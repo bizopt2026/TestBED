@@ -1,0 +1,12 @@
+services:
+  scheduler:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+    environment:
+      # 팀 접근 토큰 (비우면 인증 없음). 예: APP_TOKEN=my-team-secret
+      APP_TOKEN: ${APP_TOKEN:-}
+      MAX_UPLOAD_MB: "100"
+    restart: unless-stopped

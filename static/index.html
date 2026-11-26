@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>공정관리 분석기</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#/">▦ 공정관리 분석기</a>
+  <span class="crumb" id="crumb"></span>
+  <span class="spacer"></span>
+  <button class="btn primary" id="btnUpload">XER 업로드</button>
+</header>
+<main id="view"></main>
+
+<dialog id="dlgUpload">
+  <form method="dialog" id="formUpload">
+    <h3>XER 파일 업로드</h3>
+    <p class="muted">Primavera P6에서 내보낸 .xer 파일을 올리면 팀 전체가 결과를 공유합니다.</p>
+    <label>파일<input type="file" name="file" accept=".xer,.XER" required></label>
+    <label>업로더 이름<input name="uploader" placeholder="예: 홍길동"></label>
+    <label>메모<input name="note" placeholder="예: 3월 월간 업데이트"></label>
+    <div class="row end">
+      <button class="btn" value="cancel" formnovalidate>취소</button>
+      <button class="btn primary" id="btnDoUpload" value="ok">업로드 및 분석</button>
+    </div>
+    <p class="err" id="uploadErr"></p>
+  </form>
+</dialog>
+
+<dialog id="dlgToken">
+  <form method="dialog">
+    <h3>접근 토큰</h3>
+    <p class="muted">관리자에게 받은 팀 접근 토큰을 입력하세요.</p>
+    <input name="token" type="password" required>
+    <div class="row end"><button class="btn primary" value="ok">확인</button></div>
+  </form>
+</dialog>
+<div id="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
