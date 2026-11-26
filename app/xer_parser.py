@@ -14,13 +14,18 @@ from datetime import datetime
 ENCODINGS = ("utf-8-sig", "cp949", "cp1252", "latin-1")
 
 
-def decode(raw: bytes) -> str:
+def detect_encoding(raw: bytes) -> str:
     for enc in ENCODINGS:
         try:
-            return raw.decode(enc)
+            raw.decode(enc)
+            return enc
         except UnicodeDecodeError:
             continue
-    return raw.decode("latin-1", errors="replace")
+    return "latin-1"
+
+
+def decode(raw: bytes) -> str:
+    return raw.decode(detect_encoding(raw), errors="replace")
 
 
 def parse_tables(text: str) -> dict[str, list[dict[str, str]]]:
@@ -74,3 +79,39 @@ def parse_float(value: str | None, default: float = 0.0) -> float:
 
 def parse_xer(raw: bytes) -> dict[str, list[dict[str, str]]]:
     return parse_tables(decode(raw))
+
+
+def header_line(text: str) -> str:
+    for line in text.splitlines():
+        if line.startswith("ERMHDR"):
+            return line
+    return "ERMHDR\t19.12"
+
+
+def write_xer(tables: dict[str, list[dict[str, str]]], header: str,
+              fields: dict[str, list[str]] | None = None) -> str:
+    """테이블 dict -> XER 텍스트. fields 로 원본 컬럼 순서를 유지."""
+    out = [header]
+    for name, rows in tables.items():
+        cols = list((fields or {}).get(name) or [])
+        for r in rows:
+            for k in r:
+                if k not in cols:
+                    cols.append(k)
+        out.append(f"%T\t{name}")
+        out.append("%F\t" + "\t".join(cols))
+        for r in rows:
+            out.append("%R\t" + "\t".join(str(r.get(c, "") or "") for c in cols))
+    out.append("%E")
+    return "\r\n".join(out) + "\r\n"
+
+
+def table_fields(text: str) -> dict[str, list[str]]:
+    fields, cur = {}, None
+    for line in text.splitlines():
+        parts = line.split("\t")
+        if parts[0] == "%T" and len(parts) > 1:
+            cur = parts[1].strip()
+        elif parts[0] == "%F" and cur:
+            fields[cur] = [f.strip() for f in parts[1:]]
+    return fields

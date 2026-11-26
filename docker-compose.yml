@@ -9,4 +9,9 @@ services:
       # 팀 접근 토큰 (비우면 인증 없음). 예: APP_TOKEN=my-team-secret
       APP_TOKEN: ${APP_TOKEN:-}
       MAX_UPLOAD_MB: "100"
+      # AI 기능 (비우면 규칙 기반으로만 동작)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AI_PROVIDER: ${AI_PROVIDER:-anthropic}
+      AI_MODEL: ${AI_MODEL:-claude-opus-5-5}
+      AI_MODEL_BULK: ${AI_MODEL_BULK:-}
     restart: unless-stopped

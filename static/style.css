@@ -70,3 +70,21 @@ input.s, select.s { padding: 5px 8px; border: 1px solid var(--line); border-radi
 .legend i { display: inline-block; width: 18px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
 .dcma-items { font-size: 12px; color: var(--muted); max-width: 520px; white-space: normal; }
 @media (max-width: 900px) { .gantt { grid-template-columns: 1fr; } .g-right { display: none; } main { padding: 12px; } }
+
+/* AI 기능 */
+.tabs.ai { margin-top: -12px; }
+.tabs.ai a { font-size: 13px; }
+.panel.warn { background: #fffbeb; border-color: #fcd34d; color: #92400e; }
+.chat .msgs { max-height: 58vh; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px; }
+.msg { padding: 10px 14px; border-radius: 10px; max-width: 92%; }
+.msg.user { align-self: flex-end; background: var(--accent); color: #fff; white-space: pre-wrap; }
+.msg.bot { align-self: flex-start; background: #f3f4f6; }
+.msg.bot p { margin: 4px 0; } .msg.bot table.t { background: #fff; margin: 6px 0; }
+.examples { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+#chatForm textarea { flex: 1; padding: 8px; border: 1px solid var(--line); border-radius: 8px; font: inherit; resize: vertical; }
+.ai-box { background: #eef2ff; border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; color: var(--text); }
+.guide ul { margin: 6px 0; padding-left: 18px; color: #374151; }
+label.sec { display: block; margin: 10px 0; }
+label.sec textarea, #dText { width: 100%; margin-top: 4px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+.chg { margin-bottom: 6px; }
+code { background: #f3f4f6; padding: 1px 4px; border-radius: 4px; }

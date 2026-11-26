@@ -51,6 +51,8 @@ class Activity:
     lf: int = 0
     tf: int = 0
     ff: int = 0
+    rs: int = 0   # 잔여 작업 조기 시작 (진행중 작업)
+    rls: int = 0  # 잔여 작업 만기 시작
     critical: bool = False
     longest: bool = False
     preds: list = field(default_factory=list)
@@ -189,6 +191,10 @@ class Schedule:
         return order
 
     def compute(self) -> None:
+        self.loops = []
+        self.warnings = [w for w in self.warnings if "순환" not in w]
+        for a in self.acts.values():
+            a.longest = a.critical = False
         order = self._topo()
         dd = self.data_date.toordinal()
         loop_ids = {a.id for a in self.acts.values() if a.code in set(self.loops)}
@@ -241,6 +247,7 @@ class Schedule:
                 for y in f_cands:  # 종료 시각 y 이후에 끝나야 함
                     i = max(i, c.co(y) - 1 - d + 1)
                 start, fin = c.start_of(i), c.end_of(i + d - 1)
+            a.rs = start
             if a.status == "TK_Active" and a.act_start:
                 a.es = a.act_start.toordinal()
                 a.ef = max(fin, a.es)
@@ -270,10 +277,8 @@ class Schedule:
                 if s.status == "TK_Complete":
                     continue
                 pc = c  # lag 은 선행 캘린더 기준
-                if r.type == "FS":
-                    if s.status == "TK_Active":
-                        continue
-                    f_cands.append(pc.unshift(s.ls, r.lag))
+                if r.type == "FS":  # 진행중 후행: 잔여 작업 만기 시작 기준 (Retained Logic)
+                    f_cands.append(pc.unshift(s.rls if s.status == "TK_Active" else s.ls, r.lag))
                 elif r.type == "SS":
                     if s.status == "TK_Active":
                         continue
@@ -297,13 +302,15 @@ class Schedule:
                 if a.task_type != "TT_FinMile":
                     x = c.start_of(c.co(x + 1) - 1)
                 a.lf = x
+                a.rls = x
                 a.ls = x if a.status == "TK_NotStart" else a.es
             else:
                 j = c.co(min(f_cands)) - 1
                 for z in s_cands:  # 시작 시각 z 이전에 시작해야 함
                     j = min(j, c.co(z) + d - 1)
                 a.lf = c.end_of(j)
-                a.ls = c.start_of(j - d + 1) if a.status == "TK_NotStart" else a.es
+                a.rls = c.start_of(j - d + 1)
+                a.ls = a.rls if a.status == "TK_NotStart" else a.es
             done.add(a.id)
 
         # ---------- Float ----------
@@ -347,9 +354,7 @@ class Schedule:
         """관계 여유(작업일): 0 이면 구동(driving) 관계."""
         pc = self.cal(p)
         if r.type == "FS":
-            if s.status == "TK_Active":
-                return 999999
-            return pc.workdays_between(pc.shift(p.ef, r.lag), s.es)
+            return pc.workdays_between(pc.shift(p.ef, r.lag), s.rs if s.status == "TK_Active" else s.es)
         if r.type == "SS":
             if s.status == "TK_Active":
                 return 999999

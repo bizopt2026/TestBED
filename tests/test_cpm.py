@@ -69,3 +69,10 @@ def test_sample_file_analyzes():
     assert r["summary"]["activities"] == 25
     assert len(r["dcma"]) == 14
     assert any(x["longest"] for x in r["activities"])
+
+
+def test_out_of_sequence_progress_keeps_logic():
+    # B 가 A 완료 전에 착수(Out-of-sequence): Retained Logic 으로 A 는 여전히 B 잔여 작업을 구동
+    a, _ = run([("A", 10, "TK_Active", "2026-02-23 08:00", None), ("B", 5, "TK_Active", "2026-02-27 08:00", None),
+                ("C", 5)], [("A", "B", "FS", 0), ("B", "C", "FS", 0)])
+    assert a["A"]["tf"] == 0 and a["B"]["tf"] == 0

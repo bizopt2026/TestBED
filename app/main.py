@@ -6,12 +6,14 @@ import io
 import os
 from datetime import date
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from urllib.parse import unquote
 
-from . import storage
+from . import ai, services, storage
 from .analysis import analyze
+from .changes import ChangeError
 from .schedule import Schedule, list_projects
 from .xer_parser import parse_xer
 
@@ -97,6 +99,9 @@ def recalc(uid: str):
         raise HTTPException(404)
     result = analyze(Schedule(parse_xer(r["raw"]), r["proj_id"]))
     storage.update_result(uid, result)
+    for k in ("dcma_narrative", "report"):
+        storage.del_extra(uid, k)
+    services._tables.cache_clear()
     return {"ok": True}
 
 
@@ -159,6 +164,170 @@ def compare(base: str, target: str):
         "finish_slip": (date.fromisoformat(rb["finish"]) - date.fromisoformat(ra["finish"])).days,
         "added": pick(added), "removed": pick(removed), "changed": changed[:1000],
     }
+
+
+# ============================================================ AI·분석 기능
+
+@app.exception_handler(ai.AIUnavailable)
+async def _ai_off(_: Request, e: Exception):
+    return JSONResponse({"detail": str(e)}, status_code=503)
+
+
+@app.exception_handler(ai.AIRefused)
+async def _ai_refused(_: Request, e: Exception):
+    return JSONResponse({"detail": str(e)}, status_code=422)
+
+
+@app.exception_handler(ChangeError)
+async def _change_err(_: Request, e: Exception):
+    return JSONResponse({"detail": str(e)}, status_code=400)
+
+
+@app.exception_handler(KeyError)
+async def _not_found(_: Request, e: Exception):
+    return JSONResponse({"detail": "없는 데이터입니다"}, status_code=404)
+
+
+try:
+    import anthropic
+
+    @app.exception_handler(anthropic.APIError)
+    async def _api_err(_: Request, e: Exception):
+        msg = getattr(e, "message", str(e))
+        code = 429 if isinstance(e, anthropic.RateLimitError) else 502
+        return JSONResponse({"detail": f"AI 서비스 오류: {msg}"}, status_code=code)
+except ImportError:  # pragma: no cover
+    pass
+
+
+def _user(x_user: str = Header(default="")) -> str:
+    return unquote(x_user)[:50]
+
+
+@app.get("/api/ai/status", dependencies=[Depends(auth)])
+def ai_status():
+    return {**ai.status(), "usage": storage.ai_usage()}
+
+
+@app.post("/api/uploads/{uid}/chat", dependencies=[Depends(auth)])
+def chat(uid: str, body: dict = Body(...), user: str = Depends(_user)):
+    try:
+        return services.chat(uid, body.get("messages") or [], user)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/uploads/{uid}/dcma_guide", dependencies=[Depends(auth)])
+def dcma_guide(uid: str, ai_: int = Query(0, alias="ai"), user: str = Depends(_user)):
+    return services.dcma_guide(uid, bool(ai_), user)
+
+
+@app.get("/api/uploads/{uid}/delay", dependencies=[Depends(auth)])
+def delay(uid: str, base: str | None = None):
+    return services.delay(uid, base)
+
+
+@app.post("/api/uploads/{uid}/whatif", dependencies=[Depends(auth)])
+def whatif(uid: str, body: dict = Body(...)):
+    return services.whatif(uid, body.get("changes") or [])
+
+
+@app.post("/api/uploads/{uid}/xer_patch", dependencies=[Depends(auth)])
+def xer_patch(uid: str, body: dict = Body(...)):
+    data, name = services.export_xer(uid, body.get("changes") or [])
+    return Response(data, media_type="application/octet-stream",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_q(name)}"})
+
+
+@app.get("/api/uploads/{uid}/scenarios", dependencies=[Depends(auth)])
+def scenarios(uid: str):
+    return storage.scenarios(uid)
+
+
+@app.post("/api/uploads/{uid}/scenarios", dependencies=[Depends(auth)])
+def save_scenario(uid: str, body: dict = Body(...), user: str = Depends(_user)):
+    changes = body.get("changes") or []
+    summary = services.whatif(uid, changes)
+    summary = {k: summary[k] for k in ("log", "finish_before", "finish_after", "d_finish")}
+    sid = storage.save_scenario(uid, body.get("name") or "시나리오", body.get("kind") or "whatif",
+                                changes, summary, user or "익명")
+    return {"id": sid, "summary": summary}
+
+
+@app.delete("/api/scenarios/{sid}", dependencies=[Depends(auth)])
+def delete_scenario(sid: str):
+    if not storage.delete_scenario(sid):
+        raise HTTPException(404)
+    return {"ok": True}
+
+
+@app.get("/api/uploads/{uid}/rel_suggest", dependencies=[Depends(auth)])
+def rel_suggest(uid: str, ai_: int = Query(0, alias="ai"), user: str = Depends(_user)):
+    return services.rel_suggest(uid, bool(ai_), user)
+
+
+@app.get("/api/uploads/{uid}/trades", dependencies=[Depends(auth)])
+def trades(uid: str):
+    return services.trade_summary(uid)
+
+
+@app.post("/api/uploads/{uid}/trades", dependencies=[Depends(auth)])
+def classify(uid: str, ai_: int = Query(1, alias="ai"), user: str = Depends(_user)):
+    return services.classify(uid, bool(ai_), user)
+
+
+@app.get("/api/uploads/{uid}/montecarlo", dependencies=[Depends(auth)])
+def montecarlo(uid: str, n: int = 300):
+    return services.monte_carlo(uid, n)
+
+
+@app.get("/api/uploads/{uid}/risk", dependencies=[Depends(auth)])
+def risk(uid: str, limit: int = 50):
+    return services.risk(uid, limit)
+
+
+@app.get("/api/uploads/{uid}/benchmark", dependencies=[Depends(auth)])
+def benchmark(uid: str):
+    return services.bench(uid)
+
+
+@app.post("/api/uploads/{uid}/daily", dependencies=[Depends(auth)])
+def daily(uid: str, body: dict = Body(...), user: str = Depends(_user)):
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "작업일보 내용을 입력하세요")
+    return services.daily_extract(uid, text[:20000], body.get("date"), user)
+
+
+@app.post("/api/uploads/{uid}/report", dependencies=[Depends(auth)])
+def make_report(uid: str, base: str | None = None, ai_: int = Query(1, alias="ai"), user: str = Depends(_user)):
+    rep = services.report(uid, base, bool(ai_), user)
+    storage.set_extra(uid, "report", rep)
+    return rep
+
+
+@app.get("/api/uploads/{uid}/report", dependencies=[Depends(auth)])
+def get_report(uid: str):
+    return storage.get_extra(uid, "report") or {}
+
+
+@app.put("/api/uploads/{uid}/report", dependencies=[Depends(auth)])
+def edit_report(uid: str, body: dict = Body(...)):
+    rep = storage.get_extra(uid, "report")
+    if not rep:
+        raise HTTPException(404, "먼저 보고서를 생성하세요")
+    rep["sections"].update({k: str(v) for k, v in (body.get("sections") or {}).items() if k in rep["sections"]})
+    storage.set_extra(uid, "report", rep)
+    return rep
+
+
+@app.get("/api/uploads/{uid}/report.docx", dependencies=[Depends(auth)])
+def report_docx(uid: str):
+    rep = storage.get_extra(uid, "report") or services.report(uid, None, False)
+    data = services.report_docx(rep)
+    name = f"{rep['data']['project']}_월간공정보고_{rep['data']['data_date']}.docx"
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_q(name)}"})
 
 
 @app.get("/")
