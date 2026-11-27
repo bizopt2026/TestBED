@@ -35,7 +35,7 @@ SECURE_COOKIE = os.environ.get("SECURE_COOKIE", "0") == "1"
 
 PUBLIC = {"/api/config", "/api/login", "/api/logout", "/api/me"}
 # 조회 권한(viewer)으로도 허용되는 계산 전용 POST
-VIEWER_POST = ("/whatif", "/recovery", "/api/reports/render", "/api/reports/preview", "/outputs/log", "/api/usage")
+VIEWER_POST = ("/whatif", "/recovery", "/api/reports/render", "/api/reports/preview", "/outputs/log", "/api/usage", "/api/dashboard/ask")
 ADMIN_ONLY = ("/api/admin/",)
 
 
@@ -123,6 +123,7 @@ async def security(request: Request, call_next):
     request.state.user = user
     m = re.match(r"^/api/uploads/([^/]+)", path)
     ai.set_scope(storage.name_of(m.group(1)) if m else None)   # 프로젝트별 AI 사용 정책
+    ai.set_user(user.get("username") or "")
     resp = await call_next(request)
     if request.method in ("POST", "PUT", "DELETE") and not path.endswith(VIEWER_POST):
         storage.audit(user["username"], request.method, path, resp.status_code)
@@ -260,6 +261,10 @@ async def upload(request: Request, file: UploadFile = File(...), uploader: str =
                             f"#/wizard/{ids[-1]}", exclude=request.state.user["username"])
         if not ids:
             raise ValueError("분석 가능한 프로젝트(액티비티 포함)가 없습니다")
+        if edition.EDITION == "server":
+            from . import issues
+            for x in ids:
+                issues.evaluate(x)
     except ValueError as e:
         raise HTTPException(400, str(e))
     import threading
@@ -1771,4 +1776,376 @@ def clone_project(name: str, request: Request, body: dict = Body(...)):
     try:
         return package.clone(name, str(body.get("name") or ""), _user(request))
     except package.PackageError as e:
+        raise HTTPException(400, str(e))
+
+
+# ============================================================ PMS P2: PMS 대시보드 저장소 API (/hub/v1, 기기 토큰)
+def _hub_only():
+    if edition.EDITION != "server":
+        raise HTTPException(404, "PMS 대시보드에서만 쓰는 기능입니다")
+
+
+def _hub_auth(request: Request):
+    from . import hub
+    _hub_only()
+    try:
+        return hub.device_user(request.headers.get("x-pms-device"))
+    except hub.HubError as e:
+        raise HTTPException(e.status, e.message)
+
+
+def _hub_call(fn, *a, **kw):
+    from . import hub, package
+    try:
+        return fn(*a, **kw)
+    except hub.HubError as e:
+        raise HTTPException(e.status, {"message": e.message, **e.extra} if e.extra else e.message)
+    except package.PackageError as e:
+        raise HTTPException(400, str(e))
+
+
+def _zip_response(data: bytes, snap: dict):
+    return Response(data, media_type="application/zip", headers={"X-PMS-Version": str(snap["version"]), "ETag": f'"{snap["pid"]}-{snap["version"]}"'})
+
+
+@app.post("/hub/v1/devices")
+def hub_register(body: dict = Body(...)):
+    from . import hub
+    _hub_only()
+    return _hub_call(hub.register_device, str(body.get("username") or ""), str(body.get("password") or ""), str(body.get("name") or ""))
+
+
+@app.get("/hub/v1/me")
+def hub_me(request: Request):
+    u, dev = _hub_auth(request)
+    return {**u, "device": dev}
+
+
+@app.post("/hub/v1/projects/{pid}/snapshots")
+async def hub_publish(pid: str, request: Request, note: str = "", take: str = "0"):
+    from . import hub
+    u, dev = _hub_auth(request)
+    data = await request.body()
+    if len(data) > MAX_UPLOAD:
+        raise HTTPException(413, "패키지가 너무 큽니다")
+    r = _hub_call(hub.publish, u, dev, data, note, take == "1")
+    if r["pid"] != pid:
+        raise HTTPException(400, "주소의 프로젝트 ID와 패키지가 다릅니다")
+    return r
+
+
+@app.get("/hub/v1/projects/{pid}/snapshots")
+def hub_snapshots(pid: str, request: Request):
+    from . import hub
+    u, _ = _hub_auth(request)
+    _hub_call(hub.readable_snapshot, u, pid)
+    return hub.snapshots_of(pid)
+
+
+@app.get("/hub/v1/projects/{pid}/snapshots/{ver}")
+def hub_snapshot(pid: str, ver: str, request: Request):
+    from . import hub
+    u, _ = _hub_auth(request)
+    s = _hub_call(hub.readable_snapshot, u, pid, None if ver == "latest" else int(ver) if ver.isdigit() else -1)
+    return _zip_response(hub.package_bytes(s), s)
+
+
+@app.get("/hub/v1/projects/{pid}/lock")
+def hub_lock(pid: str, request: Request):
+    from . import hub
+    _hub_auth(request)
+    return _hub_call(hub.lock_info, pid)
+
+
+@app.get("/hub/v1/catalog")
+def hub_catalog(request: Request, q: str = ""):
+    from . import hub
+    u, _ = _hub_auth(request)
+    return hub.catalog(u, q)
+
+
+@app.get("/hub/v1/subscriptions")
+def hub_subs(request: Request):
+    from . import hub
+    u, _ = _hub_auth(request)
+    out = []
+    for s in hub.subscriptions(u["username"]):
+        last = hub.latest(s["pid"])
+        if last:
+            out.append({"pid": s["pid"], "version": last["version"]})
+    return out
+
+
+@app.post("/hub/v1/subscriptions")
+def hub_subscribe(request: Request, body: dict = Body(...)):
+    from . import hub
+    u, _ = _hub_auth(request)
+    _hub_call(hub.subscribe, u, str(body.get("pid") or ""), bool(body.get("on", True)))
+    return {"ok": True}
+
+
+@app.post("/hub/v1/share-codes")
+def hub_make_code(request: Request, body: dict = Body(...)):
+    from . import hub
+    u, _ = _hub_auth(request)
+    v = body.get("version")
+    return _hub_call(hub.make_code, u, str(body.get("pid") or ""), int(v) if v else None, int(body.get("days") or 7),
+                     int(body["max_uses"]) if body.get("max_uses") else None, body.get("target") or None)
+
+
+@app.get("/hub/v1/share-codes/{code}")
+def hub_redeem(code: str, request: Request):
+    from . import hub
+    u, _ = _hub_auth(request)
+    s = _hub_call(hub.redeem, u, code)
+    return _zip_response(hub.package_bytes(s), s)
+
+
+@app.delete("/hub/v1/share-codes/{code}")
+def hub_revoke_code(code: str, request: Request):
+    from . import hub
+    u, _ = _hub_auth(request)
+    _hub_call(hub.revoke_code, u, code)
+    return {"ok": True}
+
+
+@app.get("/hub/v1/projects/{pid}/share-codes")
+def hub_codes(pid: str, request: Request):
+    from . import hub
+    u, _ = _hub_auth(request)
+    p = hub.project(pid)
+    if not p or not hub._can_write(u, p):
+        raise HTTPException(403)
+    return hub.codes(pid)
+
+
+@app.post("/hub/v1/ai/run")
+def hub_ai(request: Request, body: dict = Body(...)):
+    """AI 게이트웨이: PMS 현장의 AI 요청을 서버의 Claude CLI로 실행 (결정: AI는 서버에서만)."""
+    from . import hub
+    u, _ = _hub_auth(request)
+    p = hub.project(str(body.get("pid") or "")) if body.get("pid") else None
+    ai.set_scope(p["name"] if p else None)
+    if not ai.available():
+        raise HTTPException(400, ai.blocked_reason() or "AI를 쓸 수 없습니다")
+    kind = body.get("kind")
+    try:
+        if kind == "complete":
+            text, usage = ai.complete(str(body["system"]), str(body["prompt"]), body.get("effort") or "medium", model=body.get("model"))
+            out = {"text": text, "usage": usage}
+        elif kind == "structured":
+            data, usage = ai.structured(str(body["system"]), str(body["prompt"]), body["schema"], body.get("effort") or "low", model=body.get("model"))
+            out = {"data": data, "usage": usage}
+        elif kind == "tools":
+            out = _hub_ai_tools(u["username"], body)
+        else:
+            raise HTTPException(400, "알 수 없는 AI 요청")
+    finally:
+        ai.set_scope(None)
+    storage.log_ai(None, f"gateway:{body.get('feature') or kind}", u["username"], out.get("usage") or {}, out.get("seconds") or 0, True)
+    return out
+
+
+def _hub_ai_tools(username: str, body: dict) -> dict:
+    """도구를 쓰는 AI(어시스턴트): 현장의 작업본 패키지를 잠시 서버에 올려 실행하고 바로 지운다."""
+    import base64
+    import uuid as _uuid
+    from . import package
+    tmp = f"__ai_tmp_{_uuid.uuid4().hex[:8]}"
+    uid = None
+    try:
+        uid = package.import_as_project(base64.b64decode(body["package_b64"]), tmp, username, "AI 임시")
+        return ai.run_tools(str(body["system"]), str(body["prompt"]), uid, body.get("effort") or "medium")
+    finally:
+        with storage.conn() as c:
+            c.execute("DELETE FROM records WHERE scope=?", (tmp,))
+            c.execute("DELETE FROM files WHERE scope=?", (tmp,))
+        for h in storage.history(tmp):
+            storage.delete(h["id"])
+        services._tables.cache_clear()
+
+
+# ---- PMS 대시보드 관리 화면용 (세션 로그인)
+@app.get("/api/dashboard/publish-status")
+def dash_publish_status():
+    from . import hub
+    _hub_only()
+    return hub.publish_status()
+
+
+@app.get("/api/admin/hub/devices")
+def hub_devices():
+    from . import hub
+    _hub_only()
+    return hub.devices()
+
+
+@app.post("/api/admin/hub/devices/{dev_id}/revoke")
+def hub_device_revoke(dev_id: str):
+    from . import hub
+    _hub_only()
+    hub.revoke_device(dev_id)
+    return {"ok": True}
+
+
+# ============================================================ PMS P2: PMS 현장 → 대시보드 연결 (/api/hub)
+def _hc(fn, *a, **kw):
+    from . import hubclient, package
+    try:
+        return fn(*a, **kw)
+    except hubclient.HubClientError as e:
+        raise HTTPException(502 if e.status == 0 else e.status, {"message": e.message, **e.extra} if e.extra else e.message)
+    except package.PackageError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/hub/status")
+def hubc_status(user: str = Depends(_user)):
+    from . import hubclient
+    return {**hubclient.status(user), **edition.config()}
+
+
+@app.post("/api/hub/connect")
+def hubc_connect(body: dict = Body(...), user: str = Depends(_user)):
+    from . import hubclient
+    return _hc(hubclient.connect, user, str(body.get("url") or ""), str(body.get("username") or ""), str(body.get("password") or ""))
+
+
+@app.post("/api/hub/disconnect")
+def hubc_disconnect(user: str = Depends(_user)):
+    from . import hubclient
+    hubclient.disconnect(user)
+    return {"ok": True}
+
+
+@app.get("/api/hub/catalog")
+def hubc_catalog(q: str = "", user: str = Depends(_user)):
+    from . import hubclient
+    return _hc(hubclient.call_json, "GET", "/hub/v1/catalog?" + __import__("urllib.parse").parse.urlencode({"q": q}), user)
+
+
+@app.post("/api/hub/subscribe")
+def hubc_subscribe(body: dict = Body(...), user: str = Depends(_user)):
+    from . import hubclient
+    pid, on = str(body.get("pid") or ""), bool(body.get("on", True))
+    _hc(hubclient.call_json, "POST", "/hub/v1/subscriptions", user, {"pid": pid, "on": on})
+    return _hc(hubclient.pull, user, pid) if on else {"ok": True}
+
+
+@app.post("/api/hub/sync")
+def hubc_sync(user: str = Depends(_user)):
+    from . import hubclient
+    return _hc(hubclient.sync, user)
+
+
+@app.post("/api/hub/redeem")
+def hubc_redeem(body: dict = Body(...), user: str = Depends(_user)):
+    from . import hubclient
+    return _hc(hubclient.pull, user, "", None, "code", str(body.get("code") or ""))
+
+
+@app.post("/api/uploads/{uid}/publish")
+def hubc_publish(uid: str, body: dict = Body(default={}), user: str = Depends(_user)):
+    from . import hubclient
+    return _hc(hubclient.publish, user, uid, str(body.get("note") or ""), bool(body.get("take")))
+
+
+@app.get("/api/uploads/{uid}/hub")
+def hubc_project(uid: str, user: str = Depends(_user)):
+    from . import hubclient, package
+    name = storage.name_of(uid)
+    if not name:
+        raise HTTPException(404)
+    out = {"published": storage.setting(name, "hub_published"), "pid": storage.setting(name, "pid"), "connected": hubclient.connected(user), "lock": None, "codes": []}
+    if out["connected"] and out["published"]:
+        try:
+            out["lock"] = hubclient.call_json("GET", f"/hub/v1/projects/{out['published']['pid']}/lock", user, timeout=8)
+            out["codes"] = hubclient.call_json("GET", f"/hub/v1/projects/{out['published']['pid']}/share-codes", user, timeout=8)
+        except hubclient.HubClientError as e:
+            out["error"] = e.message
+    out["is_ref"] = package.is_ref(name)
+    return out
+
+
+@app.post("/api/uploads/{uid}/share-code")
+def hubc_share_code(uid: str, body: dict = Body(default={}), user: str = Depends(_user)):
+    from . import hubclient
+    name = storage.name_of(uid)
+    pub = storage.setting(name, "hub_published")
+    if not pub:
+        raise HTTPException(400, "먼저 PMS 대시보드에 게시하세요")
+    return _hc(hubclient.call_json, "POST", "/hub/v1/share-codes", user,
+               {"pid": pub["pid"], "version": body.get("version"), "days": body.get("days") or 7, "max_uses": body.get("max_uses"), "target": body.get("target")})
+
+
+
+# ============================================================ PMS P3: 이슈 보드·AI 브리핑·포트폴리오 질의 (PMS 대시보드)
+@app.get("/api/issues")
+def issues_list(project: str | None = None, status: str | None = "open"):
+    from . import issues
+    return issues.listing(project, status or None)
+
+
+@app.get("/api/issues/summary")
+def issues_summary():
+    from . import issues
+    return issues.summary()
+
+
+@app.get("/api/issues/{iid}")
+def issue_get(iid: str):
+    from . import issues
+    x = issues.get(iid)
+    if not x:
+        raise HTTPException(404)
+    return x
+
+
+@app.post("/api/issues/{iid}")
+def issue_update(iid: str, request: Request, body: dict = Body(...), user: str = Depends(_user)):
+    from . import issues
+    x = issues.get(iid)
+    if not x:
+        raise HTTPException(404)
+    u = request.state.user
+    if auth_mod.users_exist() and not (u.get("role") == "admin" or access.can_write(u, x["project"])):
+        raise HTTPException(403, "프로젝트 소유자·멤버 또는 관리자만 이슈 상태를 바꿀 수 있습니다")
+    try:
+        return issues.update(iid, user, body.get("status"), body.get("assignee"), str(body.get("note") or ""))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/issues/{iid}/ai")
+def issue_ai(iid: str, body: dict = Body(default={}), user: str = Depends(_user)):
+    from . import issues
+    try:
+        return issues.explain(iid, user, bool(body.get("refresh")))
+    except KeyError:
+        raise HTTPException(404)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/admin/issues/evaluate")
+def issues_evaluate_all():
+    from . import issues
+    out = {}
+    for p in storage.latest_by_project():
+        out[p["name"]] = issues.evaluate(p["id"])
+    return out
+
+
+@app.get("/api/dashboard/briefing")
+def dash_briefing(refresh: int = 0, user: str = Depends(_user)):
+    from . import issues
+    return issues.briefing(user, bool(refresh))
+
+
+@app.post("/api/dashboard/ask")
+def dash_ask(body: dict = Body(...), user: str = Depends(_user)):
+    from . import issues
+    try:
+        return issues.ask(str(body.get("q") or ""), user)
+    except ValueError as e:
         raise HTTPException(400, str(e))

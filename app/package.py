@@ -210,7 +210,9 @@ def import_package(data: bytes, user: str = "", source: str = "file", extra_meta
             storage.rec_put(k, name, data_, x.get("author") or "", rid=x.get("id"))
     if rec.get("review", {}).get("steps"):
         storage.rec_put("review", name, rec["review"], user, rid=uid)
-    for k, b in files.items():   # 서버 게시에서 받은 현장 사진
+    if any(k.startswith("attachments/") for k in files):   # 서버 게시에서 받은 현장 사진: 최신 판 기준으로 교체
+        _drop_photos(name)
+    for k, b in files.items():
         if k.startswith("attachments/"):
             ref = k.split("/", 1)[1].split("__")[0]
             storage.file_put(name, ref, "image/jpeg", b, manifest.get("exported_by") or "")
@@ -244,3 +246,61 @@ def clone(name: str, new_name: str, user: str = "") -> dict:
         access.claim_new(new_name, user)
     project_pid(new_name)
     return {"uid": uid, "name": new_name}
+
+
+def import_as_project(data: bytes, name: str, user: str, note: str = "") -> str:
+    """(PMS 대시보드) 게시된 패키지를 서버의 일반 프로젝트로 저장. 리스크·제약·약속은 게시본 기준으로 바꾸고,
+    코멘트는 합친다(대시보드에서 단 코멘트는 지우지 않음)."""
+    from . import services
+    manifest, files = read(data)
+    settings = json.loads(files.get("settings.json", b"{}") or b"{}")
+    opts = settings.get("schedule_options") or {}
+    raw = rename_xer(files["schedule.xer"], manifest.get("proj_id"), name)
+    proj_id, res = _analyze(raw, manifest.get("proj_id"), name, opts)
+    uid = storage.save(manifest.get("source_filename") or "project.xer", proj_id, name, user, note, raw, res)
+    storage.set_setting(name, "schedule_options", opts)
+    storage.set_setting(name, "pid", manifest["pid"])
+    for k in ("metric_overrides",):
+        if settings.get(k):
+            storage.set_setting(name, k, settings[k])
+    rec = json.loads(files.get("records.json", b"{}") or b"{}")
+    for k in ("risk", "constraint", "commit"):
+        keep = {x.get("id") for x in rec.get(k) or []}
+        for x in storage.rec_list(k, name):
+            if x["id"] not in keep:
+                storage.rec_del(k, x["id"])
+        for x in rec.get(k) or []:
+            storage.rec_put(k, name, {kk: vv for kk, vv in x.items() if kk not in ("id", "author", "created_at", "updated_at")}, x.get("author") or user, rid=x.get("id"))
+    have = {x["id"] for x in storage.rec_list("comment", name)}
+    for x in rec.get("comment") or []:
+        if x.get("id") not in have:
+            storage.rec_put("comment", name, {kk: vv for kk, vv in x.items() if kk not in ("id", "author", "created_at", "updated_at")}, x.get("author") or user, rid=x.get("id"))
+    if (rec.get("review") or {}).get("steps"):
+        storage.rec_put("review", name, rec["review"], user, rid=uid)
+    if any(k.startswith("attachments/") for k in files):
+        _drop_photos(name)
+    for k, b in files.items():
+        if k.startswith("attachments/"):
+            storage.file_put(name, k.split("/", 1)[1].split("__")[0], "image/jpeg", b, user)
+    services._tables.cache_clear()
+    return uid
+
+
+def _drop_photos(name: str) -> None:
+    for f in storage.file_list(name):
+        if f["mime"].startswith("image/") and not (f["ref"] or "").startswith(("final:", "logo", "hub:")):
+            storage.file_del(f["id"])
+
+
+def with_manifest(data: bytes, **updates) -> bytes:
+    """패키지의 manifest 만 고쳐 다시 묶는다(파일 해시는 그대로). 대시보드가 판 번호를 매길 때 사용."""
+    z = zipfile.ZipFile(io.BytesIO(data))
+    manifest = json.loads(z.read("manifest.json"))
+    manifest.update(updates)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as w:
+        w.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=1))
+        for n in z.namelist():
+            if n != "manifest.json":
+                w.writestr(n, z.read(n))
+    return buf.getvalue()

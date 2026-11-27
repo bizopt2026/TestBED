@@ -22,7 +22,7 @@ def init() -> None:
 
 # ---------------------------------------------------------------- 알림
 NOTIFY_TYPES = {"access": "편집 권한 요청·결과", "member": "멤버 지정·해제", "new_update": "새 업데이트 업로드",
-                "mention": "코멘트 @멘션", "assigned": "담당자 지정", "review": "월간 점검 완료"}
+                "mention": "코멘트 @멘션", "assigned": "담당자 지정", "review": "월간 점검 완료", "issue": "대시보드 위험 이슈"}
 
 
 HOME_BLOCKS = ("summary", "msgantt", "portfolio", "hub", "team")

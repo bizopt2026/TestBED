@@ -60,6 +60,39 @@ def set_runner(fn) -> None:
 
 # ---- PMS: 요청이 속한 프로젝트(AI 사용 정책 확인용)와 기능별 프롬프트 버전
 _scope: contextvars.ContextVar = contextvars.ContextVar("ai_scope", default=None)
+_who: contextvars.ContextVar = contextvars.ContextVar("ai_user", default="")
+
+
+def set_user(username: str):
+    return _who.set(username or "")
+
+
+def _gateway() -> bool:
+    """이 요청의 AI를 PMS 대시보드(서버)에서 실행해야 하는지."""
+    from . import edition
+    where, _ = edition.ai_route()
+    if where == "gateway":
+        return True
+    if where == "auto":
+        return not (shutil.which(CLAUDE_BIN) or os.path.exists(CLAUDE_BIN))
+    return False
+
+
+def _gw_payload(kind: str, **kw) -> dict:
+    from . import package, storage
+    name = _scope.get()
+    pid = None
+    if name:
+        pid = (package.ref_meta(name) or {}).get("pid") or storage.setting(name, "pid")
+    return {"kind": kind, "pid": pid, "project": name, **kw}
+
+
+def _gw(payload: dict) -> dict:
+    from . import hubclient
+    try:
+        return hubclient.ai_complete(_who.get(), payload)
+    except hubclient.HubClientError as e:
+        raise AIFailed(f"PMS 대시보드 AI 게이트웨이: {e.message}")
 PROMPT_VERSION = {"chat": 1, "classify": 1, "dcma_guide": 1, "rel_suggest": 1, "daily_extract": 1, "report": 1,
                   "risk_extract": 1, "generate_schedule": 1, "why": 1}
 
@@ -90,8 +123,11 @@ def blocked_reason() -> str | None:
     where, note = edition.ai_route()
     if where == "off" or PROVIDER == "off":
         return "AI가 꺼져 있습니다"
-    if where == "gateway":
-        return "AI는 PMS 대시보드에서 실행하도록 설정되어 있습니다. 서버 AI 게이트웨이(P2)가 준비되면 켜집니다"
+    if where == "gateway" or (where == "auto" and _gateway()):
+        from . import hubclient
+        if _runner is None and not hubclient.connected(_who.get()):
+            return "AI는 PMS 대시보드에서 실행합니다. 내 설정 → PMS 대시보드 연결을 먼저 하세요"
+        return None
     if not (shutil.which(CLAUDE_BIN) or os.path.exists(CLAUDE_BIN)):
         return "이 컴퓨터에 Claude CLI가 설치·로그인되어 있지 않습니다"
     return None
@@ -166,6 +202,9 @@ def usage_of(data: dict) -> dict:
 
 def complete(system: str, prompt: str, effort: str = "medium", max_tokens: int = 0,
              model: str | None = None) -> tuple[str, dict]:
+    if _runner is None and _gateway():
+        r = _gw(_gw_payload("complete", system=system, prompt=prompt, effort=effort, model=model))
+        return r["text"], r.get("usage") or {}
     data = _exec(_base_args(system, effort, model if model is not None else MODEL), prompt)
     _check(data)
     return str(data.get("result") or "").strip(), usage_of(data)
@@ -173,6 +212,9 @@ def complete(system: str, prompt: str, effort: str = "medium", max_tokens: int =
 
 def structured(system: str, prompt: str, schema: dict, effort: str = "low", max_tokens: int = 0,
                model: str | None = None) -> tuple[Any, dict]:
+    if _runner is None and _gateway():
+        r = _gw(_gw_payload("structured", system=system, prompt=prompt, schema=schema, effort=effort, model=model))
+        return r["data"], r.get("usage") or {}
     args = _base_args(system, effort, model if model is not None else MODEL_BULK)
     args += ["--json-schema", json.dumps(schema, ensure_ascii=False)]
     data = _exec(args, prompt)
@@ -188,6 +230,11 @@ def structured(system: str, prompt: str, schema: dict, effort: str = "low", max_
 
 def run_tools(system: str, prompt: str, upload_id: str, effort: str = "medium") -> dict:
     """앱의 읽기 전용 MCP 도구(app.mcp_server)를 붙여 대화형 질의를 실행."""
+    if _runner is None and _gateway():
+        import base64
+        from . import package
+        data, _ = package.build(upload_id, _who.get())
+        return _gw(_gw_payload("tools", system=system, prompt=prompt, effort=effort, package_b64=base64.b64encode(data).decode()))
     from . import storage
     env = {"DB_PATH": os.path.abspath(storage.DB_PATH), "PYTHONPATH": ROOT}
     cfg = {"mcpServers": {"sched": {"type": "stdio", "command": sys.executable,
