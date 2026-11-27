@@ -1,31 +1,42 @@
-"""Claude API 연결 계층.
+"""AI 연결 계층: 서버에 설치된 Claude CLI(`claude -p`)를 호출한다. API 키를 쓰지 않는다.
+
+보안 설계
+  - `--tools ""`            : 명령 실행·파일 읽기/쓰기 등 CLI 기본 도구를 모두 끈다
+  - `--strict-mcp-config`   : 앱이 지정한 MCP 서버(읽기 전용 공정 조회 도구)만 사용
+  - `--setting-sources ""`  : 서버의 사용자/프로젝트 설정·훅을 불러오지 않음
+  - 빈 임시 디렉터리에서 실행, 세션 기록 저장 안 함, 시간 제한·동시 실행 수 제한
 
 환경변수
-  AI_PROVIDER   anthropic(기본) | bedrock | off
-  AI_MODEL      대화형·보고서 모델 (기본 claude-opus-5-5)
-  AI_MODEL_BULK 대량 분류·추출 모델 (기본 AI_MODEL과 동일. 비용을 줄이려면 claude-haiku-5-5 등으로 지정)
-  AI_FALLBACKS  on(기본) | off  - 안전 분류기로 거절될 때 서버 측 대체 모델로 자동 재시도
-  AWS_REGION    bedrock 사용 시 리전 (예: ap-northeast-2)
-  ANTHROPIC_API_KEY  anthropic 사용 시 API 키
+  AI_PROVIDER     cli(기본) | off
+  CLAUDE_BIN      claude 실행 파일 경로 (기본: PATH 에서 검색)
+  AI_MODEL        모델 별칭/ID (비우면 CLI 기본값)
+  AI_MODEL_BULK   대량 분류·추출용 모델 (비우면 AI_MODEL)
+  AI_TIMEOUT      호출당 제한 시간(초, 기본 300)
+  AI_MAX_CONCURRENCY  동시 실행 수 (기본 2)
+  AI_MAX_BUDGET_USD   호출당 최대 비용 (선택)
 """
 from __future__ import annotations
 
 import json
-import logging
 import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
 import time
 from typing import Any, Callable
 
-log = logging.getLogger("ai")
-
-PROVIDER = (os.environ.get("AI_PROVIDER") or "anthropic").lower()
-MODEL = os.environ.get("AI_MODEL") or "claude-opus-5-5"
+PROVIDER = (os.environ.get("AI_PROVIDER") or "cli").lower()
+CLAUDE_BIN = os.environ.get("CLAUDE_BIN") or shutil.which("claude") or "claude"
+MODEL = os.environ.get("AI_MODEL") or ""
 MODEL_BULK = os.environ.get("AI_MODEL_BULK") or MODEL
-FALLBACKS = os.environ.get("AI_FALLBACKS", "on").lower() != "off"
-MAX_TOOL_TURNS = int(os.environ.get("AI_MAX_TOOL_TURNS", "10"))
+TIMEOUT = int(os.environ.get("AI_TIMEOUT", "300"))
+BUDGET = os.environ.get("AI_MAX_BUDGET_USD", "")
+_sem = threading.BoundedSemaphore(int(os.environ.get("AI_MAX_CONCURRENCY", "2")))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-_client = None
-_override = None  # 테스트에서 가짜 클라이언트 주입
+_runner: Callable[[list[str], str], dict] | None = None  # 테스트용 가짜 실행기
 
 
 class AIUnavailable(RuntimeError):
@@ -36,117 +47,116 @@ class AIRefused(RuntimeError):
     pass
 
 
-def set_client(client) -> None:
-    """테스트용: 가짜 클라이언트 주입 (None 이면 해제)."""
-    global _override
-    _override = client
+class AIFailed(RuntimeError):
+    pass
+
+
+def set_runner(fn) -> None:
+    """테스트용: fn(args, stdin_text) -> CLI JSON 결과(dict). None 이면 해제."""
+    global _runner
+    _runner = fn
 
 
 def available() -> bool:
-    if _override is not None:
+    if _runner is not None:
         return True
     if PROVIDER == "off":
         return False
-    if PROVIDER == "bedrock":
-        return True
-    return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+    return bool(shutil.which(CLAUDE_BIN) or os.path.exists(CLAUDE_BIN))
 
 
 def status() -> dict:
-    return {"enabled": available(), "provider": PROVIDER, "model": MODEL, "model_bulk": MODEL_BULK}
+    return {"enabled": available(), "provider": "Claude CLI" if PROVIDER != "off" else "off",
+            "model": MODEL or "CLI 기본값", "model_bulk": MODEL_BULK or "CLI 기본값", "bin": CLAUDE_BIN}
 
 
-def client():
-    global _client
-    if _override is not None:
-        return _override
+def _exec(args: list[str], prompt: str) -> dict:
+    if _runner is not None:
+        return _runner(args, prompt)
     if not available():
-        raise AIUnavailable("AI가 설정되지 않았습니다 (ANTHROPIC_API_KEY 또는 AI_PROVIDER 설정 필요)")
-    if _client is None:
-        import anthropic
-        if PROVIDER == "bedrock":
-            from anthropic import AnthropicBedrockMantle
-            _client = AnthropicBedrockMantle(aws_region=os.environ.get("AWS_REGION", "ap-northeast-2"))
-        else:
-            _client = anthropic.Anthropic(max_retries=3)
-    return _client
-
-
-def _model_id(model: str) -> str:
-    return f"anthropic.{model}" if PROVIDER == "bedrock" and not model.startswith("anthropic.") else model
-
-
-def _create(**kw):
-    """Messages API 호출. 1st-party API에서는 거절 시 서버 측 대체 모델 사용(beta)."""
-    kw["model"] = _model_id(kw["model"])
-    c = client()
-    if FALLBACKS and PROVIDER == "anthropic" and _override is None:
-        return c.beta.messages.create(betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kw)
-    return c.messages.create(**kw)
-
-
-def _text(resp) -> str:
-    return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
-
-
-def _check(resp) -> None:
-    if resp.stop_reason == "refusal":
-        raise AIRefused("AI가 이 요청에 답변하지 않았습니다. 질문을 바꿔 다시 시도하세요.")
-
-
-def _usage(resp) -> dict:
-    u = getattr(resp, "usage", None)
-    return {"in": getattr(u, "input_tokens", 0) or 0, "out": getattr(u, "output_tokens", 0) or 0}
-
-
-def complete(system: str, prompt: str, effort: str = "medium", max_tokens: int = 16000,
-             model: str | None = None) -> tuple[str, dict]:
-    resp = _create(model=model or MODEL, max_tokens=max_tokens, system=system,
-                   output_config={"effort": effort},
-                   messages=[{"role": "user", "content": prompt}])
-    _check(resp)
-    return _text(resp), _usage(resp)
-
-
-def structured(system: str, prompt: str, schema: dict, effort: str = "low",
-               max_tokens: int = 16000, model: str | None = None) -> tuple[Any, dict]:
-    """JSON 스키마로 출력 형식을 보장받는 호출."""
-    resp = _create(model=model or MODEL_BULK, max_tokens=max_tokens, system=system,
-                   output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
-                   messages=[{"role": "user", "content": prompt}])
-    _check(resp)
-    return json.loads(_text(resp)), _usage(resp)
-
-
-def run_agent(system: str, messages: list[dict], tools: list[dict],
-              execute: Callable[[str, dict], Any], effort: str = "medium",
-              max_tokens: int = 16000) -> dict:
-    """도구 호출 루프 (앱 서버가 도구를 실행). 반환: answer, trace, usage."""
-    msgs = list(messages)
-    trace, usage = [], {"in": 0, "out": 0}
-    t0 = time.time()
-    for _ in range(MAX_TOOL_TURNS):
-        resp = _create(model=MODEL, max_tokens=max_tokens, system=system, tools=tools,
-                       output_config={"effort": effort}, messages=msgs)
-        u = _usage(resp)
-        usage["in"] += u["in"]; usage["out"] += u["out"]
-        _check(resp)
-        if resp.stop_reason == "pause_turn":
-            msgs.append({"role": "assistant", "content": resp.content})
-            continue
-        calls = [b for b in resp.content if getattr(b, "type", "") == "tool_use"]
-        if resp.stop_reason != "tool_use" or not calls:
-            return {"answer": _text(resp), "trace": trace, "usage": usage, "seconds": round(time.time() - t0, 1)}
-        msgs.append({"role": "assistant", "content": resp.content})
-        results = []
-        for b in calls:
+        raise AIUnavailable("AI가 설정되지 않았습니다 (서버에 Claude CLI 설치·로그인 필요)")
+    if not _sem.acquire(timeout=60):
+        raise AIFailed("AI 요청이 많아 대기 시간이 초과되었습니다. 잠시 후 다시 시도하세요.")
+    try:
+        with tempfile.TemporaryDirectory(prefix="ai-") as cwd:
             try:
-                out = execute(b.name, dict(b.input or {}))
-                content, err = json.dumps(out, ensure_ascii=False, default=str)[:60000], False
-            except Exception as e:  # 도구 오류는 모델에게 알려 스스로 수정하게 함
-                content, err = f"오류: {e}", True
-            trace.append({"tool": b.name, "input": b.input, "error": err})
-            results.append({"type": "tool_result", "tool_use_id": b.id, "content": content, "is_error": err})
-        msgs.append({"role": "user", "content": results})
-    return {"answer": "도구 호출이 너무 많아 중단했습니다. 질문을 더 구체적으로 해 주세요.",
-            "trace": trace, "usage": usage, "seconds": round(time.time() - t0, 1)}
+                p = subprocess.run([CLAUDE_BIN, *args], input=prompt, capture_output=True, text=True,
+                                   timeout=TIMEOUT, cwd=cwd)
+            except subprocess.TimeoutExpired:
+                raise AIFailed(f"AI 응답 시간({TIMEOUT}초)을 초과했습니다")
+            except FileNotFoundError:
+                raise AIUnavailable("Claude CLI 실행 파일을 찾을 수 없습니다")
+    finally:
+        _sem.release()
+    out = p.stdout.strip()
+    try:
+        data = json.loads(out.splitlines()[-1] if out else "{}")
+    except json.JSONDecodeError:
+        raise AIFailed(f"AI 응답을 해석할 수 없습니다: {(p.stderr or out)[:300]}")
+    if p.returncode != 0 and not data:
+        raise AIFailed(f"Claude CLI 오류: {(p.stderr or out)[:300]}")
+    return data
+
+
+def _base_args(system: str, effort: str, model: str) -> list[str]:
+    args = ["-p", "--output-format", "json", "--no-session-persistence", "--tools", "",
+            "--strict-mcp-config", "--setting-sources", "", "--system-prompt", system]
+    if effort:
+        args += ["--effort", effort]
+    if model:
+        args += ["--model", model]
+    if BUDGET:
+        args += ["--max-budget-usd", BUDGET]
+    return args
+
+
+def _check(data: dict) -> None:
+    if data.get("stop_reason") == "refusal" or data.get("subtype") == "refusal":
+        raise AIRefused("AI가 이 요청에 답변하지 않았습니다. 질문을 바꿔 다시 시도하세요.")
+    if data.get("is_error") or (data.get("subtype") and data.get("subtype") != "success"):
+        msg = data.get("result") or data.get("subtype") or "알 수 없는 오류"
+        raise AIFailed(f"AI 처리 실패: {str(msg)[:300]}")
+
+
+def usage_of(data: dict) -> dict:
+    u = data.get("usage") or {}
+    return {"in": (u.get("input_tokens") or 0) + (u.get("cache_read_input_tokens") or 0)
+            + (u.get("cache_creation_input_tokens") or 0),
+            "out": u.get("output_tokens") or 0, "cost": data.get("total_cost_usd") or 0}
+
+
+def complete(system: str, prompt: str, effort: str = "medium", max_tokens: int = 0,
+             model: str | None = None) -> tuple[str, dict]:
+    data = _exec(_base_args(system, effort, model if model is not None else MODEL), prompt)
+    _check(data)
+    return str(data.get("result") or "").strip(), usage_of(data)
+
+
+def structured(system: str, prompt: str, schema: dict, effort: str = "low", max_tokens: int = 0,
+               model: str | None = None) -> tuple[Any, dict]:
+    args = _base_args(system, effort, model if model is not None else MODEL_BULK)
+    args += ["--json-schema", json.dumps(schema, ensure_ascii=False)]
+    data = _exec(args, prompt)
+    _check(data)
+    out = data.get("structured_output")
+    if out is None:
+        try:
+            out = json.loads(data.get("result") or "")
+        except (TypeError, json.JSONDecodeError):
+            raise AIFailed("AI가 형식에 맞는 결과를 돌려주지 않았습니다")
+    return out, usage_of(data)
+
+
+def run_tools(system: str, prompt: str, upload_id: str, effort: str = "medium") -> dict:
+    """앱의 읽기 전용 MCP 도구(app.mcp_server)를 붙여 대화형 질의를 실행."""
+    from . import storage
+    env = {"DB_PATH": os.path.abspath(storage.DB_PATH), "PYTHONPATH": ROOT}
+    cfg = {"mcpServers": {"sched": {"type": "stdio", "command": sys.executable,
+                                    "args": ["-m", "app.mcp_server", upload_id], "env": env}}}
+    args = _base_args(system, effort, MODEL) + ["--mcp-config", json.dumps(cfg), "--allowedTools", "mcp__sched"]
+    t0 = time.time()
+    data = _exec(args, prompt)
+    _check(data)
+    return {"answer": str(data.get("result") or "").strip(), "usage": usage_of(data),
+            "seconds": round(time.time() - t0, 1), "turns": data.get("num_turns"),
+            "denied": [d.get("tool_name") for d in data.get("permission_denials") or []]}

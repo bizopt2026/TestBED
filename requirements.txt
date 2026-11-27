@@ -2,7 +2,6 @@ fastapi>=0.115
 uvicorn>=0.30
 python-multipart>=0.0.9
 python-docx>=1.1
-anthropic>=2.14
 defusedxml>=0.7
 pypdf>=4.0
 numpy>=1.26

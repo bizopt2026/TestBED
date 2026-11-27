@@ -280,16 +280,9 @@ async def _not_found(_: Request, e: Exception):
     return JSONResponse({"detail": "없는 데이터입니다"}, status_code=404)
 
 
-try:
-    import anthropic
-
-    @app.exception_handler(anthropic.APIError)
-    async def _api_err(_: Request, e: Exception):
-        msg = getattr(e, "message", str(e))
-        code = 429 if isinstance(e, anthropic.RateLimitError) else 502
-        return JSONResponse({"detail": f"AI 서비스 오류: {msg}"}, status_code=code)
-except ImportError:  # pragma: no cover
-    pass
+@app.exception_handler(ai.AIFailed)
+async def _ai_failed(_: Request, e: Exception):
+    return JSONResponse({"detail": str(e)}, status_code=502)
 
 
 def _user(request: Request) -> str:
@@ -305,7 +298,7 @@ def ai_status():
 @app.post("/api/uploads/{uid}/chat", dependencies=[Depends(auth)])
 def chat(uid: str, body: dict = Body(...), user: str = Depends(_user)):
     try:
-        return services.chat(uid, body.get("messages") or [], user)
+        return services.chat(uid, body.get("messages") or [], user, str(body.get("context") or ""))
     except ValueError as e:
         raise HTTPException(400, str(e))
 

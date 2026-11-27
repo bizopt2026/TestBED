@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import tempfile
@@ -6,7 +7,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 os.environ.setdefault("DB_PATH", os.path.join(tempfile.mkdtemp(), "f.db"))
 
 import pytest  # noqa: E402
-from fake_ai import FakeClient, default_handler  # noqa: E402
+from fake_ai import FakeCLI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app import ai, services, storage  # noqa: E402
@@ -29,9 +30,11 @@ def client():
     storage.DB_PATH = os.path.join(tempfile.mkdtemp(), "t.db")
     storage.init()
     services._tables.cache_clear()
-    ai.set_client(None)
+    ai.set_runner(None)
+    ai.PROVIDER = 'off'
     yield TestClient(app)
-    ai.set_client(None)
+    ai.set_runner(None)
+    ai.PROVIDER = 'cli'
 
 
 def test_whatif_and_xer_export(client):
@@ -73,13 +76,18 @@ def test_delay_risk_mc_bench_daily_report_without_ai(client):
     assert client.post(f"/api/uploads/{b}/chat", json={"messages": [{"role": "user", "content": "hi"}]}).status_code == 503
 
 
-def test_ai_features_with_fake_client(client):
+def test_ai_features_with_fake_cli(client):
     uid = upload(client)
-    fake = FakeClient(default_handler)
-    ai.set_client(fake)
-    ch = client.post(f"/api/uploads/{uid}/chat", json={"messages": [{"role": "user", "content": "주공정 알려줘"}]}).json()
-    assert ch["trace"][0]["tool"] == "search_activities"
-    assert "A2010" in ch["codes"]
+    fake = FakeCLI()
+    ai.set_runner(fake)
+    ch = client.post(f"/api/uploads/{uid}/chat", json={"messages": [{"role": "user", "content": "주공정 알려줘"}], "context": "risk"}).json()
+    assert ch["codes"] == ["A2010"] and ch["turns"] == 3
+    args, prompt = fake.calls[-1]
+    assert args[args.index("--tools") + 1] == "" and "--strict-mcp-config" in args       # 기본 도구 차단
+    assert args[args.index("--allowedTools") + 1] == "mcp__sched"
+    cfg = json.loads(args[args.index("--mcp-config") + 1])
+    assert cfg["mcpServers"]["sched"]["args"][-1] == uid
+    assert "리스크" in args[args.index("--system-prompt") + 1]
     tr = client.post(f"/api/uploads/{uid}/trades").json()
     assert tr["method"] == "AI" and tr["map"]["A2010"] == "철골"
     rs = client.get(f"/api/uploads/{uid}/rel_suggest?ai=1").json()
@@ -88,17 +96,36 @@ def test_ai_features_with_fake_client(client):
     assert dl["method"] == "AI" and dl["changes"][0]["act_start"] == "2026-03-05"
     rep = client.post(f"/api/uploads/{uid}/report").json()
     assert rep["method"] == "AI" and rep["sections"]["headline"]
-    g = client.get(f"/api/uploads/{uid}/dcma_guide?ai=1").json()
-    assert g["narrative"]
-    # 모든 요청이 기본 모델·effort 를 지정했는지
-    assert all(c["model"] == "claude-opus-5-5" and "effort" in c["output_config"] for c in fake.messages.calls)
+    assert client.get(f"/api/uploads/{uid}/dcma_guide?ai=1").json()["narrative"]
+    ex = client.post(f"/api/uploads/{uid}/risks/extract", json={"text": "철골 납품이 늦어질 수 있음"}).json()
+    assert ex[0]["codes"] == ["A2000"]
+    g = client.post("/api/generate", data={"project": "AI 생성", "start": "2026-05-04", "mode": "ai", "text": "도로 공사 " * 20}).json()
+    assert g["assumptions"] == ["테스트 가정"]
     usage = client.get("/api/ai/status").json()["usage"]
     assert {u["feature"] for u in usage} >= {"chat", "classify", "report"}
 
 
-def test_refusal_maps_to_422(client):
+def test_cli_failure_maps_to_errors(client):
     uid = upload(client)
-    from types import SimpleNamespace as NS
-    ai.set_client(FakeClient(lambda kw, n: NS(content=[], stop_reason="refusal", usage=NS(input_tokens=1, output_tokens=0))))
-    r = client.post(f"/api/uploads/{uid}/chat", json={"messages": [{"role": "user", "content": "x"}]})
-    assert r.status_code == 422
+    ai.set_runner(lambda a, p: {"type": "result", "subtype": "error_max_turns", "is_error": True, "result": "too many"})
+    assert client.post(f"/api/uploads/{uid}/chat", json={"messages": [{"role": "user", "content": "x"}]}).status_code == 502
+    ai.set_runner(lambda a, p: {"type": "result", "subtype": "success", "stop_reason": "refusal", "result": ""})
+    assert client.post(f"/api/uploads/{uid}/chat", json={"messages": [{"role": "user", "content": "x"}]}).status_code == 422
+
+
+def test_mcp_server_protocol(client):
+    import subprocess
+    uid = upload(client)
+    msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "get_activity", "arguments": {"code": "A2010"}}},
+            {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "get_activity", "arguments": {"code": "NOPE"}}}]
+    env = {**os.environ, "DB_PATH": storage.DB_PATH, "PYTHONPATH": ROOT}
+    p = subprocess.run([sys.executable, "-m", "app.mcp_server", uid], input="\n".join(json.dumps(m) for m in msgs),
+                       capture_output=True, text=True, env=env, cwd=ROOT, timeout=60)
+    out = [json.loads(x) for x in p.stdout.splitlines()]
+    assert [o["id"] for o in out] == [1, 2, 3, 4]
+    assert any(t["name"] == "what_if" for t in out[1]["result"]["tools"])
+    assert json.loads(out[2]["result"]["content"][0]["text"])["code"] == "A2010"
+    assert out[3]["result"]["isError"] is True

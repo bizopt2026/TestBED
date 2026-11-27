@@ -21,8 +21,10 @@ def client():
     storage.DB_PATH = os.path.join(tempfile.mkdtemp(), "b.db")
     storage.init()
     services._tables.cache_clear()
-    ai.set_client(None)
+    ai.set_runner(None)
+    ai.PROVIDER = 'off'
     yield TestClient(app)
+    ai.PROVIDER = 'cli'
 
 
 def up(c, raw=None, name="s.xer"):
