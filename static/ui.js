@@ -333,6 +333,7 @@ function attachTooltip(cv, labels, series, fmt = (v) => v) {
 // ---------------------------------------------------------------- ⑬ 테마, ⑭ 키보드
 function applyTheme() {
   const t = store.get("theme", "auto");
+  document.documentElement.dataset.palette = store.get("palette", "graphite");
   document.documentElement.dataset.theme = t === "auto" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : t;
 }
 applyTheme();

@@ -1,0 +1,148 @@
+/* =====================================================================
+   색 테마(9차) — '메인 색'과 '포인트 색'을 분리하고 화려한 그라데이션을 없앤 차분한 팔레트
+   html[data-palette] : graphite(기본·추천) | navy | indigo   ×   data-theme : light | dark
+   - --accent      메인 색: 주요 버튼·로고 바탕
+   - --point       포인트 색: 선택 표시 막대, 진행률, 탭 밑줄, 링크, 포커스
+   ===================================================================== */
+:root, html[data-palette="graphite"] {
+  --bg: #f7f7f5; --panel: #ffffff; --text: #18191b; --text-2: #3b3e44; --muted: #676b73; --faint: #a3a6ac;
+  --line: #e8e7e4; --line-2: #d8d7d3; --head: #fafaf9; --soft: #f2f2ef; --hover: #f7f7f5; --sel: #e8f3f1;
+  --accent: #23262b; --accent-2: #0e1013; --on-accent: #ffffff;
+  --point: #0f8a7e; --point-2: #0b6f66; --link: #0b6f66; --focus: #14a394;
+  --accent-soft: #edf6f4; --accent-text: #0b5e56;
+  --ok: #2f9a63; --ok-text: #22744a; --ok-soft: #eef7f1; --ok-line: #cfe8d9;
+  --warn: #c98a1b; --warn-text: #8f5f0c; --warn-soft: #fcf6ea; --warn-line: #efdcb5;
+  --crit: #cf4141; --crit-text: #a32d2d; --crit-soft: #fcf1f1; --crit-line: #f1d0d0;
+  --info-soft: #f3f6f6;
+  --bar: #5a9e96; --done: #b9bcc1; --bl: #d4a442; --dd: #2f9a63; --today: #d0712c; --trace: rgba(212, 164, 66, .22);
+  --c1: #0f8a7e; --c2: #d4a442; --c3: #4b5563; --c4: #cf4141; --c5: #3b7dd8; --c6: #8a6fc9; --c7: #a3a6ac; --c8: #d0712c;
+  --sh-1: 0 1px 2px rgba(24, 25, 27, .04);
+  --sh-2: 0 6px 16px -6px rgba(24, 25, 27, .10), 0 2px 4px -2px rgba(24, 25, 27, .04);
+  --sh-3: 0 24px 48px -12px rgba(24, 25, 27, .22);
+  --r: 10px; --r-lg: 12px;
+}
+html[data-palette="navy"] {
+  --bg: #f6f7f9; --text: #121a26; --text-2: #354052; --muted: #637083; --line: #e4e8ee; --line-2: #d3d9e1; --head: #f9fafb; --soft: #f0f3f6; --hover: #f6f8fa; --sel: #fdf4e3;
+  --accent: #1d3557; --accent-2: #12243d; --on-accent: #ffffff;
+  --point: #d9902a; --point-2: #b8741a; --link: #1f4f8c; --focus: #d9902a;
+  --accent-soft: #fbf3e4; --accent-text: #7a4b0c;
+  --bar: #4e6d92; --bl: #d9902a; --dd: #2f9a63; --today: #c2410c; --trace: rgba(217, 144, 42, .2);
+  --c1: #1d3557; --c2: #d9902a; --c3: #4e8f7c; --c4: #c44536; --c5: #4f86c6; --c6: #7d6bb3; --c7: #9aa5b4; --c8: #b8741a;
+}
+html[data-palette="indigo"] {
+  --bg: #f6f7f9; --text: #141826; --text-2: #363c4e; --muted: #626a7d; --line: #e5e7ee; --line-2: #d4d8e2; --head: #f9fafb; --soft: #f1f3f7; --hover: #f7f8fb; --sel: #eef0fb;
+  --accent: #3d3fb8; --accent-2: #2f3196; --on-accent: #ffffff;
+  --point: #4f52d6; --point-2: #3d3fb8; --link: #3d3fb8; --focus: #6366f1;
+  --accent-soft: #eff0fc; --accent-text: #2f3196;
+  --bar: #6d70d9; --bl: #d4a442; --dd: #2f9a63; --today: #d0712c; --trace: rgba(212, 164, 66, .22);
+  --c1: #4f52d6; --c2: #d4a442; --c3: #2f9a63; --c4: #cf4141; --c5: #3b8fd1; --c6: #9a6ad0; --c7: #9aa1b0; --c8: #d0712c;
+}
+/* 어두운 화면 */
+[data-theme="dark"], html[data-theme="dark"][data-palette="graphite"] {
+  --bg: #111213; --panel: #1a1b1d; --text: #ededec; --text-2: #c9cac8; --muted: #9b9c9a; --faint: #6d6e6c;
+  --line: #2a2b2d; --line-2: #37383b; --head: #1e1f21; --soft: #232426; --hover: #202123; --sel: #183330;
+  --accent: #ededec; --accent-2: #ffffff; --on-accent: #18191b;
+  --point: #2fb8a8; --point-2: #4fd1c1; --link: #5fd4c6; --focus: #2fb8a8;
+  --accent-soft: #17302d; --accent-text: #8ce3d8;
+  --ok-text: #6fcf97; --ok-soft: #14291d; --ok-line: #24492f; --warn-text: #e8b65a; --warn-soft: #2a2213; --warn-line: #4f3f1c;
+  --crit-text: #f08a8a; --crit-soft: #2c1717; --crit-line: #552626;
+  --info-soft: #1b2120; --bar: #4aa89c; --done: #55575b; --trace: rgba(212, 164, 66, .18);
+  --sh-1: 0 1px 2px rgba(0, 0, 0, .5); --sh-2: 0 6px 16px rgba(0, 0, 0, .5); --sh-3: 0 24px 48px rgba(0, 0, 0, .65);
+}
+html[data-theme="dark"][data-palette="navy"] {
+  --bg: #0d1117; --panel: #151b23; --text: #e8edf3; --text-2: #c3ccd8; --muted: #8b97a8; --line: #252d38; --line-2: #313b48; --head: #19202a; --soft: #1d2530; --hover: #1a212b; --sel: #2c2416;
+  --accent: #dbe5f1; --accent-2: #ffffff; --on-accent: #12243d;
+  --point: #e9a23b; --point-2: #f3b85e; --link: #8db7ea; --focus: #e9a23b; --accent-soft: #2c2416; --accent-text: #f3c27a; --bar: #6f8fb6;
+}
+html[data-theme="dark"][data-palette="indigo"] {
+  --bg: #0f1118; --panel: #171a24; --text: #eceef5; --text-2: #c8ccda; --muted: #9298ab; --line: #262a37; --line-2: #333847; --head: #1b1f2a; --soft: #1f2330; --hover: #1c202c; --sel: #24264a;
+  --accent: #8b8ef0; --accent-2: #a5a7f5; --on-accent: #10122a;
+  --point: #8b8ef0; --point-2: #a5a7f5; --link: #a5a7f5; --focus: #8b8ef0; --accent-soft: #24264a; --accent-text: #c6c7fa; --bar: #7c7fe6;
+}
+
+/* ---------- 구성 요소: 그라데이션 제거, 메인·포인트 역할 분리 ---------- */
+body { font-weight: 400; letter-spacing: -0.006em; }
+h2 { font-weight: 650; letter-spacing: -0.025em; } h3 { font-weight: 600; }
+a { color: var(--link); } a:hover { color: var(--point-2); }
+.top .brand .logo { background: var(--accent); color: var(--on-accent); box-shadow: none; border-radius: 7px; }
+.top .brand .logo svg { stroke: var(--on-accent); }
+.top .brand { font-weight: 650; }
+.btn { font-weight: 520; box-shadow: none; border-color: var(--line-2); }
+.btn:hover { background: var(--soft); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); box-shadow: none; }
+.btn.primary:hover { background: var(--accent-2); border-color: var(--accent-2); color: var(--on-accent); }
+#btnUpload.btn.primary { background: var(--accent); }
+.ai-link, .groups .ai-link, .groups button.ai-link, #btnAi2 {
+  background: var(--panel) !important; color: var(--text-2) !important; border: 1px solid var(--line-2) !important; font-weight: 520; }
+.ai-link::first-letter, #btnAi2::first-letter { color: var(--point); }
+input.s:focus, select.s:focus, textarea:focus, dialog input:focus, dialog select:focus { border-color: var(--point); box-shadow: 0 0 0 3px color-mix(in srgb, var(--point) 18%, transparent); }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--point); }
+:focus-visible { outline-color: var(--focus); }
+
+/* 사이드바: 선택 항목은 옅은 바탕 + 왼쪽 포인트 막대 */
+.side { background: var(--bg); }
+.side .s-item { position: relative; font-weight: 500; }
+.side .s-item.on { background: var(--panel); color: var(--text); font-weight: 600; box-shadow: var(--sh-1); }
+.side .s-item.on::before { content: ""; position: absolute; left: -10px; top: 7px; bottom: 7px; width: 3px; border-radius: 0 3px 3px 0; background: var(--point); }
+.side .s-item.on .ico { color: var(--point); }
+.side .s-proj { background: var(--panel); }
+body.side-mini .side .s-item.on::before { left: -10px; }
+
+/* 탭·세그먼트: 밑줄은 포인트 색 */
+.tabs a.on { color: var(--text); border-color: var(--point); }
+.seg-tabs { background: var(--soft); }
+.seg-tabs button.on { color: var(--text); }
+.seg-tabs .cnt { background: var(--text-2); }
+
+/* 배지: 테두리 없이 옅은 바탕만 */
+.chip, .tag { border: 0; font-weight: 520; }
+.tag { background: var(--soft); color: var(--text-2); }
+.status-badge { font-weight: 600; }
+
+/* 카드·지표 */
+.panel, .kpi, .card, .sum-band .s, .sit { box-shadow: var(--sh-1); }
+.kpi .v { font-weight: 650; letter-spacing: -0.03em; }
+.kpi::before { width: 3px; }
+.kpi.tone-good::before { background: var(--ok); } .kpi.tone-bad::before { background: var(--crit); }
+.sum-band .s .v, .pc-finish .d { font-weight: 650; }
+.card:hover { transform: none; box-shadow: var(--sh-2); }
+.bar i { background: var(--point) !important; }
+.sum-band .dist .ok { background: var(--ok); } .sum-band .dist .warn { background: var(--warn); } .sum-band .dist .bad { background: var(--crit); }
+.delta { font-weight: 600; }
+
+/* 상황판 머리: 그라데이션 대신 왼쪽 상태 막대 */
+.sit, .sit.ok, .sit.warn, .sit.bad { background: var(--panel); border-left-width: 4px; }
+.sit.ok { border-left-color: var(--ok); } .sit.warn { border-left-color: var(--warn); } .sit.bad { border-left-color: var(--crit); }
+.sit-line { font-weight: 650; }
+
+/* 할 일·알림 */
+.inbox-item { background: var(--panel); }
+.inbox-item.high { border-left-color: var(--crit); } .inbox-item.mid { border-left-color: var(--warn); }
+
+/* 공정표·품질 표시 */
+.qi-risk { color: var(--c6); background: color-mix(in srgb, var(--c6) 13%, transparent); }
+.qi-cmt { color: var(--point-2); background: var(--accent-soft); }
+.g-row.sel { box-shadow: inset 3px 0 0 var(--point); }
+.wi-bar { background: var(--accent-soft); border-color: color-mix(in srgb, var(--point) 35%, transparent); }
+
+/* 새로 바뀐 점·현장 모드 버튼 */
+.wn-ico { background: var(--accent-soft); color: var(--point-2); }
+.fab-cam { background: var(--accent); color: var(--on-accent); box-shadow: 0 10px 24px rgba(0, 0, 0, .25); }
+.tb-btn .av, .avatar .av { background: var(--point); color: #fff; }
+
+/* 로그인: 차분한 단색 + 옅은 격자 */
+.login-art { background: #17191c; background-image: linear-gradient(rgba(255, 255, 255, .035) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, .035) 1px, transparent 1px);
+  background-size: 32px 32px; }
+html[data-palette="navy"] .login-art { background-color: #14243b; }
+html[data-palette="indigo"] .login-art { background-color: #1b1c4a; }
+.login-art svg.deco rect { fill: var(--point); }
+.login-art .feat .ico { color: var(--point-2); }
+.login-art svg.deco { opacity: .18; }
+
+/* 디자인 가이드 팔레트 고르기 */
+.pal-pick { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.pal-card { border: 1px solid var(--line-2); border-radius: 12px; padding: 14px; background: var(--panel); cursor: pointer; text-align: left; font: inherit; color: var(--text); }
+.pal-card[aria-pressed="true"] { outline: 2px solid var(--point); outline-offset: 1px; }
+.pal-card .sw { display: flex; gap: 6px; margin: 8px 0 4px; } .pal-card .sw i { width: 28px; height: 28px; border-radius: 7px; border: 1px solid rgba(0, 0, 0, .06); }
+.wi-bar[hidden] { display: none !important; }
+main { padding-bottom: 96px; }

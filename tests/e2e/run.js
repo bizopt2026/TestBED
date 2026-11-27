@@ -359,7 +359,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
       await vic.goto(`${BASE}/#/p/${uid}/overview`);
       await vic.waitForSelector("#projComments textarea");
       await vic.fill("#projComments textarea", "@alice 마일스톤 확인 부탁드립니다");
-      await vic.click("#projComments .cmt-form > button");
+      await vic.focus("#projComments .cmt-form > button"); await vic.keyboard.press("Enter");
       await vic.waitForSelector("#projComments .cmt");
       await alice.goto(`${BASE}/#/`);
       await alice.waitForSelector("#myTasks .inbox-item");

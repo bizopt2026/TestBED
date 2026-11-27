@@ -446,8 +446,8 @@ function tabGantt(el, r) {
     </div>
     <div class="legend legend-sticky" aria-label="범례"><span><i style="background:var(--bar)"></i>일반</span><span><i style="background:var(--crit)"></i>주공정</span>
       <span><i style="background:var(--done)"></i>완료</span><span><i style="background:var(--bl);height:4px"></i>계획</span>
-      <span><i style="background:#16a34a;width:2px"></i>Data Date</span><span><i style="background:#ea580c;width:2px"></i>오늘</span>
-      <span><i style="background:#fde68a"></i>추적 경로</span><span><i style="border:1.5px dashed #7c3aed;background:transparent"></i>비교 기준</span></div>
+      <span><i style="background:var(--dd);width:2px"></i>Data Date</span><span><i style="background:var(--today);width:2px"></i>오늘</span>
+      <span><i style="background:var(--trace)"></i>추적 경로</span><span><i style="border:1.5px dashed var(--c6);background:transparent"></i>비교 기준</span></div>
     <div id="wiBar" class="wi-bar" hidden aria-live="polite"></div>
     <div class="gantt ${[...hidden].map((k) => "hide-" + k).join(" ")}" style="grid-template-columns:${+store.get("gsplit", "640")}px 6px 1fr">
       <div class="g-left"><div class="g-row hdr"><div>ID</div><div>액티비티명</div><div class="c-od">원공기</div><div class="c-rd">잔여</div><div class="c-st">시작</div><div class="c-fn">종료</div><div class="c-tf">TF</div></div>
@@ -619,7 +619,7 @@ function tabGantt(el, r) {
     for (let i = first; i < last; i++) {
       const a = rows[i]; const y = i * RH - sy;
       if (!a.id) { g.fillStyle = cssv("--head"); g.fillRect(0, y, W, RH); g.fillStyle = cLine; g.fillRect(0, y + RH - 1, W, 1); continue; }
-      if (trace.has(a.id) && sel !== a.id) { g.fillStyle = "rgba(253,230,138,.55)"; g.fillRect(0, y, W, RH); }
+      if (trace.has(a.id) && sel !== a.id) { g.fillStyle = cssv("--trace"); g.fillRect(0, y, W, RH); }
       if (sel === a.id) { g.fillStyle = cssv("--sel"); g.fillRect(0, y, W, RH); }
       const blS = blMap ? blMap[a.code]?.s : a.bl_start, blF = blMap ? blMap[a.code]?.f : a.bl_finish;
       const bl = $("#fBl").checked && blS && blF;
@@ -648,7 +648,7 @@ function tabGantt(el, r) {
       }
       if (cmpMap && cmpMap[a.code]) {
         const c = cmpMap[a.code], cx = X(toT(c.s)), cw = Math.max(2, X(toT(c.f) + dayMs) - cx);
-        g.save(); g.setLineDash([4, 3]); g.strokeStyle = "#7c3aed"; g.lineWidth = 1.5; g.strokeRect(cx, y + 3, cw, RH - 6); g.restore();
+        g.save(); g.setLineDash([4, 3]); g.strokeStyle = cssv("--c6"); g.lineWidth = 1.5; g.strokeRect(cx, y + 3, cw, RH - 6); g.restore();
       }
       if (bl) { g.fillStyle = cssv("--bl"); const x = X(toT(blS)); g.beginPath(); g.roundRect ? g.roundRect(x, by + bh + 2, Math.max(2, X(toT(blF) + dayMs) - x), 3, 1.5) : g.rect(x, by + bh + 2, Math.max(2, X(toT(blF) + dayMs) - x), 3); g.fill(); }
       if (ppd >= 1) { g.fillStyle = cText; g.font = FONT; g.fillText(a.name, X(f) + 8, y + RH / 2 + 4); }
@@ -671,7 +671,7 @@ function tabGantt(el, r) {
         g.beginPath(); g.moveTo(x2, y2); g.lineTo(x2 - 4, y2 - 3); g.lineTo(x2 - 4, y2 + 3); g.fillStyle = color; g.fill();
     }
     if (trace.size) {
-      for (const id of trace) { const a = byId[id]; for (const p of a.preds) if (trace.has(p.id)) drawRel(byId[p.id], a, p.type, "#ea580c"); }
+      for (const id of trace) { const a = byId[id]; for (const p of a.preds) if (trace.has(p.id)) drawRel(byId[p.id], a, p.type, cssv("--point")); }
     }
     if (sel && !trace.size) {
       const a = byId[sel];
@@ -688,11 +688,11 @@ function tabGantt(el, r) {
       a.succs.forEach((s) => draw(a, byId[s.id], s.type));
     }
     // Data date
-    const xd = X(toT(r.data_date)); g.strokeStyle = "#16a34a"; g.lineWidth = 1.5; g.setLineDash([5, 4]);
+    const xd = X(toT(r.data_date)); g.strokeStyle = cssv("--dd"); g.lineWidth = 1.5; g.setLineDash([5, 4]);
     g.beginPath(); g.moveTo(xd, 0); g.lineTo(xd, H); g.stroke(); g.setLineDash([]); g.lineWidth = 1;
     const xt = X(toT(new Date().toISOString().slice(0, 10)));
-    if (xt > 0 && xt < W) { g.strokeStyle = "#ea580c"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(xt, 0); g.lineTo(xt, H); g.stroke(); g.lineWidth = 1;
-      h.fillStyle = "#ea580c"; h.font = FONTB; h.fillText("오늘", xt + 3, 15); }
+    if (xt > 0 && xt < W) { g.strokeStyle = cssv("--today"); g.lineWidth = 1.5; g.beginPath(); g.moveTo(xt, 0); g.lineTo(xt, H); g.stroke(); g.lineWidth = 1;
+      h.fillStyle = cssv("--today"); h.font = FONTB; h.fillText("오늘", xt + 3, 15); }
   }
   // 경로 추적: 선택 작업에서 선행·후행 방향으로 끝까지
   let traceCache = { sel: null, set: new Set() };
@@ -1344,7 +1344,7 @@ function lineChart(cv, labels, series, opts = {}) {
   if (opts.yTitle) { g.save(); g.fillStyle = "#6b7280"; g.translate(10, pad.t + 60); g.rotate(-Math.PI / 2); g.restore(); }
   attachTooltip(cv, labels, series, opts.fmt || ((v) => (typeof v === "number" ? Math.round(v * 100) / 100 : v)));
 }
-const legend = (items) => `<div class="legend">${items.map(([c, l]) => `<span><i style="background:${c}"></i>${l}</span>`).join("")}</div>`;
+const legend = (items) => `<div class="legend">${items.map(([c, l]) => `<span><i style="background:${typeof chartColor === "function" ? chartColor(c) : c}"></i>${l}</span>`).join("")}</div>`;
 const signed = (v) => (v > 0 ? "+" : "") + v;
 const won = (v) => v === null || v === undefined ? "-" : (Math.abs(v) >= 1e8 ? (v / 1e8).toFixed(2) + "억" : Math.abs(v) >= 1e4 ? Math.round(v / 1e4).toLocaleString() + "만" : Math.round(v).toLocaleString());
 
