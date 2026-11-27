@@ -35,7 +35,7 @@ SECURE_COOKIE = os.environ.get("SECURE_COOKIE", "0") == "1"
 
 PUBLIC = {"/api/config", "/api/login", "/api/logout", "/api/me"}
 # 조회 권한(viewer)으로도 허용되는 계산 전용 POST
-VIEWER_POST = ("/whatif", "/recovery", "/api/reports/render", "/api/reports/preview", "/outputs/log", "/api/usage", "/api/dashboard/ask")
+VIEWER_POST = ("/whatif", "/recovery", "/api/reports/render", "/api/reports/preview", "/outputs/log", "/api/usage", "/api/dashboard/ask", "/hub-comments")
 ADMIN_ONLY = ("/api/admin/",)
 
 
@@ -2149,3 +2149,92 @@ def dash_ask(body: dict = Body(...), user: str = Depends(_user)):
         return issues.ask(str(body.get("q") or ""), user)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+
+# ============================================================ PMS P4: 대시보드 ↔ 현장 협업 (코멘트·이슈는 대시보드가 기준)
+def _hub_project_for(u: dict, pid: str) -> dict:
+    from . import hub
+    p = hub.project(pid)
+    if not p or not hub._can_read(u, p):
+        raise HTTPException(404, "볼 수 없는 프로젝트입니다")
+    return p
+
+
+@app.get("/hub/v1/projects/{pid}/feed")
+def hub_feed(pid: str, request: Request):
+    from . import issues
+    u, _ = _hub_auth(request)
+    p = _hub_project_for(u, pid)
+    return {"project": p["name"], "comments": storage.rec_list("comment", p["name"])[-100:], "issues": issues.listing(p["name"], "open")}
+
+
+@app.post("/hub/v1/projects/{pid}/comments")
+def hub_comment(pid: str, request: Request, body: dict = Body(...)):
+    from . import hub
+    u, _ = _hub_auth(request)
+    p = _hub_project_for(u, pid)
+    text = str(body.get("text") or "").strip()[:2000]
+    if not text:
+        raise HTTPException(400, "내용을 입력하세요")
+    ments = _mentions(text)
+    last = hub.latest(pid)
+    cid = storage.rec_put("comment", p["name"], {"target": str(body.get("target") or f"project:{p['name']}")[:80], "text": text, "mentions": ments,
+                                                "resolved": False, "via": "현장"}, u["username"])
+    notify.push(set(ments) | set(notify.project_people(p["name"])), "mention" if ments else "new_update",
+                f"{u['username']} 님이 '{p['name']}'에 코멘트를 남겼습니다: {text[:80]}", f"#/p/{last['upload_id']}/overview?c={cid}" if last else "#/", exclude=u["username"])
+    return {"id": cid}
+
+
+def _pid_of(uid: str) -> str | None:
+    from . import package
+    name = storage.name_of(uid)
+    if not name:
+        return None
+    return (package.ref_meta(name) or {}).get("pid") or (storage.setting(name, "hub_published") or {}).get("pid")
+
+
+@app.get("/api/uploads/{uid}/hub-feed")
+def hubc_feed(uid: str, user: str = Depends(_user)):
+    from . import hubclient
+    pid = _pid_of(uid)
+    if not pid or not hubclient.connected(user):
+        return {"available": False}
+    return {"available": True, **_hc(hubclient.call_json, "GET", f"/hub/v1/projects/{pid}/feed", user, timeout=10)}
+
+
+@app.post("/api/uploads/{uid}/hub-comments")
+def hubc_comment(uid: str, body: dict = Body(...), user: str = Depends(_user)):
+    from . import hubclient
+    pid = _pid_of(uid)
+    if not pid:
+        raise HTTPException(400, "PMS 대시보드에 게시·구독된 프로젝트가 아닙니다")
+    return _hc(hubclient.call_json, "POST", f"/hub/v1/projects/{pid}/comments", user, {"text": body.get("text"), "target": body.get("target")})
+
+
+# ============================================================ PMS P5: 운영 — 상태 확인·백업
+@app.get("/api/health")
+def health_check():
+    """감시용 상태 확인(로그인 필요). 판·DB 크기·프로젝트 수·마지막 게시."""
+    from . import updater
+    out = {"ok": True, "edition": edition.EDITION, "version": _version_label(), "projects": len(storage.latest_by_project()),
+           "db_mb": round(os.path.getsize(storage.DB_PATH) / 1048576, 1) if os.path.exists(storage.DB_PATH) else 0}
+    if edition.EDITION == "server":
+        from . import hub, issues
+        st = hub.publish_status()
+        out.update({"hub_projects": len(st), "last_publish": max([x["published_at"] or "" for x in st] or [""]) or None,
+                    "open_issues": issues.summary()["open"], "devices": sum(1 for d in hub.devices() if not d["revoked"])})
+    out["last_update"] = (updater.last_update() or {}).get("at")
+    return out
+
+
+@app.get("/api/admin/backup")
+def admin_backup(user: str = Depends(_user)):
+    """관리자: 지금 데이터베이스를 백업 파일로 내려받기 (사용 중에도 안전한 온라인 백업)."""
+    from . import updater
+    path = updater.backup_db()
+    if not path:
+        raise HTTPException(404, "데이터베이스가 없습니다")
+    storage.audit(user, "GET", "/api/admin/backup", 200, os.path.basename(path))
+    data = open(path, "rb").read()
+    return Response(data, media_type="application/octet-stream", headers={"Content-Disposition": f"attachment; filename={os.path.basename(path)}"})

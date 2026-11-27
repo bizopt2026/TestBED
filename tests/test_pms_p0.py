@@ -49,3 +49,12 @@ def test_team_thresholds_admin_only(env):
     assert adm.put("/api/admin/thresholds", json={"spi_warn": 0.95}).json()["values"] == {"spi_warn": 0.95}
     assert alice.get(f"/api/uploads/{uid}/situation").json()["level"] == "warn"     # 전사 기본값이 적용됨
     assert alice.get(f"/api/uploads/{uid}/thresholds").status_code == 200           # 조회는 가능
+
+
+def test_backup_and_health(env):
+    adm, vic = login("admin"), login("vic")
+    assert vic.get("/api/admin/backup").status_code == 403
+    r = adm.get("/api/admin/backup")
+    assert r.status_code == 200 and r.content.startswith(b"SQLite format 3")
+    h = vic.get("/api/health").json()
+    assert h["ok"] and h["edition"] == "client" and h["projects"] >= 1

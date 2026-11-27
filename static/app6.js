@@ -133,7 +133,7 @@ async function drawMsGantt(el) {
   const months = monthTicks(t0, t1).filter((t, i, a) => a.length < 14 || i % 2 === 0);
   const col = { ok: "var(--ok)", warn: "var(--warn)", bad: "var(--crit)" };
   el.innerHTML = `<div class="row between"><h3 class="m0">포트폴리오 마일스톤</h3><span class="muted fs12">프로젝트 막대: 시작~예상 준공 · ◆ 마일스톤(채움=완료) · 세로선 오늘</span></div>
-    <div class="ms-wrap"><svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="프로젝트별 마일스톤 공정표">
+    <div class="ms-wrap"><svg viewBox="0 0 ${W} ${H}" width="100%" role="group" aria-label="프로젝트별 마일스톤 공정표">
       ${months.map((t) => `<line x1="${X(new Date(t).toISOString().slice(0, 10))}" x2="${X(new Date(t).toISOString().slice(0, 10))}" y1="22" y2="${H}" class="ms-grid"/><text x="${X(new Date(t).toISOString().slice(0, 10)) + 3}" y="15" class="ms-axis">${new Date(t).getFullYear() % 100}.${new Date(t).getMonth() + 1}</text>`).join("")}
       ${pf.map((p, i) => { const y = 30 + i * RH, lv = p.level || "ok";
         return `<a href="#/p/${p.id}/overview"><title>${esc(p.name)} · 준공 ${p.finish}</title><rect x="0" y="${y - 4}" width="${W}" height="${RH}" class="ms-row"/>

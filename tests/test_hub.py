@@ -119,6 +119,13 @@ def test_hub_end_to_end(hub_server, monkeypatch):
     got = v.post("/api/hub/redeem", json={"code": code.lower()}).json()
     assert got["version"] == 4 and v.get(f"/api/uploads/{got['uid']}/perm").json()["ref"]["source"] == "code"
     assert v.post("/api/hub/redeem", json={"code": code}).status_code == 410                 # 사용 횟수 소진
+    # ---- P4: 구독자(bob)가 참조 프로젝트에 남긴 코멘트가 대시보드를 거쳐 소유자(alice) 현장에 보임 + 대시보드 이슈
+    _use(db_b)
+    assert b.post(f"/api/uploads/{sub['uid']}/hub-comments", json={"text": "@alice 철골 반입 일정 확인 부탁"}).status_code == 200
+    _use(db_a)
+    feed = a.get(f"/api/uploads/{uid}/hub-feed").json()
+    assert feed["available"] and any(c["author"] == "bob" and "철골" in c["text"] for c in feed["comments"])
+    assert isinstance(feed["issues"], list)
     # ---- AI 게이트웨이: 현장 AI 는 서버에서 실행 (PMS_AI_MODE=server)
     _use(db_a)
     monkeypatch.setattr(edition, "HUB_URL", hub_server)
@@ -137,3 +144,10 @@ def test_hub_end_to_end(hub_server, monkeypatch):
     ps = adm("GET", "/api/dashboard/publish-status")
     assert ps[0]["version"] == 4 and ps[0]["this_month"] is True
     assert any(d["username"] == "alice" for d in adm("GET", "/api/admin/hub/devices"))
+    # ---- P5: 상태 확인·백업
+    h = adm("GET", "/api/health")
+    assert h["edition"] == "server" and h["hub_projects"] == 1 and h["devices"] >= 3
+    import http.cookiejar  # noqa: F401
+    op = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with pytest.raises(urllib.error.HTTPError):
+        op.open(hub_server + "/api/admin/backup")            # 로그인 없이 불가

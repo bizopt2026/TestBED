@@ -39,12 +39,12 @@ for u, r in (("admin", "admin"), ("alice", "editor"), ("bob", "editor"), ("vic",
   srv.kill(); throw new Error("서버가 시작되지 않았습니다");
 }
 
-async function login(browser, user, viewport = { width: 1400, height: 900 }) {
+async function login(browser, user, viewport = { width: 1400, height: 900 }, base = BASE) {
   const ctx = await browser.newContext({ viewport, locale: "ko-KR", acceptDownloads: true });
   const page = await ctx.newPage();
   page.on("response", (r) => { if (r.status() === 401 && process.env.E2E_DEBUG) console.log(`[${user}] 401 ${r.request().method()} ${r.url()}`); });
-  page.on("pageerror", (e) => { failed++; results.push(`✕ [${user}] 화면 스크립트 오류: ${e.message}`); });
-  await page.goto(BASE + "/");
+  page.on("pageerror", (e) => { failed++; results.push(`✕ [${user}] 화면 스크립트 오류: ${e.message} @ ${(e.stack||"").split("\n").slice(1,3).join(" ")}`); });
+  await page.goto(base + "/");
   await page.fill("#fLogin [name=username]", user);
   await page.fill("#fLogin [name=password]", PW);
   await page.click("#fLogin button[value=ok]");
@@ -88,7 +88,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
 (async () => {
   const srv = await startServer();
   const browser = await chromium.launch();
-  let uid, up2;
+  let uid, up2, hubSrv;
   try {
     const alice = await login(browser, "alice");
     await step("디자인 가이드 화면 + 기준 이미지 비교", async () => {
@@ -395,9 +395,40 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
       assert(w <= 400, `가로 스크롤 발생 (${w}px): ${wide.join(", ")}`);
       await shot(m, "05_mobile");
     });
+    await step("PMS 현장 → PMS 대시보드: 연결·.pms 내보내기·게시·이슈 보드", async () => {
+      const HP = PORT + 2, HB = `http://127.0.0.1:${HP}`;
+      hubSrv = await startServer(HP, { PMS_EDITION: "server" }, true);
+      const al = await login(browser, "alice");
+      await al.goto(`${BASE}/#/me`); await al.waitForSelector("#fHub");
+      await al.fill("#fHub [name=url]", HB); await al.fill("#fHub [name=username]", "alice"); await al.fill("#fHub [name=password]", PW);
+      await al.click("#fHub button"); await al.waitForSelector("#hubOff");
+      await a11y(al, "내 설정(연결됨)");
+      await al.goto(`${BASE}/#/p/${uid}/overview`); await al.waitForSelector("#hubChip");
+      await al.click("#btnWork"); await al.waitForSelector("#workMenu:not([hidden])");
+      const [dl] = await Promise.all([al.waitForEvent("download"), al.click('#workMenu [data-w="pms"]')]);
+      assert(fs.readFileSync(await dl.path()).subarray(0, 2).toString() === "PK", ".pms 가 zip 이 아님");
+      await al.click("#btnWork"); await al.click('#workMenu [data-w="pub"]');
+      await al.fill("dialog[open] [name=note]", "E2E 게시"); await al.click("dialog[open] button.primary");
+      await al.waitForSelector("#hubChip:has-text('게시 v1')");
+      await al.waitForSelector("#hubFeed");
+      await a11y(al, "게시 후 상황판");
+      await al.context().close();
+      const dash = await login(browser, "admin", undefined, HB);
+      await dash.waitForFunction(() => document.title === "PMS 대시보드");
+      await dash.waitForSelector("#issueBoard");
+      await a11y(dash, "PMS 대시보드 홈");
+      await shot(dash, "10_dashboard");
+      await dash.goto(`${HB}/#/issues`); await dash.waitForSelector("#isList");
+      const first = dash.locator("#isList [data-issue]").first();
+      if (await first.count()) { await first.click(); await dash.waitForSelector("#drawer.open #isAi"); }
+      await a11y(dash, "이슈 화면");
+      await dash.goto(`${HB}/#/admin`); await dash.waitForSelector("#hubDevices table"); await dash.waitForSelector("#opsPanel");
+      await a11y(dash, "대시보드 관리");
+    });
   } finally {
     await browser.close();
     srv.kill();
+    hubSrv?.kill();
   }
   // ---- 데이터 화면 기준 이미지 비교: 날짜를 고정한 별도 서버(계정 없음) + 교육용 샘플
   {
@@ -416,7 +447,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
       const p = await page();
       await p.goto(VB + "/");
       const sid = (await p.evaluate(async () => api("/api/learn/sample", { method: "POST" }))).id;
-      const MASK = ["#helpFab", ".tl-card .row > .muted", "#toast"];
+      const MASK = ["#helpFab", ".tl-card .row > .muted", "#toast", ".ib-brief > .muted"];
       for (const [name, hash, wait] of [["v_home", "#/", ".pc-stats"], ["v_overview", `#/p/${sid}/overview`, ".sit"], ["v_gantt", `#/p/${sid}/gantt`, "#gc"], ["v_timeline", `#/p/${sid}/timeline`, ".timeline"]]) {
         await step(`기준 이미지: ${name}`, async () => { await p.goto(VB + "/" + hash); await p.waitForSelector(wait); await p.waitForTimeout(700); await visual(p, name, MASK); });
       }

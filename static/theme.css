@@ -221,7 +221,7 @@ body.density-compact { --row: 24px; } body.density-comfy { --row: 32px; }
 .kpi .v.crit { color: var(--crit-text); }
 .delta { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 999px; font-size: 11.5px; font-weight: 650; }
 .delta.good { background: var(--ok-soft); color: var(--ok-text); } .delta.bad { background: var(--crit-soft); color: var(--crit-text); } .delta.same { background: var(--soft); color: var(--muted); }
-.spk { color: var(--accent); } .spk-l { color: var(--faint); }
+.spk { color: var(--accent); } .spk-l { color: var(--muted); }
 .why { border-color: var(--line-2); color: var(--muted); }
 
 /* ---------- 상황판 머리(히어로) ---------- */
