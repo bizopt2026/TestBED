@@ -325,3 +325,24 @@ body.ro-ref #view [data-con], body.ro-ref #view [data-commit] { display: none !i
 /* 숨김 속성은 항상 숨김 — .btn 등의 display 가 hidden 을 덮어써 권한 없는 단추가 보이던 문제 */
 [hidden] { display: none !important; }
 @media (max-width: 760px) { .help-top { display: none; } .split-btn > .split-more { padding-inline: 7px; } }
+
+/* 사용자 매뉴얼 */
+.md-wrap { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; align-items: start; }
+.md-toc { position: sticky; top: calc(var(--top-h, 56px) + 12px); display: grid; gap: 2px; padding: 12px; font-size: 13px; max-height: 80vh; overflow: auto; }
+.md-toc b { margin-bottom: 6px; } .md-toc a { color: var(--text-2); text-decoration: none; padding: 4px 6px; border-radius: 6px; }
+.md-toc a:hover { background: var(--hover); color: var(--text); }
+.md-doc { max-width: 920px; padding: 24px 32px; line-height: 1.7; }
+.md-doc h3 { margin-top: 28px; padding-top: 8px; border-top: 1px solid var(--line); } .md-doc h3:first-child { border-top: 0; margin-top: 0; }
+.md-doc h4 { margin-top: 18px; } .md-doc p { margin: 8px 0; } .md-doc ul, .md-doc ol { padding-left: 22px; } .md-doc li.md-sub { margin-left: 18px; }
+.md-doc code { background: var(--soft); padding: 1px 5px; border-radius: 4px; font-size: .92em; }
+.md-pre { background: var(--soft); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow: auto; font-size: 12.5px; }
+.md-t { margin: 8px 0 12px; } .md-t td, .md-t th { white-space: normal; vertical-align: top; }
+.md-note { border: 1px solid var(--warn-line); background: var(--warn-soft); color: var(--text); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+.page-head .seg-tabs a { text-decoration: none; }
+@media (max-width: 900px) { .md-wrap { grid-template-columns: minmax(0, 1fr); } .md-toc { position: static; max-height: none; } .md-doc { padding: 16px; } }
+@media print { .md-toc, .page-head .row { display: none !important; } .md-wrap { display: block; } .md-doc { box-shadow: none; border: 0; max-width: none; padding: 0; } }
+.seg-tabs a { display: inline-flex; align-items: center; color: var(--muted); font-weight: 550; padding: 6px 12px; border-radius: 7px; text-decoration: none; white-space: nowrap; }
+.seg-tabs a.on { background: var(--panel); color: var(--text); box-shadow: var(--sh-1); }
+.seg-tabs a:hover { color: var(--text); }
+.page-head .row { flex-wrap: wrap; min-width: 0; }
+.page-head .seg-tabs { max-width: 100%; overflow-x: auto; }

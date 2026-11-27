@@ -13,6 +13,7 @@ services:
       APP_TOKEN: ${APP_TOKEN:-}
       MAX_UPLOAD_MB: "100"
       # 사용자 계정 (지정하면 첫 실행 때 관리자 생성 → 로그인 필수 모드)
+      # 비밀번호는 10자 이상, 영문·숫자·기호 중 2가지 이상
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       SECURE_COOKIE: ${SECURE_COOKIE:-0}   # HTTPS 뒤에서 운영하면 1

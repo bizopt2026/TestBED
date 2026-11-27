@@ -115,6 +115,7 @@ async function route() {
     if (parts[0] === "print" && parts[1]) return await showPrint(parts[1]);
     if (parts[0] === "design" && typeof showDesign === "function") return await showDesign();
     if (parts[0] === "me" && typeof showMe === "function") return await showMe();
+    if (parts[0] === "manual" && typeof showManual === "function") return await showManual(parts[1]);
     if (parts[0].split("?")[0] === "issues" && typeof showIssues === "function") return await showIssues();
     return await showList();
   } catch (err) {

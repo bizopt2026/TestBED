@@ -103,3 +103,58 @@ WHATSNEW["2.8"] = [
   { ic: "gantt", t: "휴대폰 공정표", d: "휴대폰·태블릿에서도 작업명과 막대가 함께 보입니다. Enter로 상세가 열립니다." },
   { ic: "book", t: "도움말은 머리글로", d: "떠 있던 '? 도움말' 버튼이 내용을 가리지 않도록 머리글로 옮겼습니다 (휴대폰은 작업 ▾ → 이 화면 사용법)." },
 ];
+
+// ================================================================ 사용자 매뉴얼 (프로그램 안에서 보기·인쇄)
+function mdDoc(src) {   // 매뉴얼용 Markdown: 제목·표·목록·인용·코드·구분선·굵게·코드·링크
+  const inl = (t) => esc(t).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, txt, href) => /^https?:/.test(href) ? `<a href="${href}" target="_blank" rel="noopener">${txt}</a>`
+      : `<a href="#/manual/${({ "배포-운영-가이드.md": "ops", "사용자-매뉴얼.md": "manual", "../CHANGELOG.md": "changelog" })[href] || "manual"}">${txt}</a>`);
+  const L = src.replace(/\r/g, "").split("\n"), out = [], toc = [];
+  for (let i = 0; i < L.length; i++) {
+    const l = L[i];
+    if (/^```/.test(l)) { const buf = []; while (++i < L.length && !/^```/.test(L[i])) buf.push(L[i]); out.push(`<pre class="md-pre">${esc(buf.join("\n"))}</pre>`); continue; }
+    const h = l.match(/^(#{1,4})\s+(.*)$/);
+    if (h) { const id = "m" + out.length; if (h[1].length === 2) toc.push([id, h[2]]); out.push(`<h${h[1].length + 1} id="${id}">${inl(h[2])}</h${h[1].length + 1}>`); continue; }
+    if (/^---+\s*$/.test(l)) continue;   // 장 구분은 제목 위 선으로 대신
+    if (/^\|/.test(l) && /^\|[\s:|-]+\|\s*$/.test(L[i + 1] || "")) {
+      const row = (x) => x.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const head = row(l); i++; const body = [];
+      while (i + 1 < L.length && /^\|/.test(L[i + 1])) body.push(row(L[++i]));
+      out.push(`<div class="scroll"><table class="t md-t" data-noexport data-tt="1"><thead><tr>${head.map((c) => `<th>${inl(c)}</th>`).join("")}</tr></thead><tbody>${body.map((r) => `<tr>${r.map((c) => `<td>${inl(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`);
+      continue;
+    }
+    if (/^\s*([-*]|\d+\.)\s+/.test(l)) {
+      const ordered = /^\s*\d+\./.test(l), items = [];
+      while (i < L.length && /^\s*([-*]|\d+\.)\s+/.test(L[i])) { items.push(`<li${/^\s{2,}/.test(L[i]) ? ' class="md-sub"' : ""}>${inl(L[i].replace(/^\s*([-*]|\d+\.)\s+/, ""))}</li>`); i++; }
+      i--; out.push(`<${ordered ? "ol" : "ul"}>${items.join("")}</${ordered ? "ol" : "ul"}>`); continue;
+    }
+    if (/^>\s?/.test(l)) { out.push(`<div class="md-note">${inl(l.replace(/^>\s?/, ""))}</div>`); continue; }
+    if (l.trim()) out.push(`<p>${inl(l)}</p>`);
+  }
+  return { html: out.join("\n"), toc };
+}
+async function showManual(key = "manual") {
+  $("#crumb").textContent = "/ 사용자 매뉴얼";
+  ctx.uid = null;
+  const DOCS = [["manual", "사용자 매뉴얼"], ["ops", "배포·운영 가이드"], ["changelog", "변경 기록"]];
+  if (!DOCS.some(([k]) => k === key)) key = "manual";
+  view.innerHTML = skeleton?.("page") || "";
+  const src = await fetch(`/api/docs/${key}`).then((r) => (r.ok ? r.text() : Promise.reject(Object.assign(new Error("문서를 불러오지 못했습니다"), { status: r.status }))));
+  const { html, toc } = mdDoc(src);
+  view.innerHTML = `<div class="page-head"><div><h2>${DOCS.find(([k]) => k === key)[1]}</h2><p>버전 ${esc(window.PMS?.version || "")} · 인쇄하거나 PDF로 저장해 나눠 볼 수 있습니다.</p></div>
+      <div class="row"><div class="seg-tabs sm" role="group" aria-label="문서">${DOCS.map(([k, l]) => `<a class="${k === key ? "on" : ""}" href="#/manual/${k}" ${k === key ? 'aria-current="page"' : ""}>${l}</a>`).join("")}</div>
+      <button class="btn" onclick="print()">인쇄·PDF</button></div></div>
+    <div class="md-wrap">${toc.length > 2 ? `<nav class="md-toc panel" aria-label="목차"><b>목차</b>${toc.map(([id, t]) => `<a href="#/manual/${key}" data-to="${id}">${esc(t.replace(/\*\*/g, ""))}</a>`).join("")}</nav>` : ""}
+      <article class="panel md-doc">${html}</article></div>`;
+  view.querySelectorAll("[data-to]").forEach((a) => (a.onclick = (e) => { e.preventDefault(); document.getElementById(a.dataset.to)?.scrollIntoView({ behavior: "smooth", block: "start" }); }));
+  routeTitle();
+}
+ROUTE_TITLE.manual = "사용자 매뉴얼";
+// 학습 센터·도움말에서 매뉴얼로
+const _showLearn28 = showLearn;
+showLearn = async function (...a) {
+  const r = await _showLearn28(...a);
+  const p = view.querySelector("h2")?.parentElement?.querySelector("p");   // 학습 센터 소개 문장 아래
+  if (p && !$("#lnManual")) p.insertAdjacentHTML("afterend", `<a class="btn sm" id="lnManual" href="#/manual" style="margin-bottom:12px">${icon("book", 15)} 사용자 매뉴얼 · 배포 가이드 · 변경 기록</a>`);
+  return r;
+};

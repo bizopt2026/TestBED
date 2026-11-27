@@ -6,6 +6,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY static ./static
+COPY VERSION CHANGELOG.md ./
+COPY docs ./docs
 ENV DB_PATH=/data/app.db
 VOLUME ["/data"]
 EXPOSE 8000

@@ -370,6 +370,15 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
       await alice.waitForSelector("#myTasks .inbox-item");
       assert((await alice.textContent("#myTasks")).includes("마일스톤 확인"), "멘션이 내 할 일에 없음");
     });
+    await step("사용자 매뉴얼 (프로그램 안)", async () => {
+      await alice.goto(`${BASE}/#/learn`); await alice.waitForSelector("#lnManual");
+      await alice.waitForFunction(() => !document.querySelector("#toast")?.className, null, { timeout: 8000 }).catch(() => {}); await alice.waitForTimeout(400);   // 앞 단계 알림이 사라진 뒤 검사
+      await alice.click("#lnManual"); await alice.waitForSelector(".md-doc table");
+      assert((await alice.textContent(".md-doc")).includes("PMS 사용자 매뉴얼"), "매뉴얼 내용 없음");
+      await a11y(alice, "사용자 매뉴얼");
+      await alice.goto(`${BASE}/#/manual/ops`); await alice.waitForSelector(".md-doc h2");
+      await a11y(alice, "배포·운영 가이드");
+    });
     await step("학습 센터: 모든 따라하기 대상 요소가 화면에 있음", async () => {
       const tours = await alice.evaluate(() => ALL_LESSONS.flatMap((l) => l.steps.filter((x) => x.type === "tour").map((t) => ({ id: l.id, tab: t.tab, sels: t.steps.map((x) => x.sel) }))));
       assert(tours.length >= 10, "따라하기가 너무 적음");

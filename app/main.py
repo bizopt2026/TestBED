@@ -2340,6 +2340,21 @@ def hubc_comment(uid: str, body: dict = Body(...), user: str = Depends(_user)):
     return _hc(hubclient.call_json, "POST", f"/hub/v1/projects/{pid}/comments", user, {"text": body.get("text"), "target": body.get("target")})
 
 
+_DOCS = {"manual": "사용자-매뉴얼.md", "ops": "배포-운영-가이드.md", "changelog": "../CHANGELOG.md"}
+
+
+@app.get("/api/docs/{key}")
+def get_doc(key: str):
+    """프로그램 안에서 보는 사용자 매뉴얼·배포 가이드·변경 기록 (Markdown 원문)."""
+    fn = _DOCS.get(key)
+    if not fn:
+        raise HTTPException(404)
+    path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "docs", fn))
+    if not os.path.exists(path):
+        raise HTTPException(404, "문서 파일이 없습니다")
+    return Response(open(path, encoding="utf-8").read(), media_type="text/markdown; charset=utf-8")
+
+
 # ============================================================ PMS P5: 운영 — 상태 확인·백업
 @app.get("/api/health")
 def health_check():

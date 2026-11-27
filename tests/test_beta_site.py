@@ -46,3 +46,12 @@ def test_mentions_validation_compare_members(env):  # noqa: F811
     other = bob.post("/api/upload", files={"file": ("q.xml", open(os.path.join(os.path.dirname(__file__), "..", "samples", "sample_msproject_full.xml"), "rb").read())}).json()["ids"][0]
     assert alice.get(f"/api/compare?base={uid}&target={other}").status_code == 400
     assert alice.post(f"/api/projects/{name}/members", json={"username": "vic"}).status_code == 400
+
+
+def test_docs_served(env):  # noqa: F811
+    c = login("vic")   # 로그인한 사용자는 누구나
+    for k, word in (("manual", "사용자 매뉴얼"), ("ops", "배포"), ("changelog", "변경 기록")):
+        r = c.get(f"/api/docs/{k}")
+        assert r.status_code == 200 and word in r.text
+    assert c.get("/api/docs/../../etc/passwd").status_code == 404
+    assert c.get("/api/docs/secret").status_code == 404

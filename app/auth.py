@@ -160,7 +160,10 @@ def session_user(token: str | None) -> dict | None:
 def bootstrap_from_env() -> None:
     u, p = os.environ.get("ADMIN_USERNAME"), os.environ.get("ADMIN_PASSWORD")
     if u and p and not users_exist():
-        create_user(u, p, "admin")
+        try:
+            create_user(u, p, "admin")
+        except ValueError as e:   # 약한 비밀번호 등: 원인을 알기 쉽게 알리고 시작을 멈춤
+            raise SystemExit(f"[PMS] ADMIN_PASSWORD 를 쓸 수 없습니다: {e}")
 
 
 if __name__ == "__main__":  # python -m app.auth create-admin <아이디>

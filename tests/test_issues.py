@@ -65,7 +65,7 @@ def test_issue_ai_and_briefing(env, monkeypatch):
     assert b["method"] == "규칙" and name in b["text"]
     ai.PROVIDER = "cli"; fake = FakeCLI(); ai.set_runner(fake)
     try:
-        iid = alice.get("/api/issues").json()[0]["id"]
+        iid = next(x["id"] for x in alice.get("/api/issues").json() if x["project"] == name)   # 정렬 순서와 무관하게 이 프로젝트의 이슈
         t = alice.post(f"/api/issues/{iid}/ai", json={}).json()
         assert t["cached"] is False and alice.post(f"/api/issues/{iid}/ai", json={}).json()["cached"] is True
         b2 = vic.get("/api/dashboard/briefing?refresh=1").json()
