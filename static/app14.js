@@ -147,8 +147,11 @@ async function showManual(key = "manual") {
     <div class="md-wrap">${toc.length > 2 ? `<nav class="md-toc panel" aria-label="목차"><b>목차</b>${toc.map(([id, t]) => `<a href="#/manual/${key}" data-to="${id}">${esc(t.replace(/\*\*/g, ""))}</a>`).join("")}</nav>` : ""}
       <article class="panel md-doc">${html}</article></div>`;
   view.querySelectorAll("[data-to]").forEach((a) => (a.onclick = (e) => { e.preventDefault(); document.getElementById(a.dataset.to)?.scrollIntoView({ behavior: "smooth", block: "start" }); }));
+  // 문서는 A4 세로로 인쇄 (공정표 인쇄용 A3 가로 설정을 이 화면에서만 덮어씀)
+  if (!$("#manualPage")) document.head.insertAdjacentHTML("beforeend", '<style id="manualPage">@media print { @page { size: A4 portrait; margin: 16mm 14mm; } }</style>');
   routeTitle();
 }
+window.addEventListener("hashchange", () => { if (!location.hash.startsWith("#/manual")) $("#manualPage")?.remove(); });
 ROUTE_TITLE.manual = "사용자 매뉴얼";
 // 학습 센터·도움말에서 매뉴얼로
 const _showLearn28 = showLearn;

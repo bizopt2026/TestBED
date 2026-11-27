@@ -346,3 +346,4 @@ body.ro-ref #view [data-con], body.ro-ref #view [data-commit] { display: none !i
 .seg-tabs a:hover { color: var(--text); }
 .page-head .row { flex-wrap: wrap; min-width: 0; }
 .page-head .seg-tabs { max-width: 100%; overflow-x: auto; }
+@media print { .md-doc .scroll { overflow: visible !important; } .md-doc table { width: 100%; table-layout: auto; } .md-doc td, .md-doc th { white-space: normal !important; overflow-wrap: anywhere; } .md-doc h3 { break-after: avoid; } .md-doc tr { break-inside: avoid; } }
