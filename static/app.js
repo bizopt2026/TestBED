@@ -103,6 +103,7 @@ async function route() {
   closeDrawer(); if (!location.hash.startsWith("#/p/")) { ctx.uid = null; ctx.result = null; }
   document.body.classList.toggle("field", location.hash.startsWith("#/field/"));
   const parts = location.hash.replace(/^#\/?/, "").split("/");
+  const startHash = location.hash;
   try {
     if (parts[0] === "p" && parts[1]) return await showProject(parts[1], parts[2] || "overview");
     if (parts[0] === "cmp" && parts[1] && parts[2]) return await showCompare(parts[1], parts[2]);
@@ -119,6 +120,7 @@ async function route() {
     if (parts[0].split("?")[0] === "issues" && typeof showIssues === "function") return await showIssues();
     return await showList();
   } catch (err) {
+    if (location.hash !== startHash) { console.warn("이전 화면의 늦은 오류(무시):", err); return; }   // 이미 다른 화면으로 옮겼으면 그 화면을 오류로 덮지 않음
     view.innerHTML = typeof errorPanel === "function" ? errorPanel(err) : `<div class="panel err">오류: ${esc(err.message)}</div>`;
   }
 }

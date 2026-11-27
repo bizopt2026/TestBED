@@ -49,6 +49,7 @@ showList = async function () {
 async function portfolioTable() {
   const cards = $("#pfCards"); if (!cards || $("#pfMode")) return;
   const pf = await api("/api/portfolio").catch(() => []);
+  if (!cards.isConnected || $("#pfMode")) return;   // 불러오는 사이 다른 화면으로 옮겼으면 그만
   const by = Object.fromEntries(pf.map((p) => [p.id, p]));
   const key = "pfMode", def = isDashboard() ? "table" : "cards";
   let mode = store.get(key, def);

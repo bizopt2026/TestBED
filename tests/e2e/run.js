@@ -21,7 +21,19 @@ let failed = 0;
 async function step(name, fn) {
   const t = Date.now();
   try { await fn(); results.push(`✓ ${name} (${Date.now() - t}ms)`); }
-  catch (e) { failed++; results.push(`✕ ${name}: ${e.message.split("\n")[0]}`); }
+  catch (e) {
+    failed++; results.push(`✕ ${name}: ${e.message.split("\n")[0]}`);
+    const pg = globalThis.__dbgPage;   // 실패 순간의 화면 상태(원인 추적용)
+    if (pg && !pg.isClosed()) {
+      try {
+        await pg.screenshot({ path: path.join(OUT, `fail_${results.length}.png`) });
+        results.push("    상태: " + await pg.evaluate(() => JSON.stringify({ h: location.hash, err: document.querySelector(".err-state code")?.textContent,
+          over: [...document.querySelectorAll("dialog[open], .tour-pop, .drawer.open")].map((d) => (d.id || d.className) + ":" + d.textContent.trim().slice(0, 50)),
+          menu: document.querySelector("#workMenu")?.hidden })));
+      } catch { /* 페이지가 닫힘 */ }
+    }
+  }
+  globalThis.__dbgPage = null;
 }
 function assert(c, msg) { if (!c) throw new Error(msg); }
 
@@ -407,6 +419,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
       const HP = PORT + 2, HB = `http://127.0.0.1:${HP}`;
       hubSrv = await startServer(HP, { PMS_EDITION: "server" }, true);
       const al = await login(browser, "alice");
+      globalThis.__dbgPage = al;
       await al.goto(`${BASE}/#/me`); await al.waitForSelector("#fHub");
       await al.fill("#fHub [name=url]", HB); await al.fill("#fHub [name=username]", "alice"); await al.fill("#fHub [name=password]", PW);
       await al.click("#fHub button"); await al.waitForSelector("#hubOff");
@@ -421,7 +434,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
       await al.waitForSelector("#hubFeed");
       await a11y(al, "게시 후 상황판");
       await al.context().close();
-      const dash = await login(browser, "admin", undefined, HB);
+      const dash = await login(browser, "admin", undefined, HB); globalThis.__dbgPage = dash;
       await dash.waitForFunction(() => document.title.endsWith("PMS 대시보드"));
       await dash.waitForSelector("#issueBoard");
       await a11y(dash, "PMS 대시보드 홈");
