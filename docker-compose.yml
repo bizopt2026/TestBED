@@ -13,9 +13,8 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       SECURE_COOKIE: ${SECURE_COOKIE:-0}   # HTTPS 뒤에서 운영하면 1
-      # AI 기능 (비우면 규칙 기반으로만 동작)
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      AI_PROVIDER: ${AI_PROVIDER:-anthropic}
-      AI_MODEL: ${AI_MODEL:-claude-opus-5-5}
-      AI_MODEL_BULK: ${AI_MODEL_BULK:-}
+      # AI 기능: 컨테이너 안에서 Claude CLI 를 쓰려면 CLI 설치·로그인 정보가 필요합니다.
+      # 서버에 직접 설치해 실행(uvicorn)하는 방식을 권장하며, 컨테이너에서는 기본 off 입니다.
+      AI_PROVIDER: ${AI_PROVIDER:-off}
+      AI_MODEL: ${AI_MODEL:-}
     restart: unless-stopped

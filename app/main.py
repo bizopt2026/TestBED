@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import os
 import re
 from datetime import date
@@ -40,7 +41,7 @@ def _required_role(method: str, path: str) -> str:
         return "admin"
     if path.startswith("/api/settings/team"):
         return "admin" if method != "GET" else "viewer"
-    if method == "GET" or (method == "POST" and path.endswith(VIEWER_POST)):
+    if method == "GET" or (method == "POST" and path.endswith(VIEWER_POST)) or path in ("/api/learn/progress", "/api/learn/sample"):
         return "viewer"
     return "editor"
 
@@ -651,6 +652,112 @@ def del_record(uid: str, kind: str, rid: str):
         raise HTTPException(404)
     storage.rec_del(kind, rid)
     return {"ok": True}
+
+
+# ---- 3차: UX 지원
+@app.get("/api/inbox")
+def inbox(user: str = Depends(_user)):
+    return services.inbox(user)
+
+
+@app.get("/api/uploads/{uid}/views")
+def list_views(uid: str):
+    return storage.rec_list("view", _name(uid))
+
+
+@app.post("/api/uploads/{uid}/views")
+def save_view(uid: str, body: dict = Body(...), user: str = Depends(_user)):
+    cfg = body.get("config") or {}
+    if not isinstance(cfg, dict) or len(json.dumps(cfg)) > 4000:
+        raise HTTPException(400, "보기 설정이 올바르지 않습니다")
+    name = str(body.get("name") or "").strip()[:40]
+    if not name:
+        raise HTTPException(400, "보기 이름을 입력하세요")
+    return {"id": storage.rec_put("view", _name(uid), {"name": name, "config": cfg}, user)}
+
+
+@app.delete("/api/uploads/{uid}/views/{vid}")
+def del_view(uid: str, vid: str):
+    r = storage.rec_get("view", vid)
+    if not r or r["scope"] != _name(uid):
+        raise HTTPException(404)
+    storage.rec_del("view", vid)
+    return {"ok": True}
+
+
+IMAGE_MAGIC = {b"\xff\xd8\xff": "image/jpeg", b"\x89PNG\r\n\x1a\n": "image/png", b"RIFF": "image/webp"}
+
+
+@app.post("/api/uploads/{uid}/photos")
+async def upload_photo(uid: str, request: Request, ref: str = Form(...), file: UploadFile = File(...)):
+    raw = await file.read()
+    if len(raw) > 3 * 1024 * 1024:
+        raise HTTPException(413, "사진은 3MB 이하만 올릴 수 있습니다")
+    mime = next((m for sig, m in IMAGE_MAGIC.items() if raw.startswith(sig)), None)
+    if mime == "image/webp" and raw[8:12] != b"WEBP":
+        mime = None
+    if not mime:
+        raise HTTPException(400, "JPG, PNG, WEBP 이미지만 올릴 수 있습니다")
+    fid = storage.file_put(_name(uid), str(ref)[:60], mime, raw, request.state.user["username"])
+    return {"id": fid}
+
+
+@app.get("/api/uploads/{uid}/photos")
+def list_photos(uid: str, ref: str | None = None):
+    return storage.file_list(_name(uid), ref)
+
+
+@app.get("/api/photos/{fid}")
+def get_photo(fid: str):
+    f = storage.file_get(fid)
+    if not f:
+        raise HTTPException(404)
+    return Response(f["data"], media_type=f["mime"], headers={"Content-Disposition": "inline", "Cache-Control": "private, max-age=3600"})
+
+
+@app.delete("/api/photos/{fid}")
+def del_photo(fid: str):
+    if not storage.file_del(fid):
+        raise HTTPException(404)
+    return {"ok": True}
+
+
+def _learner(request: Request, client_id: str = "") -> str:
+    u = request.state.user
+    if auth_mod.users_exist():
+        return u["username"]
+    return "anon:" + (re.sub(r"[^A-Za-z0-9-]", "", client_id)[:40] or "default")
+
+
+@app.get("/api/learn/progress")
+def learn_progress(request: Request, client_id: str = ""):
+    r = storage.rec_get("learn", _learner(request, client_id))
+    return (r or {}).get("data", {})
+
+
+@app.put("/api/learn/progress")
+def put_learn_progress(request: Request, body: dict = Body(...), client_id: str = ""):
+    data = body.get("data") or {}
+    if not isinstance(data, dict) or len(json.dumps(data)) > 20000:
+        raise HTTPException(400, "진도 데이터가 올바르지 않습니다")
+    who = _learner(request, client_id)
+    storage.rec_put("learn", who, {"data": data, "display": request.state.user["username"]}, who, rid=who)
+    return {"ok": True}
+
+
+@app.post("/api/learn/sample")
+def learn_sample(user: str = Depends(_user)):
+    return {"id": services.learn_sample(user)}
+
+
+@app.get("/api/admin/learn")
+def admin_learn():
+    rows = []
+    for r in storage.rec_list("learn"):
+        d = r.get("data") or {}
+        rows.append({"learner": r.get("display") or r["scope"], "lessons_done": len(d.get("done", [])),
+                     "quiz": d.get("quiz", {}), "updated_at": r["updated_at"]})
+    return rows
 
 
 # ---- 초기 공정표 생성

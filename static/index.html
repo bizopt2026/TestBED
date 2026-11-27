@@ -7,14 +7,15 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<a class="skip" href="#view">본문으로 건너뛰기</a>
 <header class="top">
   <a class="brand" href="#/">▦ 공정관리 분석기</a>
   <span class="crumb" id="crumb"></span>
   <span class="spacer"></span>
   <span id="userBox" class="userbox"></span>
-  <button class="btn primary" id="btnUpload">파일 업로드</button>
+  <button class="btn primary" id="btnUpload" data-need="editor">파일 업로드</button>
 </header>
-<main id="view"></main>
+<main id="view" tabindex="-1"></main>
 
 <dialog id="dlgUpload">
   <form method="dialog" id="formUpload">
@@ -41,5 +42,8 @@
 </dialog>
 <div id="toast"></div>
 <script src="/static/app.js"></script>
+<script src="/static/ui.js"></script>
+<script src="/static/field.js"></script>
+<script src="/static/learn.js"></script>
 </body>
 </html>

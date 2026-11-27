@@ -1059,3 +1059,77 @@ def generate_from_text(project: str, start: date, text: str, target_days: int | 
     tables = set_target_from_early(build_tables(project, start, out["wbs"], acts, data_date=start,
                                                 must_finish=start + timedelta(days=target_days) if target_days else None))
     return {"tables": tables, "assumptions": out["assumptions"]}
+
+
+
+# ================================================================ 3차: UX 지원
+def inbox(username: str = "") -> list[dict]:
+    """홈 화면 '오늘 확인할 것' 목록."""
+    today = date.today()
+    this_week = monday(today).isoformat()
+    items = []
+    for p in storage.latest_by_project():
+        uid, name = p["id"], p["name"]
+        r = result(uid)
+        dd = date.fromisoformat(r["data_date"])
+        inc = [a for a in r["activities"] if a["status_code"] != "TK_Complete"]
+        neg = [a for a in inc if a["tf"] is not None and a["tf"] < 0]
+        if neg:
+            items.append({"level": "high", "project": name, "uid": uid, "tab": "critical",
+                          "text": f"음수 여유 작업 {len(neg)}개 (최소 {min(a['tf'] for a in neg)}일)"})
+        if (today - dd).days > 35:
+            items.append({"level": "mid", "project": name, "uid": uid, "tab": "overview",
+                          "text": f"마지막 업데이트가 {(today - dd).days}일 전입니다 (Data Date {r['data_date']})"})
+        hist = storage.history(name)
+        if len(hist) >= 2:
+            h1, h0 = health_score(hist[-1]["id"]), health_score(hist[-2]["id"])
+            if h1 is not None and h0 is not None and h1 < h0 - 3:
+                items.append({"level": "mid", "project": name, "uid": uid, "tab": "health",
+                              "text": f"건전성 점수 하락 {h0} → {h1}"})
+            slip = (date.fromisoformat(hist[-1]["result"]["finish"]) - date.fromisoformat(hist[-2]["result"]["finish"])).days
+            if slip > 0:
+                items.append({"level": "high" if slip >= 14 else "mid", "project": name, "uid": uid, "tab": "analysis",
+                              "text": f"직전 업데이트 대비 준공 {slip}일 지연"})
+        for c in storage.rec_list("constraint", name):
+            if c.get("status") != "해결" and c.get("due") and c["due"] < today.isoformat():
+                items.append({"level": "high", "project": name, "uid": uid, "tab": "lookahead",
+                              "text": f"기한 지난 제약: {c.get('code')} {c.get('type')} - {c.get('desc', '')[:40]} (기한 {c['due']})"})
+        pending = [c for c in storage.rec_list("commit", name) if c["week"] < this_week and not c.get("done") and not c.get("reason")]
+        if pending:
+            items.append({"level": "mid", "project": name, "uid": uid, "tab": "lookahead",
+                          "text": f"지난주 약속 {len(pending)}건의 완료 여부가 입력되지 않았습니다"})
+        big = [x for x in storage.rec_list("risk", name) if x.get("status") == "open" and not x.get("mitigation")
+               and x.get("prob", 0) * (x.get("impact_ml", 0)) / 100 >= 3]
+        if big:
+            items.append({"level": "mid", "project": name, "uid": uid, "tab": "risk",
+                          "text": f"대응 방안이 없는 주요 리스크 {len(big)}건"})
+    order = {"high": 0, "mid": 1, "low": 2}
+    return sorted(items, key=lambda x: (order[x["level"]], x["project"]))
+
+
+LEARN_SAMPLE_NAME = "교육용 샘플 - 물류센터"
+
+
+def learn_sample(user: str = "") -> str:
+    """교육용 샘플 프로젝트(2회 업데이트 + 리스크 + 베이스라인)를 준비하고 최신 업로드 id 를 반환."""
+    from .analysis import analyze as _analyze
+    from .xer_parser import parse_xer as _parse
+    hist = storage.history(LEARN_SAMPLE_NAME)
+    if len(hist) >= 2:
+        return hist[-1]["id"]
+    import os as _os
+    root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    text = open(_os.path.join(root, "samples", "sample_project.xer"), encoding="utf-8").read()
+    text = text.replace("SAMPLE-물류센터 신축공사", LEARN_SAMPLE_NAME)
+    ids = []
+    for dd, note in (("2026-03-02", "교육용 3월 업데이트"), ("2026-04-01", "교육용 4월 업데이트")):
+        raw = text.replace("\t2026-03-02 08:00\tY", f"\t{dd} 08:00\tY").encode("utf-8")
+        t = _parse(raw)
+        res = _analyze(Schedule(t, "100"))
+        ids.append(storage.save(f"learn_{dd}.xer", "100", res["name"], "교육", note, raw, res))
+    storage.rec_put("baseline", LEARN_SAMPLE_NAME, {"upload_id": ids[0], "label": "최초 승인(교육용)",
+                                                    "data_date": "2026-03-02"}, "교육")
+    storage.rec_put("risk", LEARN_SAMPLE_NAME, {"title": "철골 자재 수급 지연", "desc": "공장 제작 물량 증가", "codes": ["A2000"],
+                                                "prob": 50.0, "impact_min": 5.0, "impact_ml": 12.0, "impact_max": 25.0, "cost": 0.0,
+                                                "owner": "구매팀", "mitigation": "", "status": "open", "category": "자재·장비"}, "교육")
+    return ids[-1]

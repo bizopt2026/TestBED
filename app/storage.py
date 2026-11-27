@@ -44,6 +44,8 @@ def init() -> None:
             token_hash TEXT PRIMARY KEY, username TEXT, expires_at REAL)""")
         c.execute("""CREATE TABLE IF NOT EXISTS audit (
             at TEXT, username TEXT, method TEXT, path TEXT, status INTEGER, detail TEXT)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS files (
+            id TEXT PRIMARY KEY, scope TEXT, ref TEXT, mime TEXT, data BLOB, author TEXT, created_at TEXT)""")
         c.execute("""CREATE TABLE IF NOT EXISTS ai_log (
             at TEXT, upload_id TEXT, feature TEXT, user TEXT, tokens_in INTEGER, tokens_out INTEGER,
             seconds REAL, ok INTEGER)""")
@@ -254,3 +256,32 @@ def audit_list(limit: int = 300) -> list[dict]:
     with conn() as c:
         rows = c.execute("SELECT * FROM audit ORDER BY at DESC LIMIT ?", (limit,)).fetchall()
     return [dict(r) for r in rows]
+
+
+
+def file_put(scope: str, ref: str, mime: str, data: bytes, author: str) -> str:
+    fid = uuid.uuid4().hex[:16]
+    with conn() as c:
+        c.execute("INSERT INTO files VALUES (?,?,?,?,?,?,?)",
+                  (fid, scope, ref, mime, data, author, datetime.now().isoformat(timespec="seconds")))
+    return fid
+
+
+def file_get(fid: str):
+    with conn() as c:
+        r = c.execute("SELECT * FROM files WHERE id=?", (fid,)).fetchone()
+    return dict(r) if r else None
+
+
+def file_list(scope: str, ref: str | None = None) -> list[dict]:
+    with conn() as c:
+        if ref:
+            rows = c.execute("SELECT id, scope, ref, mime, author, created_at FROM files WHERE scope=? AND ref=?", (scope, ref)).fetchall()
+        else:
+            rows = c.execute("SELECT id, scope, ref, mime, author, created_at FROM files WHERE scope=?", (scope,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def file_del(fid: str) -> bool:
+    with conn() as c:
+        return c.execute("DELETE FROM files WHERE id=?", (fid,)).rowcount > 0

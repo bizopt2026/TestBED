@@ -51,6 +51,7 @@ async function download(path, fallbackName) {
 const fmtDays = (n) => (n === null || n === undefined ? "" : n);
 const dayMs = 86400000;
 const toT = (s) => (s ? Date.parse(s + "T00:00:00") : null);
+const cssv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || "#888";
 
 // ---------------------------------------------------------------- 업로드
 $("#btnUpload").onclick = () => {
@@ -84,11 +85,15 @@ $("#formUpload").addEventListener("submit", async (e) => {
 // ---------------------------------------------------------------- 라우팅
 window.addEventListener("hashchange", route);
 async function route() {
+  closeDrawer(); if (!location.hash.startsWith("#/p/")) { ctx.uid = null; ctx.result = null; }
+  document.body.classList.toggle("field", location.hash.startsWith("#/field/"));
   const parts = location.hash.replace(/^#\/?/, "").split("/");
   try {
     if (parts[0] === "p" && parts[1]) return await showProject(parts[1], parts[2] || "overview");
     if (parts[0] === "cmp" && parts[1] && parts[2]) return await showCompare(parts[1], parts[2]);
     if (parts[0] === "admin") return await showAdmin();
+    if (parts[0] === "learn") return await showLearn(parts[1], parts[2]);
+    if (parts[0] === "field" && parts[1]) return await showField(parts[1]);
     if (parts[0] === "print" && parts[1]) return await showPrint(parts[1]);
     return await showList();
   } catch (err) {
@@ -109,14 +114,15 @@ async function showList() {
   }
   const sig = (v, good, warn) => v === null || v === undefined ? "" : v >= good ? "ok" : v >= warn ? "warn" : "bad";
   view.innerHTML = `
+  <div id="inbox"></div>
   <div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">포트폴리오</h2>
-    <button class="btn" onclick="showGenerate()">+ 새 공정표 만들기</button></div>
-  <div class="cards">${pf.map((p) => `<a class="card" href="#/p/${p.id}/overview">
+    <div class="row"><a class="btn" href="#/learn">🎓 학습 센터</a><button class="btn" onclick="showGenerate()" data-need="editor">+ 새 공정표 만들기</button></div></div>
+  <div class="cards">${pf.sort((a, b) => JSON.parse(store.get("favs", "[]")).includes(b.name) - JSON.parse(store.get("favs", "[]")).includes(a.name)).map((p) => `<a class="card" data-name="${esc(p.name)}" href="#/p/${p.id}/overview">
       <div class="row" style="justify-content:space-between"><b>${esc(p.name)}</b><span class="muted" style="font-size:12px">DD ${p.data_date}</span></div>
       <div class="big">${p.finish}<span class="muted" style="font-size:12px"> 예상 준공</span></div>
       <div class="chips">
-        <span class="chip ${p.margin === null ? "" : p.margin >= 0 ? "ok" : "bad"}">${p.margin === null ? "목표 준공 없음" : p.margin >= 0 ? `여유 ${p.margin}일` : `지연 ${-p.margin}일`}</span>
-        ${p.slip !== null ? `<span class="chip ${p.slip > 0 ? "bad" : "ok"}">전회 ${p.slip > 0 ? "+" : ""}${p.slip}일</span>` : ""}
+        <span class="chip ${p.margin === null ? "" : p.margin >= 0 ? "ok" : "bad"}">${p.margin === null ? "목표 준공 없음" : p.margin >= 0 ? `✓ 여유 ${p.margin}일` : `✕ 지연 ${-p.margin}일`}</span>
+        ${p.slip !== null ? `<span class="chip ${p.slip > 0 ? "bad" : "ok"}">${p.slip > 0 ? "▼" : "▲"} 전회 ${p.slip > 0 ? "+" : ""}${p.slip}일</span>` : ""}
         <span class="chip ${sig(p.health, 75, 60)}">건전성 ${p.health ?? "-"}</span>
         ${p.spi !== null ? `<span class="chip ${sig(p.spi, 0.95, 0.85)}">SPI ${p.spi}</span>` : ""}
         ${p.cpi !== null ? `<span class="chip ${sig(p.cpi, 0.95, 0.85)}">CPI ${p.cpi}</span>` : ""}
@@ -144,13 +150,17 @@ async function showList() {
         <td>${u.data_date}</td><td>${u.finish}</td><td class="num">${u.activities}</td>
         <td class="wrap">${esc(u.note)}</td><td>${esc(u.uploader)}</td><td>${u.created_at.replace("T", " ")}</td>
         <td><button class="btn sm" data-xer="${u.id}">XER</button>
-            <button class="btn sm danger" data-del="${u.id}">삭제</button></td></tr>`).join("")}
+            <button class="btn sm danger" data-del="${u.id}" data-need="admin">삭제</button></td></tr>`).join("")}
       </tbody></table></div>
   </div>`;
+  renderInbox($("#inbox"));
+  const favs = JSON.parse(store.get("favs", "[]"));
+  view.querySelectorAll(".card").forEach((c) => { if (favs.includes(c.dataset.name)) c.classList.add("fav"); });
+  enhance(view);
   if (list.length > 1) $("#cmpA").selectedIndex = 1;
   $("#btnCmp").onclick = () => (location.hash = `#/cmp/${$("#cmpA").value}/${$("#cmpB").value}`);
   view.querySelectorAll("[data-del]").forEach((b) => (b.onclick = async () => {
-    if (!confirm("이 업로드를 삭제할까요? 팀 전체에서 사라집니다.")) return;
+    if (!(await ui.confirm("이 업로드를 삭제할까요? 팀 전체에서 사라집니다.", { ok: "삭제", danger: true }))) return;
     await api(`/api/uploads/${b.dataset.del}`, { method: "DELETE" });
     delete cache[b.dataset.del];
     toast("삭제되었습니다"); showList();
@@ -161,11 +171,13 @@ async function showList() {
 // ---------------------------------------------------------------- 프로젝트
 const GROUPS = [
   ["현황", [["overview", "개요"], ["gantt", "공정표"], ["critical", "주공정"], ["scurve", "S-Curve"], ["evm", "베이스라인·EVM"], ["resources", "자원"]]],
-  ["품질·진단", [["health", "건전성 점수"], ["dcma", "DCMA 14"], ["forensic", "업데이트 포렌식"], ["p6", "P6 일정 비교"], ["korea", "국내 기준"], ["rels", "관계 추천"]]],
-  ["리스크·대응", [["risk", "리스크 레지스터"], ["delay", "지연 원인"], ["predict", "지연 예측"], ["recovery", "자동 만회안"], ["whatif", "What-if"]]],
+  ["품질·진단", [["health", "건전성·DCMA"], ["analysis", "업데이트 분석"], ["p6", "P6 일정 비교"], ["korea", "국내 기준"], ["rels", "관계 추천"]]],
+  ["리스크·대응", [["risk", "리스크·예측"], ["recovery", "자동 만회안"], ["whatif", "What-if"]]],
   ["현장·보고", [["lookahead", "룩어헤드·PPC"], ["daily", "작업일보 진도"], ["report", "월간 보고서"], ["trades", "공종 분류"], ["bench", "벤치마크"]]],
 ];
 const TAB_GROUP = Object.fromEntries(GROUPS.flatMap(([g, ts]) => ts.map(([k]) => [k, g])));
+const TAB_LABEL = Object.fromEntries(GROUPS.flatMap(([, ts]) => ts));
+const TAB_ALIAS = { dcma: "health", delay: "analysis", forensic: "analysis", predict: "risk", chat: "overview" };
 let aiStatus = null;
 async function getAiStatus() { if (!aiStatus) aiStatus = await api("/api/ai/status"); return aiStatus; }
 
@@ -174,24 +186,44 @@ async function load(uid) {
   return cache[uid];
 }
 
+let uploadsCache = null;
 async function showProject(uid, tab) {
+  if (tab === "chat") setTimeout(() => openAiPanel(), 50);
+  tab = TAB_ALIAS[tab] || tab;
   const u = await load(uid);
   const r = u.result;
-  $("#crumb").textContent = `/ ${r.name}`;
+  ctx.uid = uid; ctx.tab = tab; ctx.result = r;
+  uploadsCache = uploadsCache || await api("/api/uploads");
+  const same = uploadsCache.filter((x) => x.name === r.name).sort((a, b) => (a.data_date < b.data_date ? 1 : -1));
+  const latest = same[0]?.id === uid;
+  const favs = JSON.parse(store.get("favs", "[]"));
+  $("#crumb").innerHTML = `/ <a href="#/p/${uid}/overview">${esc(r.name)}</a> / ${esc(TAB_LABEL[tab] || (tab === "settings" ? "설정" : ""))}`;
   view.innerHTML = `
-    <div class="row" style="justify-content:space-between;margin-bottom:8px">
-      <div><h2 style="margin:0">${esc(r.name)}</h2>
-      <div class="muted">Data Date ${r.data_date} · 업로더 ${esc(u.uploader)} · ${esc(u.note || u.filename)}</div></div>
-      <div class="row"><button class="btn" id="btnCsv">엑셀(CSV) 내보내기</button>
-      <button class="btn" id="btnRecalc" title="최신 엔진으로 다시 계산">재계산</button></div>
+    <div class="phead">
+      <div><h2 style="margin:0">${esc(r.name)} <button class="btn icon fav ${favs.includes(r.name) ? "on" : ""}" id="btnFav" aria-label="관심 프로젝트" title="관심 프로젝트">★</button></h2>
+        <div class="row muted" style="gap:6px;margin-top:4px">
+          <label for="upSel">업데이트</label>
+          <select class="s sm" id="upSel" aria-label="업데이트 선택">${same.map((x) => `<option value="${x.id}" ${x.id === uid ? "selected" : ""}>DD ${x.data_date} · ${esc(x.note || x.filename)}</option>`).join("")}</select>
+          ${latest ? '<span class="chip ok">✓ 최신</span>' : '<span class="chip warn">! 최신 아님</span>'}
+          <span class="chip">${r.options?.progress_override ? "Progress Override" : "Retained Logic"}</span>
+          <span>업로더 ${esc(u.uploader)}</span></div></div>
+      <div class="row"><a class="btn" href="#/field/${uid}" title="현장 모바일 화면">📱 현장 모드</a>
+        <button class="btn" id="btnHelp" title="이 화면 사용법">? 사용법</button>
+        <button class="btn" id="btnRecalc" title="최신 엔진으로 다시 계산" data-need="editor">재계산</button></div>
     </div>
     ${r.warnings.map((w) => `<div class="panel err">⚠ ${esc(w)}</div>`).join("")}
-    <nav class="groups">${GROUPS.map(([g, ts]) => `<a href="#/p/${uid}/${ts[0][0]}" class="${TAB_GROUP[tab] === g ? "on" : ""}">${g}</a>`).join("")}
-      <a href="#/p/${uid}/chat" class="ai-link ${tab === "chat" ? "on" : ""}">✦ AI 어시스턴트</a>
+    <nav class="groups" aria-label="화면 그룹">${GROUPS.map(([g, ts]) => `<a href="#/p/${uid}/${ts[0][0]}" class="${TAB_GROUP[tab] === g ? "on" : ""}" ${TAB_GROUP[tab] === g ? 'aria-current="page"' : ""}>${g}</a>`).join("")}
+      <button class="ai-link" id="btnAi" title="Alt+A">✦ AI 어시스턴트</button>
       <a href="#/p/${uid}/settings" class="${tab === "settings" ? "on" : ""}">⚙ 설정</a></nav>
-    ${TAB_GROUP[tab] ? `<nav class="tabs">${GROUPS.find(([g]) => g === TAB_GROUP[tab])[1].map(([k, l]) => `<a href="#/p/${uid}/${k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</nav>` : ""}
+    ${TAB_GROUP[tab] ? `<nav class="tabs" role="tablist">${GROUPS.find(([g]) => g === TAB_GROUP[tab])[1].map(([k, l]) => `<a role="tab" aria-selected="${k === tab}" href="#/p/${uid}/${k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</nav>` : ""}
     <div id="tab"></div>`;
-  $("#btnCsv").onclick = () => download(`/api/uploads/${uid}/activities.csv`, "activities.csv");
+  $("#upSel").onchange = (e) => (location.hash = `#/p/${e.target.value}/${tab}`);
+  $("#btnAi").onclick = () => openAiPanel();
+  $("#btnHelp").onclick = () => openHelpFor(tab);
+  $("#btnFav").onclick = () => {
+    const f = new Set(JSON.parse(store.get("favs", "[]"))); f.has(r.name) ? f.delete(r.name) : f.add(r.name);
+    store.set("favs", JSON.stringify([...f])); $("#btnFav").classList.toggle("on", f.has(r.name));
+  };
   $("#btnRecalc").onclick = async () => {
     await api(`/api/uploads/${uid}/recalc`, { method: "POST" });
     delete cache[uid]; toast("재계산 완료"); showProject(uid, tab);
@@ -202,7 +234,9 @@ async function showProject(uid, tab) {
      chat: tabChat, report: tabReport, delay: tabDelay, whatif: tabWhatif, rels: tabRels, trades: tabTrades,
      risk: tabRisk, bench: tabBench, daily: tabDaily, health: tabHealth, forensic: tabForensic, predict: tabPredict,
      recovery: tabRecovery, evm: tabEvm, resources: tabResources, korea: tabKorea, lookahead: tabLookahead,
-     settings: tabSettings }[tab] || tabOverview)(el, r, uid);
+     settings: tabSettings, analysis: tabAnalysis }[tab] || tabOverview)(el, r, uid);
+  enhance(el);
+  maybeStartTour(tab);
 }
 
 function kpi(label, value, cls = "") {
@@ -291,7 +325,7 @@ function tabDcma(el, r) {
     $("#dcmaGuide").classList.remove("muted");
   };
   api(`/api/uploads/${uid}/dcma_guide`).then(showGuide);
-  $("#btnDcmaAi").onclick = () => withBusy($("#btnDcmaAi"), async () => showGuide(await api(`/api/uploads/${uid}/dcma_guide?ai=1`)));
+  $("#btnDcmaAi").onclick = async () => { const x = await runLong("AI가 조치안을 정리하는 중", "dcma", (signal) => api(`/api/uploads/${uid}/dcma_guide?ai=1`, { signal })); if (x) showGuide(x); };
   el.querySelectorAll("tr[data-i]").forEach((tr) => (tr.onclick = () => {
     const x = $(`#dx${tr.dataset.i}`); if (r.dcma[tr.dataset.i].items.length) x.hidden = !x.hidden;
   }));
@@ -355,9 +389,20 @@ function monthTicks(a, b) {
 
 // ---------------------------------------------------------------- 간트차트
 function tabGantt(el, r) {
+  const uid = el.dataset.uid;
+  const COLS = [["od", "원공기"], ["rd", "잔여"], ["st", "시작"], ["fn", "종료"], ["tf", "TF"]];
+  const hidden = new Set(JSON.parse(store.get("gcols", "[]")));
   el.innerHTML = `
+    <div class="row toolbar" style="margin-bottom:6px">
+      <select class="s" id="gView" aria-label="저장된 보기"><option value="">보기: 기본</option></select>
+      <button class="btn sm" id="gSaveView" data-need="editor" title="현재 필터·배율을 팀 공유 보기로 저장">보기 저장</button>
+      <label class="muted">베이스라인 <select class="s sm" id="gBl"><option value="target">P6 계획(Target)</option></select></label>
+      <label><input type="checkbox" id="fLines"> 최장경로 관계선</label>
+      <details class="cols"><summary class="btn sm">열 선택</summary><div class="menu">${COLS.map(([k, l]) => `<label><input type="checkbox" data-col="${k}" ${hidden.has(k) ? "" : "checked"}> ${l}</label>`).join("")}</div></details>
+      <span class="muted" style="font-size:12px">드래그: 이동 · Ctrl+휠: 확대 · ↑↓ Enter: 선택·상세</span>
+    </div>
     <div class="row" style="margin-bottom:10px">
-      <input class="s" id="q" placeholder="ID / 이름 검색" style="width:220px">
+      <input class="s" id="q" type="search" placeholder="ID / 이름 검색 ( / )" style="width:220px">
       <label><input type="checkbox" id="fCrit"> 주공정/최장경로만</label>
       ${highlight.size ? `<label><input type="checkbox" id="fHl" checked> AI 답변 작업만 (${highlight.size})</label>` : ""}
       <label><input type="checkbox" id="fInc" checked> 완료 제외</label>
@@ -368,12 +413,43 @@ function tabGantt(el, r) {
       <span><i style="background:var(--done)"></i>완료</span><span><i style="background:var(--bl);height:4px"></i>계획</span>
       <span><i style="background:#16a34a;width:2px"></i>Data Date</span></div>
     </div>
-    <div class="gantt">
-      <div class="g-left"><div class="g-row hdr"><div>ID</div><div>액티비티명</div><div>원공기</div><div>잔여</div><div>시작</div><div>종료</div><div>TF</div></div>
+    <div class="gantt ${[...hidden].map((k) => "hide-" + k).join(" ")}" style="grid-template-columns:${+store.get("gsplit", "640")}px 6px 1fr">
+      <div class="g-left"><div class="g-row hdr"><div>ID</div><div>액티비티명</div><div class="c-od">원공기</div><div class="c-rd">잔여</div><div class="c-st">시작</div><div class="c-fn">종료</div><div class="c-tf">TF</div></div>
         <div class="g-body" id="gl"><div class="g-rows" id="glr"></div></div></div>
-      <div class="g-right"><canvas class="g-head" id="gh"></canvas><div class="g-body" id="gr"><div id="grs"></div><canvas id="gc" style="position:sticky;top:0;left:0"></canvas></div></div>
+      <div class="g-split" id="gSplit" role="separator" aria-label="표 너비 조절" tabindex="0"></div>
+      <div class="g-right"><canvas class="g-head" id="gh"></canvas><div class="g-body" id="gr" tabindex="0" aria-label="간트 차트. 위아래 화살표로 작업 선택, Enter로 상세"><div id="grs"></div><canvas id="gc" style="position:sticky;top:0;left:0"></canvas></div></div>
     </div>
-    <div class="panel detail" id="det"><span class="muted">행을 클릭하면 선·후행 관계를 볼 수 있습니다.</span></div>`;
+    <div class="panel detail" id="det"><span class="muted">행을 클릭하면 선·후행 관계를 볼 수 있습니다. 더블클릭하면 상세 패널이 열립니다.</span></div>`;
+  let blMap = null; // 저장된 베이스라인 사용 시 code -> {start, finish}
+  api(`/api/uploads/${uid}/baselines`).then((bls) => { $("#gBl").insertAdjacentHTML("beforeend", bls.map((b) => `<option value="${b.upload_id}">${esc(b.label)} (DD ${b.data_date})</option>`).join("")); }).catch(() => {});
+  $("#gBl").onchange = async (e) => {
+    if (e.target.value === "target") blMap = null;
+    else { const b = await load(e.target.value); blMap = Object.fromEntries(b.result.activities.map((a) => [a.code, { s: a.start, f: a.finish }])); }
+    $("#fBl").checked = true; render();
+  };
+  el.querySelectorAll("[data-col]").forEach((c) => (c.onchange = () => {
+    c.checked ? hidden.delete(c.dataset.col) : hidden.add(c.dataset.col);
+    store.set("gcols", JSON.stringify([...hidden]));
+    COLS.forEach(([k]) => el.querySelector(".gantt").classList.toggle("hide-" + k, hidden.has(k)));
+  }));
+  // 저장된 보기
+  const views = [];
+  const loadViews = async () => {
+    views.splice(0, views.length, ...(await api(`/api/uploads/${uid}/views`).catch(() => [])));
+    $("#gView").innerHTML = `<option value="">보기: 기본</option>` + views.map((v) => `<option value="${v.id}">${esc(v.name)}</option>`).join("");
+  };
+  loadViews();
+  $("#gView").onchange = (e) => {
+    const v = views.find((x) => x.id === e.target.value); if (!v) return;
+    const c = v.config; $("#q").value = c.q || ""; $("#fCrit").checked = !!c.crit; $("#fInc").checked = c.inc !== false;
+    $("#fLines").checked = !!c.lines; $("#zoom").value = c.zoom || "1.2"; ppd = +$("#zoom").value; build();
+  };
+  $("#gSaveView").onclick = async () => {
+    const v = await ui.form("보기 저장", [{ name: "name", label: "보기 이름", required: true, placeholder: "예: 골조 주공정" }], { intro: "현재 검색어·필터·배율을 팀이 함께 쓰는 보기로 저장합니다." });
+    if (!v) return;
+    await api(`/api/uploads/${uid}/views`, { method: "POST", json: { name: v.name, config: { q: $("#q").value, crit: $("#fCrit").checked, inc: $("#fInc").checked, lines: $("#fLines").checked, zoom: $("#zoom").value } } });
+    toast("보기를 저장했습니다"); loadViews();
+  };
 
   const byId = Object.fromEntries(r.activities.map((a) => [a.id, a]));
   const RH = 26;
@@ -414,8 +490,8 @@ function tabGantt(el, r) {
       const top = (first + k) * RH;
       if (a.wbs !== undefined && !a.id) return `<div class="g-row wbs" style="top:${top}px"><div>${esc(a.wbs)}</div></div>`;
       const cls = `${a.critical || a.longest ? "crit" : ""} ${sel === a.id ? "sel" : ""}`;
-      return `<div class="g-row ${cls}" data-id="${a.id}" style="top:${top}px"><div>${esc(a.code)}</div><div class="nm" title="${esc(a.name)}">${esc(a.name)}</div>
-        <div class="num">${a.orig_dur}</div><div class="num">${a.rem_dur}</div><div>${a.start}</div><div>${a.finish}</div><div class="num">${fmtDays(a.tf)}</div></div>`;
+      return `<div class="g-row ${cls}" data-id="${a.id}" style="top:${top}px"><div>${a.longest ? "▲ " : ""}${esc(a.code)}</div><div class="nm" title="${esc(a.name)}">${esc(a.name)}</div>
+        <div class="num c-od">${a.orig_dur}</div><div class="num c-rd">${a.rem_dur}</div><div class="c-st">${a.start}</div><div class="c-fn">${a.finish}</div><div class="num c-tf">${fmtDays(a.tf)}</div></div>`;
     }).join("");
     // 캔버스
     const dpr = window.devicePixelRatio || 1;
@@ -423,11 +499,11 @@ function tabGantt(el, r) {
     gc.style.marginTop = -rows.length * RH + "px";
     gh.width = W * dpr; gh.height = 44 * dpr; gh.style.width = W + "px"; gh.style.height = "44px";
     const g = gc.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
-    const h = gh.getContext("2d"); h.setTransform(dpr, 0, 0, dpr, 0, 0); h.fillStyle = "#f9fafb"; h.fillRect(0, 0, W, 44);
+    const h = gh.getContext("2d"); h.setTransform(dpr, 0, 0, dpr, 0, 0); h.fillStyle = cssv("--head"); h.fillRect(0, 0, W, 44);
     const sx = gr.scrollLeft, sy = gr.scrollTop;
     const X = (t) => ((t - t0) / dayMs) * ppd - sx;
     // 눈금
-    h.font = "11px sans-serif"; h.fillStyle = "#374151"; g.strokeStyle = "#eef0f3";
+    h.font = "11px sans-serif"; h.fillStyle = cssv("--text"); g.strokeStyle = cssv("--line");
     const months = monthTicks(t0, t1);
     months.forEach((t) => {
       const x = X(t); if (x < -200 || x > W + 10) return;
@@ -447,9 +523,10 @@ function tabGantt(el, r) {
     // 행 배경 (WBS)
     for (let i = first; i < last; i++) {
       const a = rows[i]; const y = i * RH - sy;
-      if (!a.id) { g.fillStyle = "#f3f4f6"; g.fillRect(0, y, W, RH); continue; }
-      if (sel === a.id) { g.fillStyle = "#dbeafe"; g.fillRect(0, y, W, RH); }
-      const bl = $("#fBl").checked && a.bl_start && a.bl_finish;
+      if (!a.id) { g.fillStyle = cssv("--soft"); g.fillRect(0, y, W, RH); continue; }
+      if (sel === a.id) { g.fillStyle = cssv("--sel"); g.fillRect(0, y, W, RH); }
+      const blS = blMap ? blMap[a.code]?.s : a.bl_start, blF = blMap ? blMap[a.code]?.f : a.bl_finish;
+      const bl = $("#fBl").checked && blS && blF;
       const s = toT(a.start), f = toT(a.finish) + dayMs;
       const color = a.status_code === "TK_Complete" ? "#9ca3af" : a.critical || a.longest ? "#dc2626" : "#3b82f6";
       const by = y + (bl ? 5 : 7), bh = bl ? 10 : 12;
@@ -464,12 +541,27 @@ function tabGantt(el, r) {
           const lf = X(toT(a.late_finish) + dayMs); g.strokeStyle = "#9ca3af"; g.beginPath(); g.moveTo(x + w, by + bh / 2); g.lineTo(lf, by + bh / 2); g.stroke();
         }
       }
-      if (bl) { g.fillStyle = "#f59e0b"; const x = X(toT(a.bl_start)); g.fillRect(x, y + 18, Math.max(2, X(toT(a.bl_finish) + dayMs) - x), 4); }
-      if (ppd >= 1) { g.fillStyle = "#374151"; g.font = "11px sans-serif"; g.fillText(a.name, X(f) + 8, y + 17); }
+      if (bl) { g.fillStyle = "#f59e0b"; const x = X(toT(blS)); g.fillRect(x, y + 18, Math.max(2, X(toT(blF) + dayMs) - x), 4); }
+      if (ppd >= 1) { g.fillStyle = cssv("--text"); g.font = "11px sans-serif"; g.fillText(a.name, X(f) + 8, y + 17); }
     }
-    // 선택된 액티비티의 관계선
+    // 관계선 (선택 작업, 또는 최장경로 전체)
+    const idx = Object.fromEntries(rows.map((a, i) => [a.id, i]));
+    if ($("#fLines")?.checked) {
+      for (const a of rows) {
+        if (!a.id || !a.longest) continue;
+        for (const p of a.preds) { const pa = byId[p.id]; if (pa?.longest) drawRel(pa, a, p.type, "#b91c1c"); }
+      }
+    }
+    function drawRel(p, s, type, color = "#111827") {
+        if (idx[p.id] === undefined || idx[s.id] === undefined) return;
+        const x1 = X(toT(type[0] === "S" ? p.start : p.finish) + (type[0] === "S" ? 0 : dayMs));
+        const x2 = X(toT(type[1] === "S" ? s.start : s.finish) + (type[1] === "S" ? 0 : dayMs));
+        const y1 = idx[p.id] * RH - sy + 13, y2 = idx[s.id] * RH - sy + 13;
+        g.strokeStyle = color; g.lineWidth = 1; g.beginPath(); g.moveTo(x1, y1);
+        g.lineTo(x1 + 5, y1); g.lineTo(x1 + 5, y2); g.lineTo(x2, y2); g.stroke();
+        g.beginPath(); g.moveTo(x2, y2); g.lineTo(x2 - 4, y2 - 3); g.lineTo(x2 - 4, y2 + 3); g.fillStyle = color; g.fill();
+    }
     if (sel) {
-      const idx = Object.fromEntries(rows.map((a, i) => [a.id, i]));
       const a = byId[sel];
       const draw = (p, s, type) => {
         if (idx[p.id] === undefined || idx[s.id] === undefined) return;
@@ -493,6 +585,7 @@ function tabGantt(el, r) {
     sel = row.dataset.id; render(); detail(byId[sel]);
   });
   gc.addEventListener("click", (e) => {
+    if (gc._suppress) { gc._suppress = false; return; }
     const i = Math.floor((e.offsetY + gr.scrollTop) / RH);
     if (rows[i]?.id) { sel = rows[i].id; render(); detail(byId[sel]); }
   });
@@ -518,6 +611,50 @@ function tabGantt(el, r) {
   }
 
   ["q", "fCrit", "fInc", "fHl"].forEach((id) => $("#" + id)?.addEventListener("input", build));
+  $("#fLines").addEventListener("input", render);
+  // 더블클릭 → 상세 서랍
+  $("#glr").addEventListener("dblclick", (e) => { const row = e.target.closest("[data-id]"); if (row) openActivity(byId[row.dataset.id].code); });
+  gc.addEventListener("dblclick", (e) => { const i = Math.floor((e.offsetY + gr.scrollTop) / RH); if (rows[i]?.id) openActivity(rows[i].code); });
+  // 드래그 이동 + Ctrl/⌘ 휠 확대
+  let drag = null;
+  gc.addEventListener("mousedown", (e) => { drag = { x: e.clientX, y: e.clientY, sl: gr.scrollLeft, st: gr.scrollTop, moved: false }; });
+  window.addEventListener("mousemove", (e) => {
+    if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 4) { drag.moved = true; gc.style.cursor = "grabbing"; }
+    gr.scrollLeft = drag.sl - dx; gr.scrollTop = drag.st - dy;
+  });
+  window.addEventListener("mouseup", () => { if (drag?.moved) gc._suppress = true; drag = null; gc.style.cursor = ""; });
+  gr.addEventListener("wheel", (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    const rect = gr.getBoundingClientRect(), mx = e.clientX - rect.left, day = (gr.scrollLeft + mx) / ppd;
+    ppd = Math.min(8, Math.max(0.08, ppd * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
+    build(); gr.scrollLeft = day * ppd - mx;
+  }, { passive: false });
+  // 키보드 탐색
+  gr.addEventListener("keydown", (e) => {
+    const acts = rows.filter((x) => x.id); if (!acts.length) return;
+    let i = acts.findIndex((x) => x.id === sel);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault(); i = Math.max(0, Math.min(acts.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)));
+      sel = acts[i].id; const ri = rows.indexOf(acts[i]);
+      if (ri * RH < gr.scrollTop || ri * RH > gr.scrollTop + gr.clientHeight - RH * 2) gr.scrollTop = ri * RH - 100;
+      render(); detail(byId[sel]);
+    } else if (e.key === "Enter" && sel) { openActivity(byId[sel].code); }
+  });
+  // 표/차트 너비 조절
+  const split = $("#gSplit");
+  split.addEventListener("mousedown", (e) => {
+    e.preventDefault(); const g0 = el.querySelector(".gantt"), x0 = e.clientX, w0 = +store.get("gsplit", "640");
+    const mv = (ev) => { const w = Math.max(240, Math.min(1000, w0 + ev.clientX - x0)); g0.style.gridTemplateColumns = `${w}px 6px 1fr`; store.set("gsplit", String(w)); render(); };
+    const up = () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); };
+    window.addEventListener("mousemove", mv); window.addEventListener("mouseup", up);
+  });
+  split.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const w = Math.max(240, Math.min(1000, +store.get("gsplit", "640") + (e.key === "ArrowRight" ? 20 : -20)));
+    store.set("gsplit", String(w)); el.querySelector(".gantt").style.gridTemplateColumns = `${w}px 6px 1fr`; render();
+  });
   $("#fBl").addEventListener("input", render);
   $("#zoom").addEventListener("input", (e) => {
     const center = (gr.scrollLeft + gr.clientWidth / 2) / ppd;
@@ -559,7 +696,7 @@ function simpleList(xs) {
     ${xs.map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}</td><td>${x.start}</td><td>${x.finish}</td></tr>`).join("")}</tbody></table>`;
 }
 
-route();
+document.addEventListener("DOMContentLoaded", route);
 
 // ================================================================ AI·의사결정 기능
 const highlight = new Set();
@@ -671,11 +808,11 @@ async function tabReport(el, r, uid) {
   el.innerHTML = `${aiOffNote(st)}<div class="panel"><div class="row" style="justify-content:space-between">
     <h3 style="margin:0">월간 공정보고서</h3>
     <div class="row"><label><input type="checkbox" id="repAi" ${st.enabled ? "checked" : "disabled"}> AI 초안 작성</label>
-    <button class="btn primary" id="repGen">보고서 생성</button></div></div>
+    <button class="btn primary" id="repGen" data-need="editor">보고서 생성</button></div></div>
     <p class="muted">업데이트 비교(지연 원인), 주공정, 향후 1개월 작업, 리스크를 모아 보고서 초안을 만듭니다. 이전 업데이트는 같은 프로젝트 이름으로 자동 선택됩니다.</p>
     <div id="repBody"></div></div>`;
   draw(await api(`/api/uploads/${uid}/report`));
-  $("#repGen").onclick = () => withBusy($("#repGen"), async () => draw(await api(`/api/uploads/${uid}/report?ai=${$("#repAi").checked ? 1 : 0}`, { method: "POST" })));
+  $("#repGen").onclick = async () => { const ai_ = $("#repAi").checked; const x = await runLong(ai_ ? "AI가 보고서 초안을 작성하는 중" : "보고서 생성 중", "report" + ai_, (signal) => api(`/api/uploads/${uid}/report?ai=${ai_ ? 1 : 0}`, { method: "POST", signal })); if (x) draw(x); };
 }
 
 // ---------------------------------------------------------------- ④ 지연 원인
@@ -748,7 +885,7 @@ async function tabWhatif(el, r, uid, preset) {
     AI 어시스턴트에 "A3030을 10일 단축하면?"처럼 물어봐도 됩니다.</p>
     <div id="chgs"></div>
     <div class="row" style="margin-top:8px"><button class="btn" id="wAdd">+ 변경 추가</button><span class="spacer"></span>
-      <input class="s" id="wName" placeholder="시나리오 이름"><button class="btn" id="wSave">시나리오 저장</button>
+      <input class="s" id="wName" placeholder="시나리오 이름"><button class="btn" id="wSave" data-need="editor">시나리오 저장</button>
       <button class="btn" id="wXer">수정 XER 다운로드</button><button class="btn primary" id="wRun">재계산</button></div></div>
     <div class="panel" id="wRes" hidden></div>
     <div class="panel"><h3 style="margin-top:0">저장된 시나리오</h3><div id="wList" class="muted">불러오는 중...</div></div>`;
@@ -769,7 +906,7 @@ async function tabWhatif(el, r, uid, preset) {
         <td><button class="btn sm" data-load="${x.id}">불러오기</button> <button class="btn sm danger" data-del="${x.id}">삭제</button></td></tr>`).join("")}</tbody></table>` : "저장된 시나리오가 없습니다.";
     $("#wList").classList.toggle("muted", !sc.length);
     $("#wList").querySelectorAll("[data-load]").forEach((b) => (b.onclick = () => { chs = sc.find((x) => x.id === b.dataset.load).changes.map((c) => ({ ...c })); draw(); $("#wRun").click(); }));
-    $("#wList").querySelectorAll("[data-del]").forEach((b) => (b.onclick = async () => { if (confirm("삭제할까요?")) { await api(`/api/scenarios/${b.dataset.del}`, { method: "DELETE" }); loadList(); } }));
+    $("#wList").querySelectorAll("[data-del]").forEach((b) => (b.onclick = async () => { if (await ui.confirm("이 시나리오를 삭제할까요?", { ok: "삭제", danger: true })) { await api(`/api/scenarios/${b.dataset.del}`, { method: "DELETE" }); loadList(); } }));
   };
   $("#wAdd").onclick = () => { chs.push({ op: "set_duration" }); draw(); };
   $("#wRun").onclick = () => withBusy($("#wRun"), async () => {
@@ -798,7 +935,7 @@ async function tabRels(el, r, uid) {
     <div class="row"><button class="btn" id="rAi" ${st.enabled ? "" : "disabled"}>✦ AI로 다시 추천</button></div></div>
     <p class="muted">선행 또는 후행이 없는 작업(Open End)에 연결할 관계를 추천합니다. 승인한 항목만 What-if로 검증하고, 수정된 XER을 내려받아 P6에 반영하세요.</p>
     <div id="rBody" class="muted">분석 중...</div>
-    <div class="row end"><button class="btn" id="rTest">선택 항목 What-if 검증</button><button class="btn" id="rSave">시나리오로 저장</button><button class="btn primary" id="rXer">선택 반영 XER 다운로드</button></div></div>
+    <div class="row end"><button class="btn" id="rTest">선택 항목 What-if 검증</button><button class="btn" id="rSave" data-need="editor">시나리오로 저장</button><button class="btn primary" id="rXer">선택 반영 XER 다운로드</button></div></div>
     <div class="panel" id="rRes" hidden></div>`;
   let items = [];
   const draw = (d) => {
@@ -813,7 +950,7 @@ async function tabRels(el, r, uid) {
   const chosen = () => [...el.querySelectorAll(".rc:checked")].map((c) => items[+c.dataset.i])
     .map((x) => ({ op: "add_rel", pred: x.pred, succ: x.succ, type: x.type, lag: x.lag }));
   draw(await api(`/api/uploads/${uid}/rel_suggest`));
-  $("#rAi").onclick = () => withBusy($("#rAi"), async () => draw(await api(`/api/uploads/${uid}/rel_suggest?ai=1`)));
+  $("#rAi").onclick = async () => { const x = await runLong("AI가 관계를 추천하는 중", "rels", (signal) => api(`/api/uploads/${uid}/rel_suggest?ai=1`, { signal })); if (x) draw(x); };
   $("#rTest").onclick = () => withBusy($("#rTest"), async () => {
     const c = chosen(); if (!c.length) return toast("항목을 선택하세요");
     const w = await api(`/api/uploads/${uid}/whatif`, { method: "POST", json: { changes: c } });
@@ -833,7 +970,7 @@ async function tabRels(el, r, uid) {
 async function tabTrades(el, r, uid) {
   const st = await getAiStatus();
   el.innerHTML = `${aiOffNote(st)}<div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">공종 분류 · 명칭 표준화</h3>
-    <div class="row"><button class="btn" id="tRule">규칙으로 재분류</button><button class="btn primary" id="tAi" ${st.enabled ? "" : "disabled"}>✦ AI 분류·표준화</button></div></div>
+    <div class="row"><button class="btn" id="tRule" data-need="editor">규칙으로 재분류</button><button class="btn primary" id="tAi" data-need="editor" ${st.enabled ? "" : "disabled"}>✦ AI 분류·표준화</button></div></div>
     <p class="muted">액티비티를 표준 공종으로 분류합니다. 분류 결과는 검색, 리스크, 벤치마크(프로젝트 간 실적 비교)에 쓰입니다.</p><div id="tBody">불러오는 중...</div></div>`;
   const draw = (d) => {
     const by = Object.fromEntries(r.activities.map((a) => [a.code, a]));
@@ -845,7 +982,7 @@ async function tabTrades(el, r, uid) {
   };
   draw(await api(`/api/uploads/${uid}/trades`));
   $("#tRule").onclick = () => withBusy($("#tRule"), async () => draw(await api(`/api/uploads/${uid}/trades?ai=0`, { method: "POST" })));
-  $("#tAi").onclick = () => withBusy($("#tAi"), async () => draw(await api(`/api/uploads/${uid}/trades?ai=1`, { method: "POST" })));
+  $("#tAi").onclick = async () => { const x = await runLong("AI가 공종을 분류하는 중", "trades", (signal) => api(`/api/uploads/${uid}/trades?ai=1`, { method: "POST", signal })); if (x) draw(x); };
 }
 
 // ---------------------------------------------------------------- ⑧⑨ 리스크
@@ -893,7 +1030,7 @@ async function tabDaily(el, r, uid) {
       ${data.items.length ? `<table class="t"><thead><tr><th></th><th>ID</th><th>작업</th><th>현재</th><th>구분</th><th>날짜</th><th class="num">공정률</th><th>근거</th><th class="num">신뢰도</th></tr></thead><tbody>
       ${data.items.map((x, i) => `<tr><td><input type="checkbox" class="dc" data-i="${i}" ${x.confidence >= 70 ? "checked" : ""}></td><td>${esc(x.code)}</td><td>${esc(x.name)}</td><td>${esc(x.current)}</td>
         <td>${esc(x.event)}</td><td>${esc(x.date || "")}</td><td class="num">${x.pct ?? ""}</td><td class="wrap muted">${esc(x.evidence)}</td><td class="num">${x.confidence}</td></tr>`).join("")}</tbody></table>
-      <div class="row end"><button class="btn" id="dTest">반영 결과 미리보기</button><button class="btn" id="dSave">시나리오로 저장</button><button class="btn primary" id="dXer">진도 반영 XER 다운로드</button></div>`
+      <div class="row end"><button class="btn" id="dTest">반영 결과 미리보기</button><button class="btn" id="dSave" data-need="editor">시나리오로 저장</button><button class="btn primary" id="dXer">진도 반영 XER 다운로드</button></div>`
       : `<p class="muted">액티비티와 연결되는 진도 정보를 찾지 못했습니다.</p>`}`;
     if (!data.items.length) return;
     $("#dTest").onclick = () => withBusy($("#dTest"), async () => {
@@ -928,6 +1065,8 @@ function lineChart(cv, labels, series, opts = {}) {
     g.stroke(); g.setLineDash([]);
     if (s.dots) s.values.forEach((v, i) => { if (v !== null && v !== undefined) { g.beginPath(); g.arc(X(i), Y(v), 3.5, 0, 7); g.fill(); } });
   });
+  if (opts.yTitle) { g.save(); g.fillStyle = "#6b7280"; g.translate(10, pad.t + 60); g.rotate(-Math.PI / 2); g.restore(); }
+  attachTooltip(cv, labels, series, opts.fmt || ((v) => (typeof v === "number" ? Math.round(v * 100) / 100 : v)));
 }
 const legend = (items) => `<div class="legend">${items.map(([c, l]) => `<span><i style="background:${c}"></i>${l}</span>`).join("")}</div>`;
 const signed = (v) => (v > 0 ? "+" : "") + v;
@@ -983,9 +1122,9 @@ async function tabForensic(el, r, uid) {
     $("#fBody").innerHTML = html;
     const base = tr.length ? Date.parse(tr[0].finish) : 0;
     lineChart($("#trendCv"), tr.map((x) => x.data_date.slice(2)), [
-      { color: "#dc2626", values: tr.map((x) => Math.round((Date.parse(x.finish) - base) / 864e5)), dots: true },
-      { color: "#2563eb", values: tr.map((x) => x.health), dots: true, dash: [4, 3] },
-      { color: "#16a34a", values: tr.map((x) => x.progress), dots: true, dash: [2, 3] }], { left: 36 });
+      { name: "준공 변동(일)", color: "#dc2626", values: tr.map((x) => Math.round((Date.parse(x.finish) - base) / 864e5)), dots: true },
+      { name: "건전성", color: "#2563eb", values: tr.map((x) => x.health), dots: true, dash: [4, 3] },
+      { name: "공정률 %", color: "#16a34a", values: tr.map((x) => x.progress), dots: true, dash: [2, 3] }], { left: 36 });
     el.querySelectorAll(".chip.filter").forEach((ch) => (ch.onclick = () => {
       el.querySelectorAll(".chip.filter").forEach((x) => x.classList.toggle("on", x === ch));
       el.querySelectorAll("#chgTable tbody tr").forEach((tr) => (tr.hidden = ch.dataset.cat && tr.dataset.cat !== ch.dataset.cat));
@@ -998,7 +1137,7 @@ async function tabForensic(el, r, uid) {
 async function tabRisk(el, r, uid) {
   const st = await getAiStatus();
   el.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">리스크 레지스터</h3>
-      <div class="row"><button class="btn" id="rkExtract" ${st.enabled ? "" : "disabled title='AI 미설정'"}>✦ 문서에서 리스크 찾기</button><button class="btn primary" id="rkAdd">+ 리스크 추가</button></div></div>
+      <div class="row"><button class="btn" id="rkExtract" data-need="editor" ${st.enabled ? "" : "disabled title='AI 미설정'"}>✦ 문서에서 리스크 찾기</button><button class="btn primary" id="rkAdd" data-need="editor">+ 리스크 추가</button></div></div>
       <p class="muted">리스크(아직 일어나지 않은 사건)를 영향받는 액티비티에 연결하면 몬테카를로 시뮬레이션에 반영됩니다. 노출도 = 확률 × 평균 영향일.</p>
       <div id="rkList"></div></div>
     <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">준공 리스크 시뮬레이션</h3>
@@ -1027,7 +1166,7 @@ async function tabRisk(el, r, uid) {
         <td><button class="btn sm" data-edit="${x.id}">수정</button> <button class="btn sm danger" data-rm="${x.id}">삭제</button></td></tr>`).join("")}</tbody></table>`
       : `<p class="muted">등록된 리스크가 없습니다.</p>`;
     $("#rkList").querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => openForm(list.find((x) => x.id === b.dataset.edit))));
-    $("#rkList").querySelectorAll("[data-rm]").forEach((b) => (b.onclick = async () => { if (confirm("삭제할까요?")) { await api(`/api/uploads/${uid}/risks/${b.dataset.rm}`, { method: "DELETE" }); load(); } }));
+    $("#rkList").querySelectorAll("[data-rm]").forEach((b) => (b.onclick = async () => { if (await ui.confirm("이 리스크를 삭제할까요?", { ok: "삭제", danger: true })) { await api(`/api/uploads/${uid}/risks/${b.dataset.rm}`, { method: "DELETE" }); load(); } }));
   };
   let editing = null;
   const openForm = (x = {}) => {
@@ -1051,8 +1190,9 @@ async function tabRisk(el, r, uid) {
       $("#dlgExtract").close(); load(); toast("등록했습니다");
     });
   });
-  $("#simRun").onclick = () => withBusy($("#simRun"), async () => {
-    const m = await api(`/api/uploads/${uid}/simulate?n=${$("#simN").value}&risks=${$("#simRisk").checked ? 1 : 0}&uncertainty=${$("#simUnc").checked ? 1 : 0}`);
+  $("#simRun").onclick = async () => {
+    const m = await runLong(`몬테카를로 시뮬레이션 ${$("#simN").value}회`, "sim" + $("#simN").value, (signal) => api(`/api/uploads/${uid}/simulate?n=${$("#simN").value}&risks=${$("#simRisk").checked ? 1 : 0}&uncertainty=${$("#simUnc").checked ? 1 : 0}`, { signal }));
+    if (!m) return;
     const maxImp = Math.max(1, ...m.risk_tornado.map((t) => t.impact_days));
     $("#simBody").classList.remove("muted");
     $("#simBody").innerHTML = `<div class="kpis">${kpi("결정론적 준공", m.deterministic)}${kpi("P50", m.p50)}${kpi("P80", m.p80, "crit")}${kpi("P90", m.p90)}
@@ -1062,7 +1202,7 @@ async function tabRisk(el, r, uid) {
       <div><h4>작업 공기 민감도 (상관계수)</h4>${m.activity_tornado.map((t) => `<div class="hbar"><span title="${esc(t.label)}">${esc(t.label)}</span><div><i style="width:${100 * t.correlation}%;background:var(--bar)"></i></div><b>${t.correlation}</b></div>`).join("") || '<p class="muted">없음</p>'}</div></div>
       <h4>주공정 지수</h4><table class="t"><tbody>${m.criticality.slice(0, 12).map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}</td><td class="num">${x.index}%</td></tr>`).join("")}</tbody></table>`;
     drawHist($("#mcHist"), m.histogram);
-  });
+  };
   load();
 }
 
@@ -1092,9 +1232,10 @@ async function tabRecovery(el, r, uid) {
       <button class="btn primary" id="rvRun">탐색</button></div>
     <details style="margin-top:8px"><summary class="muted">작업별 일당 단축 비용 입력 (선택)</summary><textarea id="rvCost" rows="3" style="width:100%" placeholder="A2010=3&#10;A3030=1.5"></textarea></details></div>
     <div id="rvOut"></div>`;
-  $("#rvRun").onclick = () => withBusy($("#rvRun"), async () => {
+  $("#rvRun").onclick = async () => {
     const costs = Object.fromEntries($("#rvCost").value.split("\n").map((l) => l.split("=").map((x) => x.trim())).filter((x) => x.length === 2 && x[1]));
-    const res = await api(`/api/uploads/${uid}/recovery`, { method: "POST", json: { days: +$("#rvDays").value, max_ratio: +$("#rvRatio").value, costs, exclude: $("#rvEx").value.split(/[,\s]+/).filter(Boolean) } });
+    const res = await runLong(`${$("#rvDays").value}일 만회안 탐색 중 (3가지 전략)`, "recovery", (signal) => api(`/api/uploads/${uid}/recovery`, { method: "POST", signal, json: { days: +$("#rvDays").value, max_ratio: +$("#rvRatio").value, costs, exclude: $("#rvEx").value.split(/[,\s]+/).filter(Boolean) } }));
+    if (!res) return;
     $("#rvOut").innerHTML = `<p class="muted">${esc(res.note)}</p><div class="grid3">${res.options.map((o, i) => `<div class="panel option ${o.achieved ? "" : "dim"}">
       <div class="row" style="justify-content:space-between"><b>${esc(o.policy)}</b>${i === 0 && o.achieved ? '<span class="tag ok">추천</span>' : ""}</div>
       <div class="big">${o.gained_days}<small>일 만회</small></div><div class="muted">목표 ${o.target_days}일 ${o.achieved ? "달성" : "미달"} · 상대 비용 ${o.relative_cost}${o.finish_after ? ` · 준공 ${o.finish_after}` : ""}</div>
@@ -1106,7 +1247,7 @@ async function tabRecovery(el, r, uid) {
       const o = res.options[+b.dataset.sv];
       await api(`/api/uploads/${uid}/scenarios`, { method: "POST", json: { name: `만회안 ${o.policy} ${o.gained_days}일`, kind: "만회안", changes: o.changes } }); toast("저장했습니다");
     }));
-  });
+  };
 }
 
 // ---------------------------------------------------------------- 베이스라인·EVM
@@ -1116,7 +1257,7 @@ async function tabEvm(el, r, uid) {
   el.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><div class="row"><b>베이스라인</b>
       <select class="s" id="blSel"><option value="target">P6 계획(Target) 날짜</option>${bls.map((b) => `<option value="${b.id}">${esc(b.label)} (DD ${b.data_date})</option>`).join("")}</select></div>
       <div class="row"><select class="s" id="blSrc">${same.map((u) => `<option value="${u.id}">${u.data_date} · ${esc(u.note || u.filename)}</option>`).join("")}</select>
-      <input class="s" id="blLabel" placeholder="이름 (예: 최초 승인)"><button class="btn" id="blAdd">베이스라인 지정</button></div></div></div>
+      <input class="s" id="blLabel" placeholder="이름 (예: 최초 승인)"><button class="btn" id="blAdd" data-need="editor">베이스라인 지정</button></div></div></div>
     <div id="evBody"></div><div id="varBody"></div>`;
   $("#blAdd").onclick = async () => { await api(`/api/uploads/${uid}/baselines`, { method: "POST", json: { upload_id: $("#blSrc").value, label: $("#blLabel").value } }); toast("지정했습니다"); tabEvm(el, r, uid); };
   const draw = async () => {
@@ -1135,8 +1276,8 @@ async function tabEvm(el, r, uid) {
       const hist = Object.fromEntries((e.history || []).map((h) => [h.date, h]));
       const near = (key) => labels.map((d, i) => { const h = (e.history || []).find((x) => x.date >= d && (i + 1 >= labels.length || x.date < labels[i + 1])); return h ? h[key] : null; });
       lineChart($("#evCv"), labels.map((d) => d.slice(2)), [
-        { color: "#f59e0b", values: e.curve.map((c) => c.pv) }, { color: "#3b82f6", values: e.curve.map((c) => c.forecast), dash: [5, 4] },
-        { color: "#16a34a", values: near("ev"), dots: true }, { color: "#dc2626", values: near("ac"), dots: true }], { fmt: won, left: 52 });
+        { name: "PV", color: "#f59e0b", values: e.curve.map((c) => c.pv) }, { name: "예측", color: "#3b82f6", values: e.curve.map((c) => c.forecast), dash: [5, 4] },
+        { name: "EV", color: "#16a34a", values: near("ev"), dots: true }, { name: "AC", color: "#dc2626", values: near("ac"), dots: true }], { fmt: won, left: 52 });
     }
     $("#varBody").innerHTML = `<div class="panel"><h3 style="margin-top:0">베이스라인 대비 편차 <span class="muted" style="font-size:13px">(기준: ${esc(v.source)})</span></h3>
       <div class="kpis">${kpi("베이스라인 준공", v.bl_project_finish || "-")}${kpi("현재 예상 준공", v.project_finish)}${kpi("준공 편차", v.project_var === null ? "-" : signed(v.project_var) + "일", v.project_var > 0 ? "crit" : "")}${kpi("지연 작업 수", v.late_count)}</div>
@@ -1180,7 +1321,7 @@ async function tabKorea(el, r, uid) {
     <div class="panel"><h3 style="margin-top:0">기상 비작업일 기반 적정 공기 검토</h3>
       <p class="muted">월별 기상 비작업일(강우·강설·한파·폭염 등)을 현장 지역의 기상청 통계로 산정해 입력하세요. 필요 비작업일보다 캘린더 비작업일이 적은 달은 작업일을 과다하게 잡은 것입니다. 기준 캘린더: ${esc(k.default_calendar || "-")}</p>
       <div class="months">${Array.from({ length: 12 }, (_, i) => `<label>${i + 1}월<input class="s" type="number" step="0.5" min="0" data-m="${i + 1}" value="${k.weather_days[i + 1] ?? ""}"></label>`).join("")}</div>
-      <div class="row end"><button class="btn primary" id="kSave">저장 후 재검토</button></div>
+      <div class="row end"><button class="btn primary" id="kSave" data-need="editor">저장 후 재검토</button></div>
       <table class="t"><thead><tr><th>월</th><th class="num">일수</th><th class="num">주말·공휴일</th><th class="num">기상</th><th class="num">필요 비작업일</th><th class="num">캘린더 비작업일</th><th class="num">부족</th></tr></thead><tbody>
       ${k.review.months.map((m) => `<tr><td>${m.month}</td><td class="num">${m.days}</td><td class="num">${m.holidays_weekends}</td><td class="num">${m.weather}</td><td class="num">${m.required_nonwork}</td><td class="num">${m.calendar_nonwork}</td>
         <td class="num" style="color:${m.shortage > 0 ? "var(--crit)" : ""}">${m.shortage || ""}</td></tr>`).join("")}</tbody></table>
@@ -1224,20 +1365,26 @@ async function tabLookahead(el, r, uid) {
   const save = (kind, body) => api(`/api/uploads/${uid}/records/${kind}`, { method: "POST", json: body });
   const reload = () => tabLookahead(el, r, uid);
   el.querySelectorAll("[data-commit]").forEach((b) => (b.onclick = async () => {
-    const company = prompt(`${b.dataset.commit} 이번 주 수행 협력업체`, store.get("lastCompany")); if (company === null) return;
-    store.set("lastCompany", company); await save("commit", { week: thisWeek, code: b.dataset.commit, name: b.dataset.name, company, done: false }); reload();
+    const v = await ui.form(`${b.dataset.commit} 이번 주 약속 등록`, [
+      { name: "company", label: "수행 협력업체", value: store.get("lastCompany"), required: true },
+      { name: "note", label: "메모(선택)", placeholder: "예: 2층 구간 완료 목표" }], { submit: "등록" });
+    if (!v) return;
+    store.set("lastCompany", v.company); await save("commit", { week: thisWeek, code: b.dataset.commit, name: b.dataset.name, company: v.company, note: v.note, done: false }); reload();
   }));
   const commits = la.rows.flatMap((a) => a.commitments);
   el.querySelectorAll("[data-done]").forEach((c) => (c.onchange = async () => { const x = commits.find((y) => y.id === c.dataset.done); await save("commit", { ...x, done: c.checked, reason: c.checked ? "" : x.reason }); reload(); }));
   el.querySelectorAll("[data-reason]").forEach((c) => (c.onchange = async () => { const x = commits.find((y) => y.id === c.dataset.reason); await save("commit", { ...x, reason: c.value }); }));
   el.querySelectorAll("[data-con]").forEach((b) => (b.onclick = async () => {
-    const type = prompt("제약 유형 (도면/자재/인력/장비/허가/선행작업/기타)", "자재"); if (!type) return;
-    const desc = prompt("내용") || ""; const due = prompt("해소 기한 (YYYY-MM-DD)", thisWeek) || "";
-    try { await save("constraint", { code: b.dataset.con, type, desc, due, status: "미해결" }); reload(); } catch (e) { toast(e.message); }
+    const v = await ui.form(`${b.dataset.con} 제약 등록`, [
+      { name: "type", label: "유형", type: "select", options: ["도면", "자재", "인력", "장비", "허가", "선행작업", "기타"], value: "자재" },
+      { name: "desc", label: "내용", required: true, placeholder: "예: 철근 D25 입고 대기" },
+      { name: "owner", label: "담당" }, { name: "due", label: "해소 기한", type: "date", value: thisWeek }], { submit: "등록" });
+    if (!v) return;
+    try { await save("constraint", { code: b.dataset.con, ...v, status: "미해결" }); reload(); } catch (e) { toast(e.message); }
   }));
   el.querySelectorAll("[data-cst]").forEach((sel) => (sel.onchange = async () => { const x = la.constraints.find((y) => y.id === sel.dataset.cst); await save("constraint", { ...x, status: sel.value }); }));
   el.querySelectorAll("[data-cdel]").forEach((b) => (b.onclick = async () => { await api(`/api/uploads/${uid}/records/constraint/${b.dataset.cdel}`, { method: "DELETE" }); reload(); }));
-  if (p.weeks.length) lineChart($("#ppcCv"), p.weeks.map((w) => w.week.slice(5)), [{ color: "#2563eb", values: p.weeks.map((w) => w.ppc), dots: true }, { color: "#9ca3af", values: p.weeks.map(() => 80), dash: [4, 4] }], { min: 0, max: 100, left: 30 });
+  if (p.weeks.length) lineChart($("#ppcCv"), p.weeks.map((w) => w.week.slice(5)), [{ name: "PPC %", color: "#2563eb", values: p.weeks.map((w) => w.ppc), dots: true }, { name: "목표 80%", color: "#9ca3af", values: p.weeks.map(() => 80), dash: [4, 4] }], { min: 0, max: 100, left: 30 });
 }
 
 // ---------------------------------------------------------------- 설정
@@ -1247,7 +1394,7 @@ async function tabSettings(el, r, uid) {
   el.innerHTML = `<div class="panel"><h3 style="margin-top:0">일정 계산 옵션</h3>
       <label><input type="checkbox" id="optPO" ${st.schedule_options.progress_override ? "checked" : ""}> Progress Override (착수된 작업은 선행 논리를 무시하고 Data Date부터 잔여 작업 진행)</label>
       <p class="muted">기본값은 Retained Logic(P6 기본)입니다. P6의 Schedule Options와 같게 맞추면 'P6 일정 비교' 일치율이 올라갑니다. 변경하면 이 프로젝트의 모든 업데이트를 다시 계산합니다.</p>
-      <button class="btn primary" id="optSave">저장 및 재계산</button></div>
+      <button class="btn primary" id="optSave" data-need="editor">저장 및 재계산</button></div>
     <div class="panel"><h3 style="margin-top:0">건전성 지표 기준값 (이 프로젝트)</h3>
       <p class="muted">비워 두면 팀 기본값(${Object.keys(st.team_metric_overrides).length ? "관리자 설정" : "표준값"})을 씁니다. 가중치 0은 점수에서 제외합니다.</p>
       <div class="scroll"><table class="t"><thead><tr><th>ID</th><th>그룹</th><th>항목</th><th>비교</th><th>기본 기준</th><th>기준</th><th>가중치</th><th>사용</th></tr></thead><tbody>
@@ -1255,7 +1402,7 @@ async function tabSettings(el, r, uid) {
         <td><input class="s" style="width:70px" data-id="${d.id}" data-k="threshold" value="${o.threshold ?? ""}" ${d.cmp === "info" ? "disabled" : ""}></td>
         <td><input class="s" style="width:60px" data-id="${d.id}" data-k="weight" value="${o.weight ?? ""}" placeholder="${d.weight}"></td>
         <td><input type="checkbox" data-id="${d.id}" data-k="enabled" ${o.enabled === false ? "" : "checked"}></td></tr>`; }).join("")}</tbody></table></div>
-      <div class="row end"><button class="btn primary" id="mSave">기준값 저장</button></div></div>`;
+      <div class="row end"><button class="btn primary" id="mSave" data-need="editor">기준값 저장</button></div></div>`;
   $("#optSave").onclick = () => withBusy($("#optSave"), async () => { await api(`/api/uploads/${uid}/settings`, { method: "PUT", json: { schedule_options: { progress_override: $("#optPO").checked } } }); cache = {}; toast("재계산했습니다"); });
   $("#mSave").onclick = () => withBusy($("#mSave"), async () => {
     const out = {};
@@ -1291,7 +1438,7 @@ async function showGenerate() {
     await withBusy($("#gRun"), async () => {
       try {
         const res = await api("/api/generate", { method: "POST", body: fd });
-        dlg.close(); if (res.assumptions?.length) alert("AI 가정 사항:\n- " + res.assumptions.join("\n- "));
+        dlg.close(); if (res.assumptions?.length) ui.notice("AI가 사용한 가정", `<ul>${res.assumptions.map((x) => `<li>${esc(x)}</li>`).join("")}</ul><p class="muted">초안입니다. 공기와 논리를 반드시 검토하세요.</p>`);
         location.hash = `#/p/${res.id}/gantt`;
       } catch (err) { $("#gErr").textContent = err.message; }
     }).catch(() => {});
@@ -1326,9 +1473,12 @@ function showLogin() {
 let me = null;
 async function refreshMe() {
   try { me = await (await fetch("/api/me")).json(); } catch { me = null; }
+  document.body.dataset.role = me?.role || "admin"; applyRole();
   const box = $("#userBox"); if (!box) return;
-  box.innerHTML = me?.username ? `<span>${esc(me.username)} <span class="tag">${me.role}</span></span>${me.role === "admin" ? ' <a href="#/admin">관리</a>' : ""} <a href="#" id="lnkLogout">로그아웃</a>`
-    : me?.mode === "open" ? '<a href="#/admin">관리</a>' : "";
+  const roleKo = { viewer: "조회", editor: "편집", admin: "관리자" };
+  box.innerHTML = `<a href="#/learn">🎓 학습</a><button class="linkbtn" onclick="toggleTheme()" title="밝게/어둡게">◐ 테마</button><button class="linkbtn" onclick="showShortcuts()">⌨ 단축키</button>`
+    + (me?.username ? `<span>${esc(me.username)} <span class="tag">${roleKo[me.role]}</span></span>${me.role === "admin" ? ' <a href="#/admin">관리</a>' : ""} <a href="#" id="lnkLogout">로그아웃</a>`
+    : me?.mode === "open" ? '<a href="#/admin">관리</a>' : "");
   $("#lnkLogout")?.addEventListener("click", async (e) => { e.preventDefault(); await fetch("/api/logout", { method: "POST", headers: { "X-Requested-With": "fetch" } }); location.reload(); });
 }
 
@@ -1358,7 +1508,7 @@ async function showAdmin() {
   const reload = () => showAdmin();
   view.querySelectorAll("[data-role]").forEach((s) => (s.onchange = async () => { try { await api(`/api/admin/users/${encodeURIComponent(s.dataset.role)}`, { method: "PUT", json: { role: s.value } }); toast("변경했습니다"); } catch (e) { reload(); } }));
   view.querySelectorAll("[data-act]").forEach((b) => (b.onclick = async () => { await api(`/api/admin/users/${encodeURIComponent(b.dataset.act)}`, { method: "PUT", json: { active: b.dataset.v === "1" } }).catch(() => {}); reload(); }));
-  view.querySelectorAll("[data-pw]").forEach((b) => (b.onclick = async () => { const pw = prompt("새 비밀번호 (10자 이상)"); if (pw) { await api(`/api/admin/users/${encodeURIComponent(b.dataset.pw)}`, { method: "PUT", json: { password: pw } }).catch(() => {}); toast("변경했습니다"); } }));
+  view.querySelectorAll("[data-pw]").forEach((b) => (b.onclick = async () => { const v = await ui.form(`${b.dataset.pw} 비밀번호 재설정`, [{ name: "pw", label: "새 비밀번호 (10자 이상)", type: "password", required: true }]); const pw = v?.pw; if (pw) { await api(`/api/admin/users/${encodeURIComponent(b.dataset.pw)}`, { method: "PUT", json: { password: pw } }).catch(() => {}); toast("변경했습니다"); } }));
   $("#nAdd")?.addEventListener("click", async () => { await api("/api/admin/users", { method: "POST", json: { username: $("#nu").value, password: $("#np").value, role: $("#nr").value } }).catch(() => {}); reload(); });
   $("#hSave").onclick = async () => {
     const hs = $("#exHol").value.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => ({ date: l.slice(0, 10), name: l.slice(11).trim() }));
@@ -1395,3 +1545,38 @@ async function showPrint(uid) {
 }
 
 document.addEventListener("DOMContentLoaded", refreshMe);
+
+// ================================================================ 3차: 화면 통합
+function subTabs(el, items, key) {
+  const cur = sessionStorage.getItem(key) || items[0][0];
+  el.innerHTML = `<div class="seg-tabs" role="tablist">${items.map(([k, l]) => `<button role="tab" aria-selected="${k === cur}" class="${k === cur ? "on" : ""}" data-k="${k}">${l}</button>`).join("")}</div><div class="sub"></div>`;
+  el.querySelectorAll(".seg-tabs button").forEach((b) => (b.onclick = () => { sessionStorage.setItem(key, b.dataset.k); subTabs(el, items, key); }));
+  const it = items.find(([k]) => k === cur) || items[0];
+  const sub = el.querySelector(".sub"); sub.dataset.uid = el.dataset.uid;
+  it[2](sub);
+}
+async function tabAnalysis(el, r, uid) {
+  subTabs(el, [["delay", "지연 원인", (s) => tabDelay(s, r, uid)], ["forensic", "변경 로그·압축·추세", (s) => tabForensic(s, r, uid)]], "sub:analysis");
+}
+const _tabHealthOnly = tabHealth;
+tabHealth = async function (el, r, uid) {
+  subTabs(el, [["score", "건전성 점수 (34개 지표)", (s) => _tabHealthOnly(s, r, uid)], ["dcma", "DCMA 14-Point와 조치 가이드", (s) => tabDcma(s, r)]], "sub:health");
+};
+const _tabRiskOnly = tabRisk;
+tabRisk = async function (el, r, uid) {
+  subTabs(el, [["reg", "리스크 레지스터·시뮬레이션", (s) => _tabRiskOnly(s, r, uid)], ["pred", "지연 예측·위험 점수", (s) => tabPredict(s, r, uid)]], "sub:risk");
+};
+
+// ---------------------------------------------------------------- ⑦ 홈: 오늘 확인할 것 + 관심 프로젝트
+async function renderInbox(container) {
+  const items = await api("/api/inbox").catch(() => []);
+  const favs = JSON.parse(store.get("favs", "[]"));
+  const mine = favs.length ? items.filter((x) => favs.includes(x.project)) : items;
+  const rest = favs.length ? items.filter((x) => !favs.includes(x.project)) : [];
+  const row = (x) => `<a class="inbox-item ${x.level}" href="#/p/${x.uid}/${x.tab}"><span class="sev" aria-label="${x.level === "high" ? "높음" : "보통"}">${x.level === "high" ? "✕" : "!"}</span>
+    <b>${esc(x.project)}</b><span>${esc(x.text)}</span><span class="go">→</span></a>`;
+  container.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">오늘 확인할 것 <span class="muted">(${items.length})</span></h3>
+      <span class="muted" style="font-size:12px">${favs.length ? "★ 관심 프로젝트 우선" : "프로젝트 이름 옆 ★로 관심 프로젝트를 지정하세요"}</span></div>
+    ${items.length ? `<div class="inbox">${mine.map(row).join("")}${rest.length ? `<details><summary class="muted">다른 프로젝트 ${rest.length}건</summary>${rest.map(row).join("")}</details>` : ""}</div>`
+      : '<p class="muted">확인할 항목이 없습니다. 👍</p>'}</div>`;
+}
