@@ -84,6 +84,9 @@ def project_role(user: dict, project: str) -> str | None:
 
 
 def can_write(user: dict, project: str) -> bool:
+    from .package import is_ref
+    if is_ref(project):          # 참조 프로젝트(남의 프로젝트를 받아 온 것)는 누구도 편집하지 않음
+        return False
     return project_role(user, project) is not None
 
 

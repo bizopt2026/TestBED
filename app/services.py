@@ -1029,6 +1029,7 @@ def portfolio() -> list[dict]:
                     "open_risks": sum(1 for x in rs if x.get("status") != "closed"),
                     "spi": e.get("spi"), "cpi": e.get("cpi"),
                     "review": _review_status(p["id"]), "created_at": p.get("created_at"),
+                    "ref": storage.setting(r["name"], "ref_meta") or None,
                     "milestones": [{"code": a["code"], "name": a["name"], "finish": a["finish"] if a["milestone"] != "start" else a["start"],
                                     "bl": a.get("bl_finish"), "done": a["status_code"] == "TK_Complete", "longest": a.get("longest")}
                                    for a in r["activities"] if a.get("milestone")][:12],

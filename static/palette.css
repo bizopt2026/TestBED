@@ -146,3 +146,9 @@ html[data-palette="indigo"] .login-art { background-color: #1b1c4a; }
 .pal-card .sw { display: flex; gap: 6px; margin: 8px 0 4px; } .pal-card .sw i { width: 28px; height: 28px; border-radius: 7px; border: 1px solid rgba(0, 0, 0, .06); }
 .wi-bar[hidden] { display: none !important; }
 main { padding-bottom: 96px; }
+/* PMS P1: 가져오기·참조 프로젝트 */
+.drop { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 26px 16px; border: 2px dashed var(--line-2); border-radius: 12px; color: var(--muted); cursor: pointer; text-align: center; }
+.drop.on, .drop:hover { border-color: var(--point); background: var(--accent-soft); color: var(--text-2); }
+.ref-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: -8px 0 16px; padding: 10px 14px; border-radius: 10px;
+  background: var(--warn-soft); color: var(--warn-text); border: 1px solid var(--warn-line); font-size: 13px; }
+.ref-bar .spacer { flex: 1; }

@@ -69,6 +69,9 @@ $("#formUpload").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = e.target;
   const fd = new FormData(f);
+  if (/\.pms$/i.test(f.file.files[0]?.name || "") && typeof importPms === "function") {   // PMS 패키지는 참조 프로젝트로 가져오기
+    $("#dlgUpload").close(); importPms(f.file.files[0]); f.reset(); return;
+  }
   store.set("uploader", f.uploader.value);
   const btn = $("#btnDoUpload");
   btn.disabled = true; btn.textContent = "분석 중...";

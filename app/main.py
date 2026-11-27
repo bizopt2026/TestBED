@@ -49,8 +49,7 @@ def _project_of(method: str, path: str) -> str | None:
     """쓰기 요청이 속한 프로젝트 이름 (없으면 None = 프로젝트 무관)."""
     m = re.match(r"^/api/uploads/([^/]+)", path)
     if m:
-        d = storage.get(m.group(1))
-        return d["name"] if d else None
+        return storage.name_of(m.group(1))
     m = re.match(r"^/api/scenarios/([^/]+)$", path)
     if m:
         sc = storage.get_scenario(m.group(1))
@@ -114,6 +113,13 @@ async def security(request: Request, call_next):
                 storage.audit(user["username"], request.method, path, 403, f"프로젝트 권한 없음: {proj}")
                 return JSONResponse({"detail": f"'{proj}' 프로젝트에 대한 쓰기 권한이 없습니다. 프로젝트 소유자나 관리자에게 멤버 추가를 요청하세요."},
                                     status_code=403)
+    # 참조 프로젝트는 읽기 전용 (계정 유무와 상관없이). 삭제·멤버 관리·내보내기·복제는 허용
+    if request.method in ("POST", "PUT", "DELETE") and not path.endswith(READONLY_POST) and not path.endswith(("/export.pms", "/export.txt", "/clone")):
+        proj = _project_of(request.method, path)
+        if proj:
+            from .package import is_ref
+            if is_ref(proj) and not ("/members" in path or (request.method == "DELETE" and re.fullmatch(r"/api/uploads/[^/]+", path))):
+                return JSONResponse({"detail": f"'{proj}'는 참조 프로젝트(읽기 전용)입니다. 편집하려면 '내 프로젝트로 복제'를 쓰세요."}, status_code=403)
     request.state.user = user
     m = re.match(r"^/api/uploads/([^/]+)", path)
     ai.set_scope(storage.name_of(m.group(1)) if m else None)   # 프로젝트별 AI 사용 정책
@@ -1208,13 +1214,15 @@ async def generate(request: Request, project: str = Form(...), start: str = Form
 @app.get("/api/uploads/{uid}/perm")
 def upload_perm(uid: str, request: Request):
     """현재 사용자의 이 프로젝트 권한 (화면 캐시와 별도로 매번 확인)."""
-    d = storage.get(uid)
-    if not d:
+    from . import package
+    name = storage.name_of(uid)
+    if not name:
         raise HTTPException(404)
+    ref = package.ref_meta(name)
     if not auth_mod.users_exist():
-        return {"my_role": "admin", "can_write": True, "can_manage": True}
-    role = access.project_role(request.state.user, d["name"])
-    return {"my_role": role, "can_write": role is not None, "can_manage": role in ("admin", "owner")}
+        return {"my_role": "admin", "can_write": not ref, "can_manage": True, "ref": ref}
+    role = access.project_role(request.state.user, name)
+    return {"my_role": role, "can_write": role is not None and not ref, "can_manage": role in ("admin", "owner"), "ref": ref}
 
 
 @app.get("/api/projects")
@@ -1709,3 +1717,58 @@ def put_ai_policy(body: dict = Body(...), user: str = Depends(_user)):
     storage.set_setting(name, "ai_policy", pol, user)
     storage.audit(user, "PUT", "/api/admin/ai-policy", 200, f"{name}: {pol}")
     return {"project": name, "policy": pol}
+
+
+
+# ============================================================ PMS P1: .pms 패키지 — 파일·붙여넣기 공유, 참조 프로젝트, 복제
+@app.get("/api/uploads/{uid}/export.pms")
+def export_pms(uid: str, request: Request):
+    from . import package
+    try:
+        data, m = package.build(uid, _user(request))
+    except package.PackageError as e:
+        raise HTTPException(400, str(e))
+    return Response(data, media_type="application/zip",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_q(m['project'] + '_v' + str(m['version']) + '_' + m['data_date'] + '.pms')}"})
+
+
+@app.get("/api/uploads/{uid}/export.txt")
+def export_text(uid: str, request: Request):
+    from . import package
+    try:
+        data, m = package.build(uid, _user(request))
+        return {"text": package.to_text(data), "project": m["project"], "version": m["version"], "size": len(data)}
+    except package.PackageError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/import/pms")
+async def import_pms(request: Request, file: UploadFile = File(...)):
+    from . import package
+    raw = await file.read()
+    if len(raw) > MAX_UPLOAD:
+        raise HTTPException(413, "파일이 너무 큽니다")
+    try:
+        return package.import_package(raw, _user(request), "file")
+    except package.PackageError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/import/text")
+def import_text(request: Request, body: dict = Body(...)):
+    from . import package
+    try:
+        return package.import_package(package.from_text(str(body.get("text") or "")), _user(request), "paste")
+    except package.PackageError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/projects/{name}/clone")
+def clone_project(name: str, request: Request, body: dict = Body(...)):
+    from . import package
+    if not access.project_exists(name):
+        raise HTTPException(404)
+    try:
+        return package.clone(name, str(body.get("name") or ""), _user(request))
+    except package.PackageError as e:
+        raise HTTPException(400, str(e))
