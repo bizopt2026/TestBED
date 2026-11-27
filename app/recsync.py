@@ -52,6 +52,9 @@ def merge(name: str, incoming: dict, other: str, by: str = "") -> dict:
                 st["kept"] += 1          # 여기서 더 나중에 지움
                 continue
             l = local.get(rid)
+            if l is None and storage.rec_scope(kind, rid) not in (None, name):
+                st["kept"] += 1          # 다른 프로젝트의 id와 겹침 — 받지 않음
+                continue
             if l is None:
                 storage.rec_put(kind, name, _body(x), x.get("author") or by, rid=rid, updated_at=at, created_at=x.get("created_at"))
                 st["added"] += 1

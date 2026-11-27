@@ -41,12 +41,16 @@ class HubError(Exception):
 
 
 # ---------------------------------------------------------------- 기기 토큰
-def register_device(username: str, password: str, name: str) -> dict:
+def register_device(username: str, password: str, name: str, ip: str = "") -> dict:
     from . import auth
     init()
     if not auth.users_exist():
         raise HubError(400, "PMS 대시보드에 사용자 계정이 없습니다. 관리자 계정을 먼저 만드세요")
-    if not auth.check_password(username, password):
+    try:
+        ok = auth.check_password(username, password, ip=ip)
+    except PermissionError as e:
+        raise HubError(429, str(e))
+    if not ok:
         raise HubError(401, "PMS 대시보드 아이디 또는 비밀번호가 맞지 않습니다")
     token = secrets.token_urlsafe(32)
     with storage.conn() as c:
@@ -123,6 +127,8 @@ def publish(user: dict, device: str, data: bytes, note: str = "", take_lock: boo
     """패키지를 새 판으로 게시. 같은 프로젝트는 편집 소유권을 가진 기기에서만 게시."""
     from . import access, notify, package, services
     init()
+    if user.get("role") not in ("editor", "admin"):
+        raise HubError(403, "조회 전용 계정은 게시할 수 없습니다 (편집자 이상)")
     manifest, files = package.read(data)
     pid = manifest["pid"]
     p = project(pid)

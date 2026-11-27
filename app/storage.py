@@ -206,6 +206,17 @@ def rec_get(kind: str, rid: str):
 
 
 SYNC_KINDS = ("risk", "constraint")   # 현장 ↔ 대시보드 양방향 동기화 대상 (지우면 tomb 를 남김)
+SCOPED_KINDS = ("risk", "constraint", "commit", "comment")   # 프로젝트 데이터: 다른 프로젝트의 같은 id를 덮어쓰지 못함
+
+
+class RecordScopeError(ValueError):
+    """다른 프로젝트에 속한 레코드 id로 쓰려 함 (가져오기·게시 패키지의 id 충돌)."""
+
+
+def rec_scope(kind: str, rid: str):
+    with conn() as c:
+        r = c.execute("SELECT scope FROM records WHERE kind=? AND id=?", (kind, rid)).fetchone()
+    return r["scope"] if r else None
 
 
 def rec_put(kind: str, scope: str, data: dict, author: str = "", rid: str | None = None,
@@ -215,12 +226,14 @@ def rec_put(kind: str, scope: str, data: dict, author: str = "", rid: str | None
     data = {k: v for k, v in data.items() if k not in ("id", "scope", "author", "created_at", "updated_at")}
     with conn() as c:
         if rid:
-            old = c.execute("SELECT created_at, author FROM records WHERE kind=? AND id=?", (kind, rid)).fetchone()
+            old = c.execute("SELECT created_at, author, scope FROM records WHERE kind=? AND id=?", (kind, rid)).fetchone()
+            if old and kind in SCOPED_KINDS and old["scope"] != scope:
+                raise RecordScopeError(f"{kind} {rid} 는 다른 프로젝트의 기록입니다")
             c.execute("INSERT OR REPLACE INTO records VALUES (?,?,?,?,?,?,?)",
                       (kind, scope, rid, json.dumps(data, ensure_ascii=False), old["author"] if old else author,
                        old["created_at"] if old else (created_at or now), upd))
             if kind in SYNC_KINDS:
-                c.execute("DELETE FROM records WHERE kind='tomb' AND id=?", (f"{kind}:{rid}",))
+                c.execute("DELETE FROM records WHERE kind='tomb' AND id=?", (_tomb_id(scope, kind, rid),))
             return rid
         rid = uuid.uuid4().hex[:10]
         c.execute("INSERT INTO records VALUES (?,?,?,?,?,?,?)",
@@ -228,11 +241,15 @@ def rec_put(kind: str, scope: str, data: dict, author: str = "", rid: str | None
     return rid
 
 
+def _tomb_id(scope: str, kind: str, rid: str) -> str:
+    return f"{scope}\x1f{kind}:{rid}"
+
+
 def tomb_put(scope: str, kind: str, rid: str, at: str | None = None) -> None:
     at = at or datetime.now().isoformat(timespec="seconds")
     with conn() as c:
         c.execute("INSERT OR REPLACE INTO records VALUES ('tomb',?,?,?,?,?,?)",
-                  (scope, f"{kind}:{rid}", json.dumps({"kind": kind, "rid": rid, "at": at}), "", at, at))
+                  (scope, _tomb_id(scope, kind, rid), json.dumps({"kind": kind, "rid": rid, "at": at}), "", at, at))
 
 
 def rec_del(kind: str, rid: str, at: str | None = None, tomb: bool = True) -> bool:

@@ -28,6 +28,7 @@ TEXT_PREFIX = "PMS1:"
 TEXT_MAX = 1024 * 1024           # 붙여넣기 텍스트로 보낼 수 있는 패키지 크기(압축 후)
 REF_SUFFIX = " · 참조"
 RECORD_KINDS = ("risk", "constraint", "commit", "comment")
+MAX_UNPACKED = 300 * 1048576   # 풀었을 때 최대 크기 (압축 폭탄 방지)
 
 
 class PackageError(ValueError):
@@ -118,7 +119,14 @@ def read(data: bytes) -> tuple[dict, dict[str, bytes]]:
     if int(manifest.get("format_version", 0)) > FORMAT_VERSION:
         raise PackageError("더 새 버전의 PMS에서 만든 패키지입니다. 프로그램을 업데이트하세요")
     files = {}
-    for k, h in (manifest.get("files") or {}).items():
+    names = manifest.get("files") or {}
+    try:
+        total = sum(z.getinfo(k).file_size for k in names)
+    except KeyError as e:
+        raise PackageError(f"패키지에 {e.args[0]}가 없습니다")
+    if total > MAX_UNPACKED:
+        raise PackageError(f"패키지 내용이 너무 큽니다 (풀면 {total // 1048576}MB, 최대 {MAX_UNPACKED // 1048576}MB)")
+    for k, h in names.items():
         try:
             b = z.read(k)
         except KeyError:
@@ -208,7 +216,7 @@ def import_package(data: bytes, user: str = "", source: str = "file", extra_meta
             storage.rec_del(k, x["id"], tomb=False)
         for x in rec.get(k) or []:
             data_ = {kk: vv for kk, vv in x.items() if kk not in ("id", "author", "created_at", "updated_at")}
-            storage.rec_put(k, name, data_, x.get("author") or "", rid=x.get("id"))
+            _put_safe(k, name, data_, x.get("author") or "", x.get("id"))
     if rec.get("review", {}).get("steps"):
         storage.rec_put("review", name, rec["review"], user, rid=uid)
     if any(k.startswith("attachments/") for k in files):   # 서버 게시에서 받은 현장 사진: 최신 판 기준으로 교체
@@ -273,11 +281,11 @@ def import_as_project(data: bytes, name: str, user: str, note: str = "") -> str:
             if x["id"] not in keep:
                 storage.rec_del(k, x["id"])
         for x in rec.get(k) or []:
-            storage.rec_put(k, name, {kk: vv for kk, vv in x.items() if kk not in ("id", "author", "created_at", "updated_at")}, x.get("author") or user, rid=x.get("id"))
+            _put_safe(k, name, {kk: vv for kk, vv in x.items() if kk not in ("id", "author", "created_at", "updated_at")}, x.get("author") or user, x.get("id"))
     have = {x["id"] for x in storage.rec_list("comment", name)}
     for x in rec.get("comment") or []:
         if x.get("id") not in have:
-            storage.rec_put("comment", name, {kk: vv for kk, vv in x.items() if kk not in ("id", "author", "created_at", "updated_at")}, x.get("author") or user, rid=x.get("id"))
+            _put_safe("comment", name, {kk: vv for kk, vv in x.items() if kk not in ("id", "author", "created_at", "updated_at")}, x.get("author") or user, x.get("id"))
     if (rec.get("review") or {}).get("steps"):
         storage.rec_put("review", name, rec["review"], user, rid=uid)
     if any(k.startswith("attachments/") for k in files):
@@ -287,6 +295,15 @@ def import_as_project(data: bytes, name: str, user: str, note: str = "") -> str:
             storage.file_put(name, k.split("/", 1)[1].split("__")[0], "image/jpeg", b, user)
     services._tables.cache_clear()
     return uid
+
+
+def _put_safe(kind: str, name: str, data: dict, author: str, rid) -> str:
+    """패키지의 레코드 id가 이 DB의 다른 프로젝트 id와 겹치면 새 id로 저장 (남의 기록을 덮어쓰지 않음)."""
+    rid = str(rid)[:40] if rid else None
+    try:
+        return storage.rec_put(kind, name, data, author, rid=rid)
+    except storage.RecordScopeError:
+        return storage.rec_put(kind, name, data, author)
 
 
 def _drop_photos(name: str) -> None:

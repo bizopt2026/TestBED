@@ -43,9 +43,16 @@ def verify_pw(pw: str, stored: str) -> bool:
         return False
 
 
+_WEAK = {"1234567890", "0123456789", "qwertyuiop", "password12", "passw0rd12", "abcdefghij", "1q2w3e4r5t", "asdfghjkl1"}
+
+
 def validate_pw(pw: str) -> None:
-    if len(pw or "") < 10:
+    pw = pw or ""
+    if len(pw) < 10:
         raise ValueError("비밀번호는 10자 이상이어야 합니다")
+    kinds = sum([any(ch.isalpha() for ch in pw), any(ch.isdigit() for ch in pw), any(not ch.isalnum() for ch in pw)])
+    if kinds < 2 or len(set(pw)) < 4 or pw.lower() in _WEAK:
+        raise ValueError("비밀번호는 영문·숫자·기호 중 2가지 이상을 섞고, 같은 글자 반복이나 흔한 비밀번호는 쓸 수 없습니다")
 
 
 def users_exist() -> bool:
@@ -91,23 +98,38 @@ def list_users() -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def check_password(username: str, pw: str) -> bool:
+def check_password(username: str, pw: str, ip: str | None = None) -> bool:
+    """비밀번호 확인. ip를 주면 로그인과 같은 실패 잠금(5회/10분)을 적용한다(대시보드 연결 등)."""
+    now = time.time()
+    key = f"{ip}|{username}"
+    if ip is not None:
+        recent = [t for t in _fails.get(key, []) if now - t < 600]
+        if len(recent) >= 5:
+            raise PermissionError("로그인 실패가 많아 이 PC에서 10분간 잠겼습니다")
     with storage.conn() as c:
         r = c.execute("SELECT pw_hash, active FROM users WHERE username=?", (username,)).fetchone()
-    return bool(r and r["active"] and verify_pw(pw, r["pw_hash"]))
+    ok = bool(r and r["active"] and verify_pw(pw, r["pw_hash"]))
+    if ip is not None:
+        if ok:
+            _fails.pop(key, None)
+        else:
+            _fails[key] = [t for t in _fails.get(key, []) if now - t < 600] + [now]
+    return ok
 
 
-def login(username: str, pw: str) -> str:
+def login(username: str, pw: str, ip: str = "") -> str:
+    """실패 잠금은 '접속 주소 + 아이디' 기준 — 남이 아이디만 알고 계정을 잠글 수 없게."""
     now = time.time()
-    recent = [t for t in _fails.get(username, []) if now - t < 600]
+    key = f"{ip}|{username}"
+    recent = [t for t in _fails.get(key, []) if now - t < 600]
     if len(recent) >= 5:
-        raise PermissionError("로그인 실패가 많아 10분간 잠겼습니다")
+        raise PermissionError("로그인 실패가 많아 이 PC에서 10분간 잠겼습니다")
     with storage.conn() as c:
         r = c.execute("SELECT pw_hash, active FROM users WHERE username=?", (username,)).fetchone()
     if not r or not r["active"] or not verify_pw(pw, r["pw_hash"]):
-        _fails[username] = recent + [now]
+        _fails[key] = recent + [now]
         raise PermissionError("아이디 또는 비밀번호가 올바르지 않습니다")
-    _fails.pop(username, None)
+    _fails.pop(key, None)
     token = secrets.token_urlsafe(32)
     with storage.conn() as c:
         c.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))

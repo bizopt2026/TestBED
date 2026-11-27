@@ -142,10 +142,11 @@ def _user(request: Request) -> str:
 
 
 @app.get("/api/config")
-def config():
+def config(request: Request):
     from . import mpp_convert
+    signed = not auth_mod.users_exist() or bool(getattr(request.state, "user", None))
     return {"mpp": mpp_convert.available(), "token_required": bool(APP_TOKEN) and not auth_mod.users_exist(), "login_required": auth_mod.users_exist(),
-            "ai": ai.status()["enabled"], "version": _version_label(), "today": __import__("app.clock", fromlist=["today"]).today().isoformat(),
+            "ai": ai.status()["enabled"], "version": _version_label() if signed else _version_label().split(" ")[0],   # 로그인 전에는 커밋 해시를 보이지 않음 "today": __import__("app.clock", fromlist=["today"]).today().isoformat(),
             **edition.config()}
 
 
@@ -162,9 +163,9 @@ def _version_label() -> str:
 
 
 @app.post("/api/login")
-def login(body: dict = Body(...)):
+def login(request: Request, body: dict = Body(...)):
     try:
-        token = auth_mod.login(str(body.get("username", "")), str(body.get("password", "")))
+        token = auth_mod.login(str(body.get("username", "")), str(body.get("password", "")), request.client.host if request.client else "")
     except PermissionError as e:
         raise HTTPException(401, str(e))
     storage.audit(body.get("username", ""), "POST", "/api/login", 200)
@@ -439,6 +440,16 @@ async def _change_err(_: Request, e: Exception):
     return JSONResponse({"detail": str(e)}, status_code=400)
 
 
+@app.exception_handler(ValueError)
+@app.exception_handler(TypeError)
+async def _bad_input(request: Request, e: Exception):
+    """입력값 형식 오류는 500 대신 400. 원인은 서버 기록에만 남긴다."""
+    import logging
+    logging.getLogger("pms").warning("bad input %s %s: %r", request.method, request.url.path, e)
+    msg = str(e) if isinstance(e, storage.RecordScopeError) else "입력값 형식이 올바르지 않습니다. 숫자·목록 칸을 확인하세요"
+    return JSONResponse({"detail": msg}, status_code=400)
+
+
 @app.exception_handler(KeyError)
 async def _not_found(_: Request, e: Exception):
     return JSONResponse({"detail": "없는 데이터입니다"}, status_code=404)
@@ -478,7 +489,10 @@ def delay(uid: str, base: str | None = None):
 
 @app.post("/api/uploads/{uid}/whatif", dependencies=[Depends(auth)])
 def whatif(uid: str, body: dict = Body(...)):
-    return services.whatif(uid, body.get("changes") or [])
+    ch = body.get("changes") or []
+    if not isinstance(ch, list) or not all(isinstance(x, dict) for x in ch):
+        raise HTTPException(400, "changes 는 변경 목록이어야 합니다")
+    return services.whatif(uid, ch)
 
 
 @app.post("/api/uploads/{uid}/xer_patch", dependencies=[Depends(auth)])
@@ -1759,6 +1773,8 @@ async def import_pms(request: Request, file: UploadFile = File(...)):
         return package.import_package(raw, _user(request), "file")
     except package.PackageError as e:
         raise HTTPException(400, str(e))
+    except ValueError:
+        raise HTTPException(400, "패키지 안의 공정표를 읽을 수 없습니다 (손상되었거나 XER 형식이 아님)")
 
 
 @app.post("/api/import/text")
@@ -1768,6 +1784,8 @@ def import_text(request: Request, body: dict = Body(...)):
         return package.import_package(package.from_text(str(body.get("text") or "")), _user(request), "paste")
     except package.PackageError as e:
         raise HTTPException(400, str(e))
+    except ValueError:
+        raise HTTPException(400, "패키지 안의 공정표를 읽을 수 없습니다 (손상되었거나 XER 형식이 아님)")
 
 
 @app.post("/api/projects/{name}/clone")
@@ -1811,10 +1829,11 @@ def _zip_response(data: bytes, snap: dict):
 
 
 @app.post("/hub/v1/devices")
-def hub_register(body: dict = Body(...)):
+def hub_register(request: Request, body: dict = Body(...)):
     from . import hub
     _hub_only()
-    return _hub_call(hub.register_device, str(body.get("username") or ""), str(body.get("password") or ""), str(body.get("name") or ""))
+    return _hub_call(hub.register_device, str(body.get("username") or ""), str(body.get("password") or ""), str(body.get("name") or ""),
+                     request.client.host if request.client else "")
 
 
 @app.get("/hub/v1/me")

@@ -1,0 +1,18 @@
+- generic:
+  - link "본문으로 건너뛰기" [ref=e1] [cursor=pointer]:
+    - /url: "#view"
+  - status
+  - complementary "도움말 풍선"
+  - main [ref=e2]:
+    - generic [ref=e4]:
+      - heading "로그인" [level=2] [ref=e5]
+      - paragraph [ref=e6]: 팀 계정으로 로그인하세요.
+      - generic [ref=e7]:
+        - text: 아이디
+        - textbox "아이디" [active] [ref=e8]
+      - generic [ref=e9]:
+        - text: 비밀번호
+        - textbox "비밀번호" [ref=e10]
+      - button "로그인" [ref=e11] [cursor=pointer]
+      - alert
+      - paragraph [ref=e12]: 계정이 없거나 비밀번호를 잊었으면 관리자에게 문의하세요.
