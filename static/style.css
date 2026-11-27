@@ -474,3 +474,10 @@ body.field .help-fab { display: none; }
   .phead.compact > .menu-wrap:first-of-type { margin-left: auto; }
 }
 .show-sm { display: none; } @media (max-width: 760px) { .show-sm { display: inline; } }
+/* 버전·업데이트 */
+.ver-line { margin: 8px 0; } .upd-box { border: 1px solid #16a34a; border-radius: 8px; padding: 10px 14px; background: color-mix(in srgb, #16a34a 6%, transparent); }
+.upd-box ul { margin: 6px 0; padding-left: 18px; font-size: 13px; } .ok-text { color: var(--ok-text); } .warn-text { color: var(--warn-text); }
+.upd-overlay { position: fixed; inset: 0; z-index: 200; background: rgba(15, 23, 42, .45); display: grid; place-items: center; }
+.upd-overlay .panel { width: min(420px, 90vw); }
+.tb-btn.upd { background: #16a34a; color: #fff; border-color: #16a34a; text-decoration: none; }
+.menu .ver { font-size: 11px; padding: 6px 12px 2px; }

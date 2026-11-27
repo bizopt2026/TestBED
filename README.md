@@ -275,6 +275,17 @@ claude --version
 - **동료 접속**: `start_windows.bat`의 `127.0.0.1`을 `0.0.0.0`으로 바꾸고 방화벽에서 8000 포트를 허용하면 같은 사내망에서 `http://내PC주소:8000`으로 접속합니다. 이때는 관리자 계정을 만들어 로그인을 켜세요.
 - 포트를 바꾸려면 `set PORT=8080` 후 실행(macOS: `PORT=8080 ./start_mac_linux.sh`).
 
+### 버전 관리·자동 업데이트 (로컬 설치판)
+설치 폴더가 `git clone`으로 만든 저장소이면, GitHub에 새 버전이 올라올 때 PC에서 바로 받아 올 수 있습니다.
+
+- **시작할 때 자동 확인**: `start_windows.bat`(macOS·Linux `start_mac_linux.sh`)이 실행 전에 새 버전을 확인하고, 바뀐 내용을 보여 준 뒤 업데이트합니다(20초 동안 답이 없으면 자동 진행, 끄기: `set UPDATE_CHECK=0`).
+- **화면에서 업데이트**: 관리자에게는 상단에 `⬆ 업데이트 N건`이 표시되고, 관리 → 버전·업데이트에서 바뀐 내용 확인 후 '지금 업데이트'를 누르면 자동으로 다시 시작합니다.
+- **안전장치**: 업데이트 전에 `data/app.db`를 `data/backups/`에 백업(최근 10개 보관), `git pull --ff-only`로만 받음(설치 폴더 파일을 직접 고쳤으면 멈춤), requirements.txt가 바뀌면 패키지도 설치.
+- **되돌리기**: 관리 화면의 '이 업데이트 되돌리기' 또는 `.venv\Scripts\python -m app.updater rollback`. 데이터는 그대로입니다.
+- **명령줄**: `python -m app.updater version | check | apply | rollback`
+- 버전 번호는 저장소의 `VERSION` 파일, 바뀐 내용은 커밋 제목으로 표시합니다. 업데이트 기록은 `data/update_log.json`.
+- ZIP으로 받은 설치본은 자동 업데이트가 되지 않습니다. `git clone -b <브랜치> <저장소 주소>`로 다시 설치하고 `data` 폴더만 옮기세요.
+
 ### 로컬 개발
 ```bash
 pip install -r requirements-dev.txt

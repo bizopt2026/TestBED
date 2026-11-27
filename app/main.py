@@ -6,6 +6,7 @@ import io
 import json
 import os
 import re
+import subprocess
 from datetime import date
 
 from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
@@ -133,7 +134,19 @@ def _user(request: Request) -> str:
 def config():
     from . import mpp_convert
     return {"mpp": mpp_convert.available(), "token_required": bool(APP_TOKEN) and not auth_mod.users_exist(), "login_required": auth_mod.users_exist(),
-            "ai": ai.status()["enabled"]}
+            "ai": ai.status()["enabled"], "version": _version_label()}
+
+
+_VER = None
+
+
+def _version_label() -> str:
+    global _VER
+    if _VER is None:
+        from . import updater
+        v = updater.version()
+        _VER = f"{v['version']}" + (f" ({v['commit']})" if v["commit"] else "")
+    return _VER
 
 
 @app.post("/api/login")
@@ -1563,3 +1576,35 @@ def admin_usage():
             lessons[lid] = lessons.get(lid, 0) + 1
     return {"screens": storage.usage_stats(), "review_steps": steps, "reviews_started": len(reviews),
             "reviews_completed": sum(1 for r in reviews if r.get("completed_by")), "lessons": lessons, "learners": len(learners)}
+
+
+
+# ============================================================ 로컬 설치판 버전 관리·업데이트 (관리자)
+@app.get("/api/admin/update")
+def update_status(force: int = 0):
+    from . import updater
+    return {**updater.check(force=bool(force)), "launcher": os.environ.get("APP_LAUNCHER") == "1"}
+
+
+@app.post("/api/admin/update")
+def update_apply(user: str = Depends(_user)):
+    from . import updater
+    try:
+        r = updater.apply(by=user)
+    except updater.UpdateError as e:
+        raise HTTPException(400, str(e))
+    except subprocess.TimeoutExpired:
+        raise HTTPException(504, "업데이트 시간이 초과되었습니다. 네트워크를 확인하세요")
+    r["restarting"] = bool(r["restart"]) and updater.restart_later()
+    return r
+
+
+@app.post("/api/admin/update/rollback")
+def update_rollback(user: str = Depends(_user)):
+    from . import updater
+    try:
+        r = updater.rollback(by=user)
+    except updater.UpdateError as e:
+        raise HTTPException(400, str(e))
+    r["restarting"] = updater.restart_later()
+    return r

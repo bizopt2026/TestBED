@@ -247,3 +247,77 @@ const _showList1 = showList;
 showList = async function () { await _showList1(); hit("home"); };
 const _showWizard1 = showWizard;
 showWizard = async function (uid) { await _showWizard1(uid); hit("wizard"); };
+
+// ---------------------------------------------------------------- 로컬 설치판: 버전·업데이트 (관리자)
+async function updatePanelHtml(force = false) {
+  const u = await api(`/api/admin/update${force ? "?force=1" : ""}`).catch((e) => ({ error: e.message }));
+  const last = u.last;
+  return `<div class="row" style="justify-content:space-between"><h3 style="margin:0">버전·업데이트</h3>
+      <button class="btn sm" id="updCheck">${icon("search", 14)} 지금 확인</button></div>
+    <div class="ver-line"><b>현재 ${esc(u.version || "-")}</b> <span class="muted">${esc(u.commit || "")} · ${esc(u.branch || "")} · ${esc(u.date || "")}</span>
+      ${u.checked_at ? `<span class="muted" style="font-size:12px"> · 확인 ${u.checked_at.replace("T", " ").slice(5, 16)}</span>` : ""}</div>
+    ${u.error ? `<p class="warn-text">⚠ ${esc(u.error)}</p>` : u.available ? `<div class="upd-box"><b>새 업데이트 ${u.behind}건</b>${u.remote_version ? ` → ${esc(u.remote_version)}` : ""}
+        <ul>${u.changes.map((c) => `<li><span class="muted">${esc(c.date)}</span> ${esc(c.title)}</li>`).join("")}</ul>
+        <p class="muted" style="font-size:12px">업데이트 전에 데이터(data/app.db)를 자동으로 백업합니다. 업데이트 중에는 1분 정도 접속이 끊깁니다.</p>
+        <button class="btn primary" id="updGo">지금 업데이트</button></div>`
+      : `<p class="ok-text">✓ 최신 버전입니다.</p>`}
+    ${last ? `<p class="muted" style="font-size:12px">마지막 ${last.rollback ? "되돌리기" : "업데이트"}: ${last.at.replace("T", " ").slice(0, 16)} · ${esc(last.by || "")} · ${esc(last.from)} → ${esc(last.to)}${last.backup ? ` · 백업 ${esc(last.backup)}` : ""}
+      ${last.rollback ? "" : ` <button class="btn sm ghost" id="updBack">이 업데이트 되돌리기</button>`}</p>` : ""}
+    ${u.launcher === false && !u.error ? `<p class="muted" style="font-size:12px">시작 스크립트(start_windows.bat) 밖에서 실행 중이라 업데이트 후 자동 재시작이 되지 않습니다. 업데이트 뒤 프로그램을 직접 다시 시작하세요.</p>` : ""}`;
+}
+async function bindUpdatePanel(box) {
+  box.innerHTML = await updatePanelHtml();
+  const rebind = async (force) => { box.innerHTML = skeleton("tab"); box.innerHTML = await updatePanelHtml(force); bindUpdatePanel2(box); };
+  const bindUpdatePanel2 = (b) => {
+    $("#updCheck").onclick = () => rebind(true);
+    $("#updGo")?.addEventListener("click", async () => {
+      if (!(await ui.confirm("지금 업데이트할까요? 데이터는 자동으로 백업되고, 잠시 뒤 새 버전으로 다시 시작합니다.", { ok: "업데이트" }))) return;
+      runUpdate("/api/admin/update");
+    });
+    $("#updBack")?.addEventListener("click", async () => {
+      if (!(await ui.confirm("직전 업데이트 전 버전으로 프로그램을 되돌릴까요? 데이터는 그대로이며, 다음 업데이트 때 다시 최신으로 올라갑니다.", { ok: "되돌리기", danger: true }))) return;
+      runUpdate("/api/admin/update/rollback");
+    });
+  };
+  bindUpdatePanel2(box);
+}
+async function runUpdate(path) {
+  const before = (await fetch("/api/config").then((r) => r.json()).catch(() => ({}))).version;
+  const ov = document.createElement("div"); ov.className = "upd-overlay"; ov.setAttribute("role", "status");
+  ov.innerHTML = `<div class="panel"><h3>업데이트 중…</h3><p class="muted">데이터 백업 → 새 버전 받기 → 다시 시작. 창을 닫지 마세요.</p><div class="sk" style="width:100%;height:8px"></div></div>`;
+  document.body.appendChild(ov);
+  try {
+    const r = await api(path, { method: "POST" });
+    if (r.updated === false) { ov.remove(); toast("이미 최신입니다"); return; }
+    if (!r.restarting) { ov.querySelector(".panel").innerHTML = `<h3>업데이트를 받았습니다</h3><p>프로그램 창을 닫고 <b>start_windows.bat</b>으로 다시 시작하면 새 버전이 적용됩니다.</p><button class="btn" onclick="this.closest('.upd-overlay').remove()">닫기</button>`; return; }
+    for (let i = 0; i < 90; i++) {
+      await new Promise((res) => setTimeout(res, 1500));
+      const c = await fetch("/api/config").then((x) => x.json()).catch(() => null);
+      if (c && c.version !== before) { ov.querySelector(".panel").innerHTML = `<h3>✓ ${esc(c.version)} 으로 바뀌었습니다</h3><p class="muted">화면을 새로 고칩니다…</p>`; setTimeout(() => location.reload(), 1200); return; }
+    }
+    ov.querySelector(".panel").innerHTML = `<h3>다시 시작을 확인하지 못했습니다</h3><p>프로그램 창을 확인하고 필요하면 다시 시작하세요.</p><button class="btn" onclick="location.reload()">새로 고침</button>`;
+  } catch (e) { ov.remove(); toast(e.message); }
+}
+const _showAdmin1 = showAdmin;
+showAdmin = async function () {
+  await _showAdmin1();
+  const p = document.createElement("div"); p.className = "panel"; p.id = "updPanel";
+  view.querySelector("h2")?.after(p);
+  bindUpdatePanel(p);
+};
+// 관리자에게 상단 '업데이트 있음' 알림 (세션당 한 번 확인, 서버는 10분 캐시)
+const _renderTopbar1 = renderTopbar;
+renderTopbar = function () {
+  _renderTopbar1();
+  fetch("/api/config").then((r) => r.json()).then((c) => {
+    const m = $("#userMenu");
+    if (m && c.version && !m.querySelector(".ver")) m.insertAdjacentHTML("beforeend", `<div class="ver muted">버전 ${esc(c.version)}</div>`);
+  }).catch(() => {});
+  if ((me?.role || "admin") !== "admin" || renderTopbar._upd) return;
+  renderTopbar._upd = true;
+  setTimeout(async () => {
+    const u = await api("/api/admin/update").catch(() => null);
+    if (!u?.available || $("#tbUpd")) return;
+    $("#userBox")?.insertAdjacentHTML("afterbegin", `<a class="tb-btn upd" id="tbUpd" href="#/admin" title="${esc(u.changes.map((c) => c.title).slice(0, 5).join("\n"))}">⬆<span class="hide-sm"> 업데이트 ${u.behind}건</span></a>`);
+  }, 1500);
+};
