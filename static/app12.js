@@ -34,11 +34,31 @@ async function hubFeedPanel(el, uid) {
     }
   };
 }
+// ---------------------------------------------------------------- 리스크·제약 동기화 기록 (나중에 고친 쪽 우선, 진 쪽 내용 보관)
+async function syncLogPanel(el, uid) {
+  const xs = await api(`/api/uploads/${uid}/sync-log`).catch(() => []);
+  if (!xs.length || !el.isConnected) return;
+  const KIND = { risk: "리스크", constraint: "제약" };
+  const p = document.createElement("details"); p.className = "panel"; p.id = "syncLog";
+  p.innerHTML = `<summary><b>리스크·제약 동기화 기록</b> <span class="muted fs13">현장과 대시보드에서 함께 고쳐 나중에 고친 쪽으로 맞춘 ${xs.length}건</span></summary>
+    <table class="t mt12"><thead><tr><th>시각</th><th>구분</th><th>항목</th><th>결과</th><th>밀린 내용</th><th></th></tr></thead><tbody>
+    ${xs.map((x) => `<tr><td class="nowrap">${esc((x.at || "").replace("T", " ").slice(5, 16))}</td><td>${KIND[x.kind] || esc(x.kind)}</td><td>${esc(x.title)}</td>
+      <td>${esc(x.winner)} 쪽 수정으로 ${esc(x.action)}</td><td class="muted fs12">${esc(x.lost_by || "")} ${esc((x.lost_at || "").replace("T", " ").slice(5, 16))}</td>
+      <td>${x.restored_by ? `<span class="chip">되살림 · ${esc(x.restored_by)}</span>` : `<button class="btn sm" data-restore="${x.id}">되살리기</button>`}</td></tr>`).join("")}</tbody></table>
+    <p class="muted fs12">되살리면 지금 시각으로 저장되어 다음 동기화 때 상대편에도 반영됩니다.</p>`;
+  el.appendChild(p);
+  p.querySelectorAll("[data-restore]").forEach((b) => b.onclick = () => withBusy(b, async () => {
+    await api(`/api/uploads/${uid}/sync-log/${b.dataset.restore}/restore`, { method: "POST" });
+    toast("밀린 내용을 되살렸습니다"); p.remove(); syncLogPanel(el, uid);
+  }));
+}
+
 const _tabOverview14 = tabOverview;
 tabOverview = async function (el, r, uid) {
   await _tabOverview14(el, r, uid);
   await pmsReady;
   if (!isDashboard()) hubFeedPanel(el, uid);
+  syncLogPanel(el, uid);
 };
 
 // ---------------------------------------------------------------- 관리: 백업 · 상태
@@ -58,4 +78,8 @@ showAdmin = async function () {
 WHATSNEW["2.5"] = [
   { ic: "message", t: "대시보드 코멘트·이슈를 현장에서", d: "게시·구독한 프로젝트의 상황판 아래에 PMS 대시보드의 열린 이슈와 코멘트가 보이고, 바로 답할 수 있습니다. 연결이 끊기면 임시 저장 후 자동 전송합니다." },
   { ic: "shield", t: "운영: 백업·상태", d: "관리 화면에서 지금 백업을 내려받고, 버전·DB 크기·게시·이슈·연결 기기 현황을 봅니다." },
+];
+
+WHATSNEW["2.6"] = [
+  { ic: "link", t: "리스크·제약 양방향 동기화", d: "대시보드에서 고친 리스크·제약도 현장에 들어옵니다. 양쪽에서 고치면 나중에 고친 쪽으로 맞추고, 밀린 내용은 상황판 동기화 기록에서 되살릴 수 있습니다." },
 ];

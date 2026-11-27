@@ -77,6 +77,7 @@ def build(uid: str, by: str = "", attachments: bool = False, version: int | None
         "status_thresholds": storage.setting(name, "status_thresholds", {}) or {},
     }, ensure_ascii=False).encode()
     rec = {k: [{kk: vv for kk, vv in x.items() if kk != "scope"} for x in storage.rec_list(k, name)] for k in RECORD_KINDS}
+    rec["tomb"] = [{"kind": t["kind"], "rid": t["rid"], "at": t["at"]} for t in storage.rec_list("tomb", name)]
     rec["review"] = workflow.signoffs(uid)
     files["records.json"] = json.dumps(rec, ensure_ascii=False).encode()
     acts = r["activities"]
@@ -204,7 +205,7 @@ def import_package(data: bytes, user: str = "", source: str = "file", extra_meta
     rec = json.loads(files.get("records.json", b"{}") or b"{}")
     for k in RECORD_KINDS:
         for x in storage.rec_list(k, name):
-            storage.rec_del(k, x["id"])
+            storage.rec_del(k, x["id"], tomb=False)
         for x in rec.get(k) or []:
             data_ = {kk: vv for kk, vv in x.items() if kk not in ("id", "author", "created_at", "updated_at")}
             storage.rec_put(k, name, data_, x.get("author") or "", rid=x.get("id"))
@@ -264,7 +265,9 @@ def import_as_project(data: bytes, name: str, user: str, note: str = "") -> str:
         if settings.get(k):
             storage.set_setting(name, k, settings[k])
     rec = json.loads(files.get("records.json", b"{}") or b"{}")
-    for k in ("risk", "constraint", "commit"):
+    from . import recsync
+    recsync.merge(name, rec, "현장", user)   # 리스크·제약: 나중에 고친 쪽 우선 (대시보드에서 고친 것도 살림)
+    for k in ("commit",):
         keep = {x.get("id") for x in rec.get(k) or []}
         for x in storage.rec_list(k, name):
             if x["id"] not in keep:

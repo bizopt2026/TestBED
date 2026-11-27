@@ -2186,6 +2186,47 @@ def hub_comment(pid: str, request: Request, body: dict = Body(...)):
     return {"id": cid}
 
 
+@app.post("/hub/v1/projects/{pid}/records")
+def hub_records(pid: str, request: Request, body: dict = Body(...)):
+    """리스크·제약 양방향 동기화: 현장 것을 합치고(나중에 고친 쪽 우선) 합친 결과를 돌려준다."""
+    from . import access, hub, recsync
+    u, _ = _hub_auth(request)
+    p = _hub_project_for(u, pid)
+    if not access.can_write(u, p["name"]):
+        raise HTTPException(403, "이 프로젝트의 리스크·제약을 고칠 권한이 없습니다")
+    st = recsync.merge(p["name"], body, "현장", u["username"])
+    if st["added"] or st["updated"] or st["deleted"]:
+        last = hub.latest(pid)
+        if last:
+            try:
+                from . import issues
+                issues.evaluate(last["upload_id"])
+            except Exception:  # noqa: BLE001 — 이슈 재계산 실패가 동기화를 막지 않게
+                pass
+    return {"stats": st, "records": recsync.export(p["name"])}
+
+
+@app.get("/api/uploads/{uid}/sync-log")
+def sync_log(uid: str, user: str = Depends(_user)):
+    from . import recsync
+    name = storage.name_of(uid)
+    if not name:
+        raise HTTPException(404, "없는 업데이트입니다")
+    return recsync.log(name)
+
+
+@app.post("/api/uploads/{uid}/sync-log/{lid}/restore")
+def sync_log_restore(uid: str, lid: str, user: str = Depends(_user)):
+    """동기화로 덮어쓴·지워진 리스크·제약을 되살린다(지금 시각으로 저장되므로 다음 동기화 때 상대편에도 퍼짐)."""
+    name = storage.name_of(uid)
+    x = storage.rec_get("sync_log", lid)
+    if not name or not x or x["scope"] != name:
+        raise HTTPException(404, "없는 기록입니다")
+    storage.rec_put(x["kind"], name, x["lost"], user, rid=x["rid"])
+    storage.rec_put("sync_log", name, {**{k: v for k, v in x.items() if k not in ("id", "scope", "updated_at")}, "restored_by": user}, user, rid=lid)
+    return {"ok": True}
+
+
 def _pid_of(uid: str) -> str | None:
     from . import package
     name = storage.name_of(uid)

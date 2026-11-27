@@ -41,6 +41,8 @@ async function hubSync(verbose = false) {
   const st = await getHubStatus(); if (!st.connected || isDashboard()) return;
   try {
     const r = await api("/api/hub/sync", { method: "POST" });
+    const rc = (r.records || []).reduce((n, x) => n + x.local.added + x.local.updated + x.local.deleted, 0);
+    if (rc) toast(`대시보드에서 고친 리스크·제약 ${rc}건을 반영했습니다`);
     if (r.updated.length) { uploadsCache = null; toast(`구독한 프로젝트 새 판 ${r.updated.length}건을 받았습니다`); if (location.hash === "#/" || !location.hash) showList(); }
     else if (verbose) toast(`구독 ${r.checked}건 모두 최신입니다`);
   } catch (e) { if (verbose) toast(e.message); }

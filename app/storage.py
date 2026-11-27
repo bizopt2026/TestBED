@@ -205,25 +205,43 @@ def rec_get(kind: str, rid: str):
     return {**json.loads(r["data"]), "id": r["id"], "scope": r["scope"], "updated_at": r["updated_at"]} if r else None
 
 
-def rec_put(kind: str, scope: str, data: dict, author: str = "", rid: str | None = None) -> str:
+SYNC_KINDS = ("risk", "constraint")   # 현장 ↔ 대시보드 양방향 동기화 대상 (지우면 tomb 를 남김)
+
+
+def rec_put(kind: str, scope: str, data: dict, author: str = "", rid: str | None = None,
+            updated_at: str | None = None, created_at: str | None = None) -> str:
     now = datetime.now().isoformat(timespec="seconds")
+    upd = updated_at or now
     data = {k: v for k, v in data.items() if k not in ("id", "scope", "author", "created_at", "updated_at")}
     with conn() as c:
         if rid:
             old = c.execute("SELECT created_at, author FROM records WHERE kind=? AND id=?", (kind, rid)).fetchone()
             c.execute("INSERT OR REPLACE INTO records VALUES (?,?,?,?,?,?,?)",
                       (kind, scope, rid, json.dumps(data, ensure_ascii=False), old["author"] if old else author,
-                       old["created_at"] if old else now, now))
+                       old["created_at"] if old else (created_at or now), upd))
+            if kind in SYNC_KINDS:
+                c.execute("DELETE FROM records WHERE kind='tomb' AND id=?", (f"{kind}:{rid}",))
             return rid
         rid = uuid.uuid4().hex[:10]
         c.execute("INSERT INTO records VALUES (?,?,?,?,?,?,?)",
-                  (kind, scope, rid, json.dumps(data, ensure_ascii=False), author, now, now))
+                  (kind, scope, rid, json.dumps(data, ensure_ascii=False), author, created_at or now, upd))
     return rid
 
 
-def rec_del(kind: str, rid: str) -> bool:
+def tomb_put(scope: str, kind: str, rid: str, at: str | None = None) -> None:
+    at = at or datetime.now().isoformat(timespec="seconds")
     with conn() as c:
-        return c.execute("DELETE FROM records WHERE kind=? AND id=?", (kind, rid)).rowcount > 0
+        c.execute("INSERT OR REPLACE INTO records VALUES ('tomb',?,?,?,?,?,?)",
+                  (scope, f"{kind}:{rid}", json.dumps({"kind": kind, "rid": rid, "at": at}), "", at, at))
+
+
+def rec_del(kind: str, rid: str, at: str | None = None, tomb: bool = True) -> bool:
+    with conn() as c:
+        r = c.execute("SELECT scope FROM records WHERE kind=? AND id=?", (kind, rid)).fetchone()
+        ok = c.execute("DELETE FROM records WHERE kind=? AND id=?", (kind, rid)).rowcount > 0
+    if ok and tomb and kind in SYNC_KINDS:
+        tomb_put(r["scope"], kind, rid, at)
+    return ok
 
 
 def setting(scope: str, key: str, default=None):

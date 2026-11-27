@@ -107,8 +107,24 @@ def status(user: str) -> dict:
 
 
 # ---------------------------------------------------------------- 게시·구독·공유 코드
+def sync_records(user: str, name: str, pid: str) -> dict:
+    """리스크·제약 양방향 동기화: 내 것을 보내 대시보드가 합치고, 합친 결과를 내 쪽에 합친다."""
+    from . import recsync
+    r = call_json("POST", f"/hub/v1/projects/{pid}/records", user, recsync.export(name))
+    mine = recsync.merge(name, r["records"], "대시보드", user)
+    return {"project": name, "hub": r["stats"], "local": mine}
+
+
 def publish(user: str, uid: str, note: str = "", take: bool = False) -> dict:
     from . import package
+    name0 = storage.name_of(uid)
+    pub0 = storage.setting(name0, "hub_published") or {}
+    if pub0.get("pid"):
+        try:
+            sync_records(user, name0, pub0["pid"])   # 대시보드에서 고친 리스크·제약을 먼저 받아 게시본에 반영
+        except HubClientError as e:
+            if e.status not in (403, 404):
+                raise
     data, m = package.build(uid, user, attachments=True)
     q = urllib.parse.urlencode({"note": note[:500], "take": "1" if take else "0"})
     r = json.loads(call("POST", f"/hub/v1/projects/{m['pid']}/snapshots?{q}", user, raw=data,
@@ -135,13 +151,23 @@ def sync(user: str) -> dict:
         m = package.ref_meta(p["name"]) or {}
         if m.get("pid"):
             have[m["pid"]] = m.get("version") or 0
-    updated = []
+    updated, records = [], []
+    for p in storage.latest_by_project():
+        pub = storage.setting(p["name"], "hub_published") or {}
+        if pub.get("pid") and not package.is_ref(p["name"]):
+            try:
+                r = sync_records(user, p["name"], pub["pid"])
+                if any(r["local"][k] for k in ("added", "updated", "deleted")):
+                    records.append(r)
+            except HubClientError as e:
+                if e.status == 0:
+                    raise
     for s in subs:
         if s.get("version", 0) > have.get(s["pid"], 0):
             r = pull(user, s["pid"])
             if not r.get("duplicate"):
                 updated.append(r)
-    return {"checked": len(subs), "updated": updated}
+    return {"checked": len(subs), "updated": updated, "records": records}
 
 
 # ---------------------------------------------------------------- AI 게이트웨이 (PMS_AI_MODE=server)

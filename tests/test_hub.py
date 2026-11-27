@@ -63,8 +63,11 @@ def _hub_session(url, user):
     op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj), urllib.request.ProxyHandler({}))
     op.open(urllib.request.Request(url + "/api/login", data=json.dumps({"username": user, "password": PW}).encode(), headers={"Content-Type": "application/json", "X-Requested-With": "fetch"}))
     def call(method, path, body=None):
-        r = op.open(urllib.request.Request(url + path, method=method, data=json.dumps(body).encode() if body is not None else None,
-                                           headers={"Content-Type": "application/json", "X-Requested-With": "fetch"}))
+        try:
+            r = op.open(urllib.request.Request(url + path, method=method, data=json.dumps(body).encode() if body is not None else None,
+                                               headers={"Content-Type": "application/json", "X-Requested-With": "fetch"}))
+        except urllib.error.HTTPError as e:
+            raise AssertionError(f"{method} {path} → {e.code} {e.read()[:300]!r}") from None
         return json.loads(r.read() or b"null")
     return call
 
@@ -151,3 +154,44 @@ def test_hub_end_to_end(hub_server, monkeypatch):
     op = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with pytest.raises(urllib.error.HTTPError):
         op.open(hub_server + "/api/admin/backup")            # 로그인 없이 불가
+
+
+def test_hub_records_two_way(hub_server, monkeypatch):
+    """리스크·제약 양방향 동기화: 나중에 고친 쪽 우선, 지움도 전파, 밀린 내용은 기록·되살리기."""
+    monkeypatch.setattr(edition, "EDITION", "client")
+    db = _client_db(); a = _c()
+    a.post("/api/hub/connect", json={"url": hub_server, "username": "alice", "password": PW})
+    uid = a.post("/api/upload", files={"file": ("p.xer", RAW)}).json()["ids"][0]
+    name = storage.name_of(uid)
+    r1 = a.post(f"/api/uploads/{uid}/risks", json={"title": "철골 지연", "codes": [], "prob": 30}).json()["id"]
+    x = storage.rec_get("risk", r1); storage.rec_put("risk", name, x, "alice", rid=r1, updated_at="2026-01-01T00:00:00")
+    pub = a.post(f"/api/uploads/{uid}/publish", json={}).json()
+    huid = pub["upload_id"]
+    hub = _hub_session(hub_server, "alice")
+    assert [x["title"] for x in hub("GET", f"/api/uploads/{huid}/risks")] == ["철골 지연"]
+    # 대시보드에서 고치고 새로 추가
+    hub("POST", f"/api/uploads/{huid}/risks", {"id": r1, "title": "철골 지연(본사 확인)", "codes": [], "prob": 50})
+    r2 = hub("POST", f"/api/uploads/{huid}/risks", {"title": "크레인 고장", "codes": [], "prob": 20})["id"]
+    s = a.post("/api/hub/sync").json()
+    assert s["records"] and s["records"][0]["local"]["added"] == 1 and s["records"][0]["local"]["updated"] == 1
+    titles = {x["id"]: x["title"] for x in storage.rec_list("risk", name)}
+    assert titles == {r1: "철골 지연(본사 확인)", r2: "크레인 고장"}
+    log = a.get(f"/api/uploads/{uid}/sync-log").json()
+    assert log[0]["action"] == "덮어씀" and log[0]["winner"] == "대시보드" and log[0]["lost"]["title"] == "철골 지연"
+    # 현장이 더 나중에 고친 것은 현장 쪽이 이김 → 대시보드로 퍼짐
+    x = storage.rec_get("risk", r2); storage.rec_put("risk", name, {**x, "title": "크레인 고장(수리 완료)"}, "alice", rid=r2, updated_at="2099-01-01T00:00:00")
+    a.post("/api/hub/sync")
+    assert {x["id"]: x["title"] for x in hub("GET", f"/api/uploads/{huid}/risks")}[r2] == "크레인 고장(수리 완료)"
+    # 대시보드에서 지우면 현장에서도 지워짐 (나중에 고치지 않았으므로)
+    hub("DELETE", f"/api/uploads/{huid}/risks/{r1}")
+    a.post("/api/hub/sync")
+    assert [x["id"] for x in storage.rec_list("risk", name)] == [r2]
+    gone = next(x for x in a.get(f"/api/uploads/{uid}/sync-log").json() if x["action"] == "삭제됨")
+    # 되살리기
+    assert a.post(f"/api/uploads/{uid}/sync-log/{gone['id']}/restore").json()["ok"]
+    assert {x["title"] for x in storage.rec_list("risk", name)} == {"철골 지연(본사 확인)", "크레인 고장(수리 완료)"}
+    # 게시해도 대시보드에서만 추가한 것은 지워지지 않음
+    r3 = hub("POST", f"/api/uploads/{huid}/risks", {"title": "우기 대비", "codes": [], "prob": 40})["id"]
+    pub2 = a.post(f"/api/uploads/{uid}/publish", json={}).json()
+    assert r3 in {x["id"] for x in hub("GET", f"/api/uploads/{pub2['upload_id']}/risks")}
+    assert r3 in {x["id"] for x in storage.rec_list("risk", name)}        # 게시 전에 받아 왔음
