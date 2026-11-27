@@ -262,6 +262,19 @@ claude --version
 
 ## 실행 방법
 
+### 로컬 PC 설치 (Windows / macOS)
+1. **Python 3.10 이상** 설치: https://www.python.org/downloads/ (Windows는 설치 첫 화면에서 **Add python.exe to PATH** 체크)
+2. 이 저장소를 내려받아 압축을 풉니다(GitHub → Code → Download ZIP, 또는 `git clone`).
+3. 설치(처음 한 번): Windows는 `install_windows.bat` 더블클릭, macOS·Linux는 터미널에서 `./install_mac_linux.sh`
+4. 실행: Windows는 `start_windows.bat`, macOS·Linux는 `./start_mac_linux.sh` → 브라우저가 http://localhost:8000 으로 열립니다. 실행 창을 닫으면 종료됩니다.
+
+- 데이터는 `data/app.db` 한 파일에 저장됩니다. 백업은 이 파일을 복사하면 됩니다.
+- 관리자 계정을 만들지 않으면 계정 없이(모두 편집 가능) 사용합니다. 나중에 `.venv\Scripts\python -m app.auth create-admin 아이디`로 만들 수 있습니다.
+- **AI 기능**: PC에 Claude Code CLI(`claude`)가 설치·로그인되어 있으면 자동으로 켜지고, 없으면 꺼진 상태(규칙 기반)로 실행됩니다.
+- **.mpp 파일**: MS Project .mpp를 올리려면 Java 21(예: Eclipse Temurin)이 필요합니다. XER·MS Project XML은 Java 없이 됩니다.
+- **동료 접속**: `start_windows.bat`의 `127.0.0.1`을 `0.0.0.0`으로 바꾸고 방화벽에서 8000 포트를 허용하면 같은 사내망에서 `http://내PC주소:8000`으로 접속합니다. 이때는 관리자 계정을 만들어 로그인을 켜세요.
+- 포트를 바꾸려면 `set PORT=8080` 후 실행(macOS: `PORT=8080 ./start_mac_linux.sh`).
+
 ### 로컬 개발
 ```bash
 pip install -r requirements-dev.txt
