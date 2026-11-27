@@ -156,7 +156,7 @@ chartSvg = function (host, opt) {
 showLogin = function () {
   if (loginWait) return loginWait;
   document.body.classList.add("login-screen");
-  const w = document.createElement("div"); w.className = "login-wrap"; w.id = "loginWrap";
+  const w = document.createElement("div"); w.className = "login-wrap"; w.id = "loginWrap"; w.setAttribute("role", "main");
   w.innerHTML = `<div class="login-art"><div><div class="brand" style="display:flex;align-items:center;gap:10px;font-weight:750;font-size:17px">
       <span class="logo" style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.16);display:grid;place-items:center">${icon("gantt", 18)}</span>공정관리 분석기</div></div>
     <div><h1>공정표를 올리면<br>상황이 한눈에 보입니다</h1><p>P6·MS Project 공정표의 CPM 재계산, 품질 점검, 지연 원인, 리스크와 만회안, 월간 보고까지 팀이 함께 씁니다.</p>
@@ -198,13 +198,13 @@ async function showDesign() {
       <div class="dg-row"><button class="btn primary sm">작게</button><button class="btn sm">${icon("upload", 14)} 아이콘과 함께</button><button class="btn icon" aria-label="설정">${icon("gear")}</button></div></div>
     <div class="panel"><h3>상태 배지</h3><div class="dg-row"><span class="status-badge ok">정상</span><span class="status-badge warn">주의</span><span class="status-badge bad">위험</span>
       <span class="chip ok">✓ 여유 35일</span><span class="chip warn">! 최신 아님</span><span class="chip bad">✕ 지연 12일</span><span class="chip">보통</span><span class="tag">태그</span></div>
-      <p class="muted" style="font-size:13px">카드 하나에는 상태 배지를 하나만 쓰고, 나머지는 보조 글자로 적습니다.</p></div>
+      <p class="muted fs13">카드 하나에는 상태 배지를 하나만 쓰고, 나머지는 보조 글자로 적습니다.</p></div>
     <div class="panel"><h3>입력</h3><div class="dg-row"><input class="s" placeholder="검색어" aria-label="검색어 예시"><select class="s" aria-label="선택 예시"><option>선택</option></select><input class="s" type="date" aria-label="날짜 예시"><label><input type="checkbox" checked> 체크</label></div></div>
     <div class="panel"><h3>지표 카드</h3><div class="kpis kpis6"><div class="kpi tone-good"><div class="l">공정률</div><div class="v">42.5<small>%</small></div><span class="delta good">▲ 3.2%</span></div>
       <div class="kpi tone-bad"><div class="l">예상 준공</div><div class="v">2026-09-12</div><span class="delta bad">▼ 12일</span></div><div class="kpi"><div class="l">건전성</div><div class="v">85<small>점</small></div><span class="delta same">변화 없음</span></div></div></div>
     <div class="panel"><h3>표</h3><table class="t"><thead><tr><th>ID</th><th>작업</th><th class="num">TF</th><th>상태</th></tr></thead><tbody>
       <tr><td>A2000</td><td>철골 제작</td><td class="num">0</td><td><span class="chip bad">주공정</span></td></tr><tr><td>A3000</td><td>지붕 패널</td><td class="num">57</td><td><span class="chip">진행</span></td></tr></tbody></table>
-      <p class="muted" style="font-size:13px">오른쪽 위 내 메뉴에서 표 간격(편안·보통·촘촘)을 고를 수 있습니다.</p></div>
+      <p class="muted fs13">오른쪽 위 내 메뉴에서 표 간격(편안·보통·촘촘)을 고를 수 있습니다.</p></div>
     <div class="panel"><h3>빈 화면 · 알림</h3>${emptyState("표시할 항목이 없습니다", "조건을 바꾸거나 새로 추가하세요.")}
       <div class="inbox"><div class="inbox-item high"><span class="sev">✕</span><a href="#/design">기한 지난 제약</a><span></span></div><div class="inbox-item mid"><span class="sev">!</span><a href="#/design">대응 방안 없는 리스크</a><span></span></div></div></div>`;
 }

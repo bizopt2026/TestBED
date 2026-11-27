@@ -74,6 +74,8 @@ const COURSES = [
         { sel: "#fLines", title: "최장경로 관계선", body: "최장경로 작업 사이의 관계선을 그립니다.", wait: "change" },
         { sel: ".gantt", title: "차트 조작", body: "드래그로 이동, Ctrl+휠로 확대합니다. 행을 클릭하면 관계선, 더블클릭하면 상세가 열립니다. ↑↓와 Enter로도 됩니다." },
         { sel: "#gFit", title: "전체 맞춤·날짜 이동", body: "전체 공기를 한 화면에 맞추고, 날짜 입력·'오늘'·'Data Date' 버튼으로 원하는 시점으로 바로 갑니다. 주황 세로선이 오늘입니다." },
+        { sel: "#gGroup", title: "묶어 보기", body: "WBS 대신 공종·주공정 여부·진행 상태로 묶어 봅니다. '열 설정'에서 열을 숨기거나 순서를 바꾸고, '보기 저장'으로 팀과 함께 씁니다." },
+        { sel: "#fEdit", title: "끌어서 What-if", body: "켜고 막대 오른쪽 끝을 끌면 공기, 가운데를 끌면 시작 시점이 바뀌고 준공 영향이 위에 표시됩니다. 원본은 그대로이고 '시나리오로 저장'할 수 있습니다." },
         { sel: "#fCmp", title: "비교 겹쳐보기", body: "비교 기준 업데이트의 막대를 보라색 점선으로 겹쳐 그립니다. '바뀐 작업만'을 켜면 날짜가 달라진 작업만 남습니다." },
         { sel: "#fTrace", title: "경로 추적", body: "'구동 경로'를 고른 뒤 작업을 클릭하면 그 작업을 실제로 밀고 있는 선행·후행 체인이 노랗게 강조됩니다. '전체 선·후행'은 연결된 모든 작업을 보여 줍니다.", wait: "change" },
         { sel: "#gBl", title: "베이스라인 비교", body: "P6 계획(Target) 또는 저장한 베이스라인(예: 최초 승인)을 주황 막대로 겹쳐 봅니다." },
@@ -225,6 +227,8 @@ const COURSES = [
     { id: "t-4", title: "Ctrl+K 빠른 이동과 되돌리기", steps: [
       { type: "text", html: `<ul><li><b>Ctrl+K</b>(맥 ⌘K): 프로젝트·화면·작업 ID를 검색해 바로 이동합니다. 화살표와 Enter로 고르고 Esc로 닫습니다.</li>
         <li><b>되돌리기</b>: 리스크·제약·약속·업로드를 지우면 화면 아래에 10초 동안 <b>되돌리기</b> 버튼이 나옵니다. 놓쳤다면 관리자가 휴지통(7일 보관)에서 복원할 수 있습니다.</li>
+        <li><b>Ctrl+K 명령</b>: 검색창에 '리스크 추가', '보고 패키지', '월간 점검', 'A2000 공정표'처럼 입력하면 바로 실행합니다.</li>
+        <li><b>내 설정</b>: 오른쪽 위 내 메뉴 → 내 설정에서 계정·테마·표 간격·홈 구성·알림(바탕화면 알림)을 한 번에 바꿉니다.</li>
         <li><b>화면 이동 단축키</b>: <kbd>g</kbd>를 누른 뒤 <kbd>o</kbd> 상황판, <kbd>t</kbd> 타임라인, <kbd>g</kbd> 공정표, <kbd>r</kbd> 리스크, <kbd>l</kbd> 룩어헤드, <kbd>w</kbd> 월간 점검, <kbd>p</kbd> 보고서 센터, <kbd>h</kbd> 홈. <kbd>?</kbd>로 전체 목록을 봅니다.</li>
         <li><b>표에서 바로 고치기</b>: 리스크의 상태·확률·담당자·기한, 제약의 기한·담당자·상태는 표 칸에서 바로 바꿉니다. 다른 사람이 먼저 고쳤으면 '덮어쓰기/다시 불러오기'를 묻습니다.</li>
         <li><b>왼쪽 메뉴</b>: 화면은 왼쪽 메뉴에서 고릅니다. 맨 아래 '메뉴 접기'로 아이콘만 남길 수 있고, 휴대폰에서는 왼쪽 위 ☰ 버튼으로 엽니다. 내 메뉴에서 <b>표 간격</b>(편안·보통·촘촘)과 <b>화면 테마</b>(밝게·어둡게)를 고릅니다.</li>
@@ -275,19 +279,19 @@ async function showLearn(courseId, lessonId) {
   if (lessonId) return showLesson(lessonId);
   const total = ALL_LESSONS.length, done = LP.done.length;
   const isAdmin = (document.body.dataset.role || "admin") === "admin";
-  view.innerHTML = `<div class="row" style="justify-content:space-between"><div><h2 style="margin:0">🎓 학습 센터</h2>
+  view.innerHTML = `<div class="row between"><div><h2 class="m0">🎓 학습 센터</h2>
       <p class="muted" style="margin:4px 0 12px">개념 설명 → 실제 화면 따라하기 → 퀴즈 순서로 진행합니다. 진도는 ${me?.username ? "계정에" : "이 브라우저에"} 저장됩니다.</p></div>
       <div class="kpi" style="min-width:200px"><div class="l">내 진도</div><div class="v">${done} / ${total}</div><div class="bar"><i style="width:${(100 * done) / total}%"></i></div></div></div>
     <div class="learn-grid">${COURSES.map((c) => { const n = c.lessons.filter((l) => LP.done.includes(l.id)).length;
       return `<a class="course" href="#/learn/${c.id}/${(c.lessons.find((l) => !LP.done.includes(l.id)) || c.lessons[0]).id}"><div class="ico">${c.icon}</div><h3 style="margin:6px 0">${esc(c.title)}</h3>
         <div class="muted">${esc(c.desc)}</div><div class="muted" style="font-size:12px;margin-top:8px">${n}/${c.lessons.length} 완료 ${n === c.lessons.length ? "✓" : ""}</div><div class="pbar"><i style="width:${(100 * n) / c.lessons.length}%"></i></div></a>`; }).join("")}</div>
-    <div class="grid2" style="margin-top:16px">
-      <div class="panel"><h3 style="margin-top:0">📖 용어 사전</h3><input class="s" type="search" id="gq" placeholder="용어 검색" style="width:100%">
+    <div class="grid2 mt16">
+      <div class="panel"><h3 class="mt0">📖 용어 사전</h3><input class="s" type="search" id="gq" placeholder="용어 검색" style="width:100%">
         <dl class="kv" id="glist" style="margin-top:8px"></dl></div>
-      <div class="panel"><h3 style="margin-top:0">🧪 실습 도구</h3>
+      <div class="panel"><h3 class="mt0">🧪 실습 도구</h3>
         <p><a href="#/learn/cpm/cpm-2" class="btn">CPM 계산 실습</a> <a href="#/learn/cpm/cpm-1" class="btn">여유일 시뮬레이터</a></p>
         <p><button class="btn" id="lSample">교육용 샘플 프로젝트 열기</button></p>
-        <p class="muted" style="font-size:13px">교육용 샘플은 3월·4월 업데이트, 베이스라인, 리스크 1건이 들어 있어 모든 화면을 연습할 수 있습니다.</p>
+        <p class="muted fs13">교육용 샘플은 3월·4월 업데이트, 베이스라인, 리스크 1건이 들어 있어 모든 화면을 연습할 수 있습니다.</p>
         ${isAdmin ? `<p><button class="btn" id="lTeam">팀 학습 현황 보기</button></p>` : ""}</div></div>`;
   const drawG = (q) => { $("#glist").innerHTML = Object.entries(GLOSSARY).filter(([k, v]) => !q || (k + v).toLowerCase().includes(q.toLowerCase())).map(([k, v]) => `<dt><b>${esc(k)}</b></dt><dd>${esc(v)}</dd>`).join(""); };
   drawG(""); $("#gq").oninput = (e) => drawG(e.target.value);
@@ -331,7 +335,7 @@ async function showLesson(lessonId) {
 }
 
 function renderQuiz(box, q, key) {
-  box.innerHTML = `<div class="quiz"><h3 style="margin-top:0">Q. ${esc(q.q)}</h3>${q.options.map((o, i) => `<button class="opt" data-i="${i}">${String.fromCharCode(65 + i)}. ${esc(o)}</button>`).join("")}<div id="qExp" aria-live="polite"></div></div>`;
+  box.innerHTML = `<div class="quiz"><h3 class="mt0">Q. ${esc(q.q)}</h3>${q.options.map((o, i) => `<button class="opt" data-i="${i}">${String.fromCharCode(65 + i)}. ${esc(o)}</button>`).join("")}<div id="qExp" aria-live="polite"></div></div>`;
   box.querySelectorAll(".opt").forEach((b) => (b.onclick = async () => {
     const ok = +b.dataset.i === q.answer;
     box.querySelectorAll(".opt").forEach((x) => { x.disabled = true; if (+x.dataset.i === q.answer) x.classList.add("right"); });
@@ -403,7 +407,7 @@ function renderFloatSim(box) {
       <text x="${110 + end * sc - 30}" y="${acts.length * 30 + 24}" style="font-size:12px">준공 ${end}일</text></svg>`;
     box.querySelector("#simMsg").textContent = `준공 ${end}일 · 주공정: ${acts.filter((a) => by[a.id].tf === 0).map((a) => a.id).join(" → ")}`;
   };
-  box.innerHTML = `<h3 style="margin-top:0">여유일 시뮬레이터</h3><p class="muted">슬라이더로 공기를 바꿔 보세요. 여유(회색 점선)가 있는 작업은 늘려도 준공이 그대로지만, 여유를 다 쓰면 주공정(빨강)이 바뀝니다.
+  box.innerHTML = `<h3 class="mt0">여유일 시뮬레이터</h3><p class="muted">슬라이더로 공기를 바꿔 보세요. 여유(회색 점선)가 있는 작업은 늘려도 준공이 그대로지만, 여유를 다 쓰면 주공정(빨강)이 바뀝니다.
       <b>도전:</b> C(배관 매설)를 몇 일까지 늘려야 주공정이 바뀌나요?</p>
     <div class="sim-box"><div>${acts.map((a, i) => `<label>${a.id} ${a.name} <b id="sv${i}">${a.dur}</b>일<input type="range" min="1" max="20" value="${a.dur}" data-i="${i}" aria-label="${a.id} 공기"></label>`).join("")}</div>
       <div><div id="simChart"></div><p id="simMsg" aria-live="polite"></p></div></div>`;
@@ -454,7 +458,7 @@ function runTour() {
     pop.style.left = Math.max(8, Math.min(innerWidth - 380, r.left)) + "px";
     pop.style.top = (below ? r.top + Math.min(r.height, innerHeight * 0.6) + 14 : Math.max(8, r.top - 190)) + "px";
   };
-  pop.innerHTML = `<div class="muted" style="font-size:12px">따라하기 ${s.i + 1} / ${s.tour.steps.length}</div><h4>${esc(step.title)}</h4><div>${esc(step.body)}</div>
+  pop.innerHTML = `<div class="muted fs12">따라하기 ${s.i + 1} / ${s.tour.steps.length}</div><h4>${esc(step.title)}</h4><div>${esc(step.body)}</div>
     ${!el ? `<div class="task">이 화면에서 해당 요소를 찾지 못했습니다. 다음으로 넘어가세요.</div>` : step.wait ? `<div class="task">👉 직접 해 보면 자동으로 다음 단계로 넘어갑니다.</div>` : ""}
     <div class="row"><button class="btn sm" id="tSkip">그만하기</button><span><button class="btn sm" id="tPrev" ${s.i ? "" : "disabled"}>이전</button>
       <button class="btn sm primary" id="tNext">${s.i === s.tour.steps.length - 1 ? "완료" : "다음"}</button></span></div>`;
@@ -482,7 +486,7 @@ function openHelpFor(tab) {
     ${tour ? `<button class="btn primary" id="hTour">▶ 이 화면 따라하기 (${tour.steps.length}단계)</button>` : ""}
     <p><a class="btn" href="#/learn/${L.course.id}/${L.id}">📘 관련 강의: ${esc(L.title)}</a></p>
     <h4>이 화면의 용어</h4><div id="hTerms" class="muted">-</div>
-    <p class="muted" style="font-size:12px">단축키는 <kbd>?</kbd>, AI 질문은 <kbd>Alt</kbd>+<kbd>A</kbd>.</p>`);
+    <p class="muted fs12">단축키는 <kbd>?</kbd>, AI 질문은 <kbd>Alt</kbd>+<kbd>A</kbd>.</p>`);
   const words = new Set([...document.querySelectorAll("#tab .term")].map((t) => t.dataset.term));
   $("#hTerms").innerHTML = [...words].map((w) => `<div class="mini"><b>${esc(w)}</b> ${esc(GLOSSARY[w])}</div>`).join("") || "표 머리글의 ? 표시에 마우스를 올리면 설명이 나옵니다.";
   if (tour) d.querySelector("#hTour").onclick = () => {

@@ -17,9 +17,9 @@ async function loadPrefs() {
 function skeleton(kind = "page") {
   const line = (w, h = 14) => `<span class="sk" style="width:${w};height:${h}px"></span>`;
   const card = `<div class="panel sk-card">${line("40%", 16)}${line("70%", 28)}${line("90%")}${line("60%")}</div>`;
-  if (kind === "tab") return `<div class="skel" aria-busy="true" aria-label="불러오는 중"><div class="kpis">${Array(6).fill(`<div class="kpi">${line("60%")}${line("80%", 26)}</div>`).join("")}</div><div class="grid2">${card}${card}</div></div>`;
-  if (kind === "project") return `<div class="skel" aria-busy="true" aria-label="불러오는 중"><div class="phead">${line("30%", 26)}${line("50%")}</div>${line("100%", 34)}${skeleton("tab")}</div>`;
-  return `<div class="skel" aria-busy="true" aria-label="불러오는 중">${line("25%", 26)}<div class="cards">${card}${card}${card}</div>${card}</div>`;
+  if (kind === "tab") return `<div class="skel" role="status" aria-busy="true" aria-label="불러오는 중"><div class="kpis">${Array(6).fill(`<div class="kpi">${line("60%")}${line("80%", 26)}</div>`).join("")}</div><div class="grid2">${card}${card}</div></div>`;
+  if (kind === "project") return `<div class="skel" role="status" aria-busy="true" aria-label="불러오는 중"><div class="phead">${line("30%", 26)}${line("50%")}</div>${line("100%", 34)}${skeleton("tab")}</div>`;
+  return `<div class="skel" role="status" aria-busy="true" aria-label="불러오는 중">${line("25%", 26)}<div class="cards">${card}${card}${card}</div>${card}</div>`;
 }
 
 // ---------------------------------------------------------------- ⑯ 대형 공정표: 요약(lite) 먼저, 액티비티 나중
@@ -245,7 +245,7 @@ tabOverview = async function (el, r, uid) {
   const rv = s.review || {};
   el.innerHTML = `
     <div class="sit ${lvl[0]}"><span class="sit-badge">${lvl[1]}</span><div><div class="sit-line">${esc(s.headline)}</div>
-      <div class="muted" style="font-size:12px">${s.base_data_date ? `비교 기준: DD ${s.base_data_date}` : "비교할 이전 업데이트 없음"} ·
+      <div class="muted fs12">${s.base_data_date ? `비교 기준: DD ${s.base_data_date}` : "비교할 이전 업데이트 없음"} ·
         ${rv.completed_by ? `<span class="chip ok">✓ 월간 점검 완료 · ${esc(rv.completed_by)} ${fmtAt(rv.completed_at)}</span>` : `<a href="#/wizard/${uid}">월간 업데이트 점검 ${Object.keys(rv.steps || {}).length ? `(${Object.keys(rv.steps).length}단계 확인됨) ` : ""}열기 →</a>`}</div></div></div>
     <div class="kpis kpis6">${s.kpis.map((k) => `<div class="kpi ${kTone(k)}">
       <div class="l">${esc(k.label)}${s.why?.[k.key] ? ` <button class="why" data-why="${k.key}" aria-expanded="false" aria-label="${esc(k.label)} 왜 이런가요?">왜?</button>` : ""}</div>
@@ -257,15 +257,15 @@ tabOverview = async function (el, r, uid) {
     <div class="row end" style="margin:-6px 0 8px"><button class="btn sm ghost" id="kpiCfg" title="보일 지표와 순서를 고릅니다">⚙ 지표 고르기</button>
       <a class="btn sm ghost" href="#/p/${uid}/settings" data-sub="status" title="정상·주의·위험 판정 기준">상태 기준</a></div>
     <div class="grid2">
-      <div class="panel"><h3 style="margin-top:0">이번 주 할 일 <span class="muted" style="font-size:13px">${s.todo_total > s.todo.length ? `(${s.todo_total}건 중 5건)` : ""}</span></h3>
+      <div class="panel"><h3 class="mt0">이번 주 할 일 <span class="muted fs13">${s.todo_total > s.todo.length ? `(${s.todo_total}건 중 5건)` : ""}</span></h3>
         ${s.todo.map((t) => `<a class="inbox-item ${t.level}" href="#/p/${uid}/${t.tab}"><span class="sev">${t.level === "high" ? "✕" : t.level === "mid" ? "!" : "·"}</span><span style="grid-column:2/4">${esc(t.text)}</span><span class="go">→</span></a>`).join("")
           || '<p class="muted">✓ 급한 일이 없습니다.</p>'}</div>
-      <div class="panel"><h3 style="margin-top:0">마일스톤</h3>
+      <div class="panel"><h3 class="mt0">마일스톤</h3>
         <div class="scroll"><table class="t" data-noexport><thead><tr><th>ID</th><th>마일스톤</th><th>예정</th><th>계획</th><th class="num">편차</th></tr></thead><tbody>
         ${s.milestones.map((m) => `<tr><td>${esc(m.code)}</td><td>${m.done ? "✓ " : ""}${esc(m.name)}</td><td>${m.finish}</td><td>${m.bl || "-"}</td>
           <td class="num" style="color:${(m.var || 0) > 0 ? "var(--crit-text)" : ""}">${m.var === null ? "-" : (m.var > 0 ? "+" : "") + m.var}</td></tr>`).join("") || '<tr><td colspan="5" class="muted">마일스톤이 없습니다.</td></tr>'}</tbody></table></div></div></div>
     ${readinessPanel(s.readiness, uid)}
-    <div class="panel"><h3 style="margin-top:0">팀 코멘트 <span class="muted" style="font-size:13px">@아이디로 동료를 부르면 알림이 갑니다</span></h3><div id="projComments"></div></div>`;
+    <div class="panel"><h3 class="mt0">팀 코멘트 <span class="muted fs13">@아이디로 동료를 부르면 알림이 갑니다</span></h3><div id="projComments"></div></div>`;
   el.querySelectorAll("[data-why]").forEach((b) => (b.onclick = () => {
     const box = $("#why-" + b.dataset.why); box.hidden = !box.hidden; b.setAttribute("aria-expanded", String(!box.hidden));
   }));
@@ -287,7 +287,7 @@ function kTone(k) {
 const KPI_LABEL = { finish: "예상 준공", margin: "목표 대비 여유", progress: "공정률", health: "건전성", spi: "SPI", neg: "음수 여유 작업" };
 async function kpiConfig(uid, r) {
   let cur = [...(prefs.kpis?.length ? prefs.kpis : Object.keys(KPI_LABEL))];
-  const d = _modal(`<form method="dialog" id="fKpi"><h3>상황판 지표 고르기</h3><p class="muted" style="font-size:13px">체크한 지표만 보이고, ↑↓로 순서를 바꿉니다. 내 계정에만 적용됩니다.</p>
+  const d = _modal(`<form method="dialog" id="fKpi"><h3>상황판 지표 고르기</h3><p class="muted fs13">체크한 지표만 보이고, ↑↓로 순서를 바꿉니다. 내 계정에만 적용됩니다.</p>
     <ol id="kpiList" class="kpi-cfg"></ol><div class="row end"><button class="btn" value="cancel" formnovalidate>닫기</button><button class="btn" type="button" id="kpiReset">기본값</button><button class="btn primary" value="ok">저장</button></div></form>`);
   const all = () => [...cur, ...Object.keys(KPI_LABEL).filter((k) => !cur.includes(k))];
   const draw = () => {
@@ -370,21 +370,21 @@ showWizard = async function (uid) {
   const cur = Math.min(+(sessionStorage.getItem("wizStep:" + uid) || 0), rv.steps.length - 1);
   const badge = (s) => s.ok === null ? '<span class="chip">정보</span>' : s.ok ? '<span class="chip ok">✓ 이상 없음</span>' : '<span class="chip warn">! 확인 필요</span>';
   const st = rv.steps[cur], sg = signed(st.key);
-  view.innerHTML = `<div class="row" style="justify-content:space-between"><div><h2 style="margin:0">월간 업데이트 점검</h2>
+  view.innerHTML = `<div class="row between"><div><h2 class="m0">월간 업데이트 점검</h2>
       <div class="muted">${esc(r.name)} · DD ${rv.data_date}${rv.base_data_date ? ` (비교: DD ${rv.base_data_date})` : ""}</div></div>
       <div class="row">${so.completed_by ? `<span class="chip ok">✓ 점검 완료 · ${esc(so.completed_by)} ${fmtAt(so.completed_at)}</span>` : `<span class="chip">${Object.keys(so.steps || {}).length}/${rv.steps.length} 단계 확인</span>`}
         <button class="btn" id="wzUpload" data-need="editor">${icon("upload")} 새 업데이트 올리기</button><a class="btn" href="#/p/${uid}/overview">상황판</a></div></div>
     <ol class="stepper">${rv.steps.map((x, i) => `<li class="${i === cur ? "on" : ""} ${signed(x.key) ? "done" : ""}"><button data-st="${i}" title="${signed(x.key) ? `확인: ${esc(signed(x.key).by)} ${fmtAt(signed(x.key).at)}` : "미확인"}">
       <span class="n">${signed(x.key) ? "✓" : i + 1}</span><span>${esc(x.title)}</span>${x.ok === false ? '<span class="dot" aria-label="확인 필요"></span>' : ""}</button></li>`).join("")}</ol>
-    <div class="panel wiz"><div class="row" style="justify-content:space-between"><h3 style="margin:0">${cur + 1}. ${esc(st.title)}</h3>${badge(st)}</div>
+    <div class="panel wiz"><div class="row between"><h3 class="m0">${cur + 1}. ${esc(st.title)}</h3>${badge(st)}</div>
       <p style="font-size:16px">${esc(st.summary)}</p>
       ${st.issues.length ? `<ul>${st.issues.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
       ${(st.detail || []).length ? `<details><summary>주의 변경 ${st.detail.length}건</summary><ul>${st.detail.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></details>` : ""}
       ${st.key === "report" ? `<p>보고서 센터에서 이번 달 출력물을 만듭니다. 비교 기준(${rv.base_data_date || "없음"})이 그대로 적용됩니다.</p><a class="btn primary" href="#/reports/${uid}">보고서 센터 열기 →</a>`
         : `<a class="btn" href="#/p/${uid}/${st.tab}">자세히 보기 →</a>`}
       <div class="signoff">${sg ? `<div class="chip ok">✓ ${esc(sg.by)} 님이 ${fmtAt(sg.at)}에 확인${sg.note ? ` · “${esc(sg.note)}”` : ""}</div>` : '<div class="muted">아직 이 단계를 확인한 사람이 없습니다.</div>'}
-        ${ctx.canWrite ? `<label class="muted" style="display:block;margin-top:8px">확인 메모 (선택, 팀에 공유)<input class="s" id="wzNote" style="width:100%" maxlength="500" value="${esc(sg?.note || "")}" placeholder="예: 철골 공기 단축은 협력사 회의 결과 반영"></label>` : ""}</div>
-      <div class="nav" style="margin-top:16px"><button class="btn" id="wzPrev" ${cur ? "" : "disabled"}>← 이전</button>
+        ${ctx.canWrite ? `<label class="muted db mt8">확인 메모 (선택, 팀에 공유)<input class="s" id="wzNote" style="width:100%" maxlength="500" value="${esc(sg?.note || "")}" placeholder="예: 철골 공기 단축은 협력사 회의 결과 반영"></label>` : ""}</div>
+      <div class="nav mt16"><button class="btn" id="wzPrev" ${cur ? "" : "disabled"}>← 이전</button>
         <button class="btn primary" id="wzNext">${ctx.canWrite ? (cur < rv.steps.length - 1 ? "확인했습니다 · 다음 →" : "점검 완료 ✓") : (cur < rv.steps.length - 1 ? "다음 →" : "상황판으로")}</button></div></div>`;
   applyRole(view);
   const go = (i) => { sessionStorage.setItem("wizStep:" + uid, String(i)); showWizard(uid); };
@@ -422,7 +422,7 @@ showList = async function () {
   if (!list.length) {
     view.innerHTML = `<div class="panel empty"><h2>업로드된 공정표가 없습니다</h2>
       <p>P6 XER 또는 MS Project 파일을 올리거나, 템플릿·문서로 초기 공정표를 만들어 보세요.</p>
-      <div class="row" style="justify-content:center"><button class="btn primary" onclick="$('#btnUpload').click()">파일 업로드</button>
+      <div class="row center"><button class="btn primary" onclick="$('#btnUpload').click()">파일 업로드</button>
       <button class="btn" onclick="showGenerate()">새 공정표 만들기</button></div></div>`;
     return;
   }
@@ -445,15 +445,15 @@ showList = async function () {
     <div class="s"><div class="l">가장 빠른 준공</div><div class="v" style="font-size:20px">${nextFin || "-"}</div></div>
   </div>
   <div class="home-grid"><div>
-  <div class="row" style="justify-content:space-between;margin-bottom:12px"><h3 style="margin:0">포트폴리오 <span class="muted" id="pfCount"></span></h3>
+  <div class="row" style="justify-content:space-between;margin-bottom:12px"><h3 class="m0">포트폴리오 <span class="muted" id="pfCount"></span></h3>
     <div class="row"><label class="muted">정렬 <select class="s sm" id="pfSort">${[["risk", "위험 높은 순"], ["slip", "지연 큰 순"], ["recent", "최근 업데이트 순"], ["name", "이름 순"]].map(([k, l]) => `<option value="${k}" ${st.sort === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <div class="seg-tabs sm" role="group" aria-label="상태 필터">${[["all", "전체"], ["bad", "위험"], ["warn", "주의"], ["ok", "정상"]].map(([k, l]) => `<button class="${st.lv === k ? "on" : ""}" data-lv="${k}">${l}</button>`).join("")}</div>
       </div></div>
   <div class="cards" id="pfCards"></div></div>
   <aside><div id="myTasks"></div><div id="inbox"></div></aside></div>
   <div class="panel">
-    <div class="row" style="justify-content:space-between;margin-bottom:10px">
-      <h3 style="margin:0">팀 공정표 <span class="muted">(프로젝트 ${Object.keys(byName).length} · 업데이트 ${list.length})</span></h3>
+    <div class="row between mb10">
+      <h3 class="m0">팀 공정표 <span class="muted">(프로젝트 ${Object.keys(byName).length} · 업데이트 ${list.length})</span></h3>
       <div class="row"><span class="muted">업데이트 비교:</span>
         <select class="s" id="cmpA" aria-label="비교 이전">${list.map((u) => `<option value="${u.id}">${esc(u.name)} · ${u.data_date}</option>`).join("")}</select><span>→</span>
         <select class="s" id="cmpB" aria-label="비교 이후">${list.map((u) => `<option value="${u.id}">${esc(u.name)} · ${u.data_date}</option>`).join("")}</select>
@@ -516,7 +516,7 @@ async function renderMyTasks(box) {
   const xs = await api("/api/my/tasks").catch(() => []);
   if (!xs.length) { box.innerHTML = ""; return; }
   const today = new Date().toISOString().slice(0, 10);
-  box.innerHTML = `<div class="panel"><h3 style="margin-top:0">내게 배정된 일 <span class="muted">(${xs.length})</span></h3><div class="inbox">
+  box.innerHTML = `<div class="panel"><h3 class="mt0">내게 배정된 일 <span class="muted">(${xs.length})</span></h3><div class="inbox">
     ${xs.map((t) => `<a class="inbox-item ${t.due && t.due < today ? "high" : "mid"}" href="#/p/${t.uid}/${t.tab}${t.kind === "멘션" ? "?c=" + t.id : ""}">
       <span class="sev">${t.kind === "멘션" ? "@" : t.kind === "리스크" ? "!" : "▣"}</span>
       <span><span class="tag">${esc(t.kind)}</span> <b>${esc(t.project)}</b> ${esc(t.text)}</span>
@@ -530,7 +530,7 @@ tabSettings = async function (el, r, uid) {
 };
 async function settingsCalc(el, r, uid) {
   const st = await api(`/api/uploads/${uid}/settings`);
-  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">일정 계산 옵션</h3>
+  el.innerHTML = `<div class="panel"><h3 class="mt0">일정 계산 옵션</h3>
       <label><input type="checkbox" id="optPO" ${st.schedule_options.progress_override ? "checked" : ""}> Progress Override (착수된 작업은 선행 논리를 무시하고 Data Date부터 잔여 작업 진행)</label>
       <p class="muted">기본값은 Retained Logic(P6 기본)입니다. P6의 Schedule Options와 같게 맞추면 'P6 일정 비교' 일치율이 올라갑니다. 변경하면 이 프로젝트의 모든 업데이트를 다시 계산합니다.</p>
       <button class="btn primary" id="optSave" data-need="editor">저장 및 재계산</button></div>`;
@@ -543,7 +543,7 @@ async function settingsCalc(el, r, uid) {
 async function settingsQuality(el, r, uid) {
   const [st, defs] = await Promise.all([api(`/api/uploads/${uid}/settings`), api("/api/metrics/defaults")]);
   const ov = st.metric_overrides;
-  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">건전성 지표 기준값 (이 프로젝트)</h3>
+  el.innerHTML = `<div class="panel"><h3 class="mt0">건전성 지표 기준값 (이 프로젝트)</h3>
       <p class="muted">비워 두면 팀 기본값(${Object.keys(st.team_metric_overrides).length ? "관리자 설정" : "표준값"})을 씁니다. 가중치 0은 점수에서 제외합니다.</p>
       <div class="scroll"><table class="t"><thead><tr><th>ID</th><th>그룹</th><th>항목</th><th>비교</th><th>기본 기준</th><th>기준</th><th>가중치</th><th>사용</th></tr></thead><tbody>
       ${defs.map((d) => { const o = ov[d.id] || {}; return `<tr><td>${d.id}</td><td>${d.group}</td><td>${esc(d.name)}</td><td>${d.cmp === "le" ? "≤" : d.cmp === "ge" ? "≥" : "참고"}</td><td>${d.threshold ?? "-"}${d.unit === "%" ? "%" : ""}</td>
@@ -590,7 +590,7 @@ function parsePaste(text, kind) {
 async function bulkPaste(uid, kind, onDone) {
   const spec = BULK[kind];
   const d = _modal(`<form method="dialog" id="fBulk" style="min-width:min(760px,92vw)"><h3>엑셀에서 붙여넣기 · ${spec.label}</h3>
-    <p class="muted" style="font-size:13px">엑셀에서 표를 복사(Ctrl+C)해 아래에 붙여넣으세요(Ctrl+V). 첫 줄이 머리글이면 열 이름으로 맞추고, 없으면 다음 순서로 읽습니다:<br><b>${spec.cols.map(([, l]) => l).join(" · ")}</b></p>
+    <p class="muted fs13">엑셀에서 표를 복사(Ctrl+C)해 아래에 붙여넣으세요(Ctrl+V). 첫 줄이 머리글이면 열 이름으로 맞추고, 없으면 다음 순서로 읽습니다:<br><b>${spec.cols.map(([, l]) => l).join(" · ")}</b></p>
     <textarea id="bkText" rows="8" style="width:100%" aria-label="붙여넣을 표" placeholder="${spec.cols.map(([, l]) => l).join("\t")}"></textarea>
     <div class="row"><button type="button" class="btn" id="bkTpl">머리글 줄 복사</button><span class="spacer"></span><button type="button" class="btn" id="bkCheck">미리보기·검사</button></div>
     <div id="bkOut" aria-live="polite"></div>
@@ -623,7 +623,7 @@ tabLookahead = async function (el, r, uid) {
   const users = await userList();
   const cl = [...el.querySelectorAll(".panel h3")].find((h) => h.textContent.startsWith("제약 로그"));
   if (cl) {
-    cl.insertAdjacentHTML("afterend", `<div class="row" style="margin:-4px 0 8px"><span class="muted" style="font-size:12px">담당자를 지정하면 그 사람의 홈 '내게 배정된 일'과 알림에 나타납니다.</span><span class="spacer"></span>
+    cl.insertAdjacentHTML("afterend", `<div class="row" style="margin:-4px 0 8px"><span class="muted fs12">담당자를 지정하면 그 사람의 홈 '내게 배정된 일'과 알림에 나타납니다.</span><span class="spacer"></span>
       <button class="btn sm" id="laBulkC" data-need="editor">제약 엑셀 붙여넣기</button><button class="btn sm" id="laBulkK" data-need="editor">약속 엑셀 붙여넣기</button></div>`);
     $("#laBulkC").onclick = () => bulkPaste(uid, "constraint", () => tabLookahead(el, r, uid));
     $("#laBulkK").onclick = () => bulkPaste(uid, "commit", () => tabLookahead(el, r, uid));
@@ -663,7 +663,7 @@ showReports = async function (preUid) {
     <div class="out-card on" role="listitem"><b>📊 엑셀 양식 리포트</b><span class="muted">회사 양식(.xlsx)에 자동 채움 · 아래 ①~③</span><div class="row"><a class="btn sm" href="#rpGo" onclick="event.preventDefault();$('#rpGo').scrollIntoView({block:'center'});$('#rpGo').focus()">아래에서 만들기</a></div></div>
     <div class="out-card" role="listitem"><b>🖨 A3 공정표 인쇄</b><span class="muted">바 차트 A3 가로, PDF로 저장 가능</span><div class="row"><a class="btn sm" id="ocPrint">인쇄 화면</a></div></div>
     <div class="out-card" role="listitem"><b>📄 CSV 데이터</b><span class="muted">전체 액티비티 표, 엑셀에서 열기</span><div class="row"><button class="btn sm" id="ocCsv">내려받기</button></div></div></div>
-    <p class="muted" style="font-size:13px">카드의 출력물은 아래 ② 에서 고른 프로젝트·업데이트 기준으로 만듭니다.</p>`);
+    <p class="muted fs13">카드의 출력물은 아래 ② 에서 고른 프로젝트·업데이트 기준으로 만듭니다.</p>`);
   const cur = () => $("#rpUp")?.value;
   $("#ocWordEdit").onclick = () => (location.hash = `#/p/${cur()}/report`);
   $("#ocWord").onclick = () => download(`/api/uploads/${cur()}/report.docx`, "report.docx");
@@ -677,7 +677,7 @@ showReports = async function (preUid) {
     const panel = hp.parentElement;
     const drawH = (t) => {
       const xs = hist.filter((h) => !t || (h.type || "엑셀 양식") === t).slice(0, 20);
-      panel.innerHTML = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">최근 출력물 이력</h3>
+      panel.innerHTML = `<div class="row between"><h3 class="m0">최근 출력물 이력</h3>
         <select class="s sm" id="hType" aria-label="출력물 종류"><option value="">전체 종류</option>${types.map((x) => `<option ${x === t ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></div>
         <table class="t" data-noexport><thead><tr><th>시각</th><th>종류</th><th>프로젝트</th><th>양식</th><th>작성자</th></tr></thead><tbody>
         ${xs.map((h) => `<tr><td>${fmtAt(h.created_at)}</td><td><span class="tag">${esc(h.type || "엑셀 양식")}</span></td><td>${esc(h.project)} <span class="muted">${h.data_date}</span></td>
@@ -702,7 +702,7 @@ async function showPrefs() {
   const p = await loadPrefs();
   const types = p.types || {};
   const d = _modal(`<form method="dialog" id="fPrefs"><h3>⚙ 환경 설정</h3>
-    <h4>시작 화면</h4><p class="muted" style="font-size:13px">로그인 후 처음 열 화면입니다.</p>
+    <h4>시작 화면</h4><p class="muted fs13">로그인 후 처음 열 화면입니다.</p>
     <select class="s" name="start_page" style="width:100%">${[["home", "홈 (오늘 확인할 것 + 포트폴리오)"], ["portfolio", "포트폴리오만"], ["wizard", "내 최근 프로젝트의 월간 점검"], ["field", "내 최근 프로젝트의 현장 모드"], ["reports", "보고서 센터"]]
       .map(([k, l]) => `<option value="${k}" ${p.start_page === k ? "selected" : ""}>${l}</option>`).join("")}</select>
     <h4>용어 표기</h4>
@@ -778,7 +778,7 @@ async function settingsStatus(el, r, uid) {
   const F = [["margin_bad", "목표 대비 여유가 이 값(일) 미만이면 위험", "기본 0"], ["margin_warn", "목표 대비 여유가 이 값(일) 미만이면 주의", "예: 10"],
     ["slip_warn", "직전 대비 준공 지연이 이 값(일) 이상이면 주의", "기본 1"], ["health_bad", "건전성 점수가 이 값 미만이면 위험", "예: 60"],
     ["health_warn", "건전성 점수가 이 값 미만이면 주의", "예: 75"], ["spi_warn", "SPI가 이 값 미만이면 주의", "예: 0.9"]];
-  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">상태 판정 기준 <span class="muted" style="font-size:13px">${esc(r.name)}</span></h3>
+  el.innerHTML = `<div class="panel"><h3 class="mt0">상태 판정 기준 <span class="muted fs13">${esc(r.name)}</span></h3>
     <p class="muted">상황판 머리 문장과 홈 포트폴리오 카드의 정상·주의·위험 색을 정하는 기준입니다. 비워 두면 그 기준은 쓰지 않습니다. 음수 여유 작업이 있으면 항상 위험입니다.</p>
     <div class="th-grid">${F.map(([k, l, ph]) => `<label>${l}<input class="s" type="number" step="${k === "spi_warn" ? "0.01" : "1"}" data-th="${k}" value="${v[k] ?? ""}" placeholder="${ph}"></label>`).join("")}</div>
     <div class="row end"><button class="btn primary" id="thSave" data-need="editor">저장</button></div></div>`;

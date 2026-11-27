@@ -25,6 +25,7 @@ NOTIFY_TYPES = {"access": "편집 권한 요청·결과", "member": "멤버 지�
                 "mention": "코멘트 @멘션", "assigned": "담당자 지정", "review": "월간 점검 완료"}
 
 
+HOME_BLOCKS = ("summary", "msgantt", "portfolio", "hub", "team")
 KPI_KEYS = ("finish", "margin", "progress", "health", "spi", "neg")
 
 
@@ -36,7 +37,7 @@ def prefs(username: str) -> dict:
     r = storage.rec_get("user_pref", username)
     d = {"start_page": "home", "term_mode": "mixed", "notify": list(NOTIFY_TYPES), "kpis": list(KPI_KEYS)}
     if r:
-        d.update({k: r[k] for k in ("start_page", "term_mode", "notify", "kpis") if k in r})
+        d.update({k: r[k] for k in ("start_page", "term_mode", "notify", "kpis", "home") if k in r})
     return d
 
 
@@ -46,6 +47,12 @@ def set_prefs(username: str, data: dict) -> dict:
         cur["start_page"] = data["start_page"]
     if data.get("term_mode") in ("mixed", "ko"):
         cur["term_mode"] = data["term_mode"]
+    if isinstance(data.get("home"), dict):
+        h = data["home"]
+        blocks = [b for b in (h.get("order") or []) if b in HOME_BLOCKS]
+        cur["home"] = {"preset": h.get("preset") if h.get("preset") in ("office", "field", "pm", "custom") else "office",
+                       "order": blocks + [b for b in HOME_BLOCKS if b not in blocks],
+                       "hidden": [b for b in (h.get("hidden") or []) if b in HOME_BLOCKS]}
     if isinstance(data.get("kpis"), list):
         ks = [k for k in dict.fromkeys(data["kpis"]) if k in KPI_KEYS]
         cur["kpis"] = ks or list(KPI_KEYS)

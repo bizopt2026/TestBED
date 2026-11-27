@@ -17,7 +17,7 @@ function errorPanel(err, inTab = false) {
   return `<div class="panel err-state" role="alert"><h3>⚠ ${kind[0]}</h3><p>${kind[1]}</p>
     <div class="row"><button class="btn primary" onclick="${inTab ? "showProject(ctx.uid, ctx.tab, true)" : "route()"}">다시 시도</button><a class="btn" href="#/">홈으로</a>
       ${st && st >= 500 || st === undefined ? `<button class="btn ghost" onclick="copyText(this.dataset.d)" data-d="${esc(detail)}">오류 내용 복사</button>` : ""}</div>
-    ${st && st >= 500 || st === undefined ? `<details><summary class="muted">자세히</summary><code style="font-size:12px">${esc(detail)}</code></details>` : ""}</div>`;
+    ${st && st >= 500 || st === undefined ? `<details><summary class="muted">자세히</summary><code class="fs12">${esc(detail)}</code></details>` : ""}</div>`;
 }
 // 오프라인 안내
 function offlineBanner() {
@@ -68,7 +68,7 @@ renderMyTasks = async function (box) {
     if (st.tab === "notes") body = (unread().length ? `<div class="row end"><button class="btn sm" id="hubReadAll">모두 읽음</button></div>` : "") +
       (notes.items.slice(0, 20).map((n) => `<div class="inbox-item ${n.read ? "low read" : "mid"}"><span class="sev">${n.read ? "·" : "●"}</span>
         <a href="${esc(n.link || "#/")}" data-nread="${n.id}">${esc(n.text)} <span class="muted">${(n.created_at || "").replace("T", " ").slice(5, 16)}</span></a><span></span></div>`).join("") || emptyState("알림이 없습니다", "받을 알림 종류는 내 메뉴 → 환경 설정에서 고릅니다."));
-    const panel = `<div class="hub-head"><h3 style="margin:0">할 일 함</h3><div class="seg-tabs sm" role="tablist" aria-label="할 일 함">${tabs.map(([k, l, n]) => `<button role="tab" aria-selected="${st.tab === k}" class="${st.tab === k ? "on" : ""}" data-ht="${k}">${l}${n ? ` <span class="cnt">${n}</span>` : ""}</button>`).join("")}</div></div>
+    const panel = `<div class="hub-head"><h3 class="m0">할 일 함</h3><div class="seg-tabs sm" role="tablist" aria-label="할 일 함">${tabs.map(([k, l, n]) => `<button role="tab" aria-selected="${st.tab === k}" class="${st.tab === k ? "on" : ""}" data-ht="${k}">${l}${n ? ` <span class="cnt">${n}</span>` : ""}</button>`).join("")}</div></div>
       <div class="inbox">${body}</div>`;
     if (prefs.start_page === "portfolio") box.innerHTML = `<details class="panel hub"><summary><b>할 일 함</b> <span class="muted">${tabs.map(([, l, n]) => `${l} ${n}`).join(" · ")} (펼치기)</span></summary>${panel}</details>`;
     else box.innerHTML = `<div class="panel hub">${panel}</div>`;
@@ -98,8 +98,8 @@ async function tabTimeline(el, r, uid) {
   const tl = await api(`/api/projects/${encodeURIComponent(r.name)}/timeline`);
   if (!tl.length) { el.innerHTML = emptyState("이력이 없습니다"); return; }
   const card = (t) => `<li class="tl-item ${t.id === uid ? "cur" : ""}"><div class="tl-dot ${t.slip > 0 ? "bad" : t.slip < 0 ? "ok" : ""}" aria-hidden="true"></div>
-    <div class="panel tl-card"><div class="row" style="justify-content:space-between"><h3 style="margin:0"><a href="#/p/${t.id}/overview">DD ${t.data_date}</a> ${t.id === uid ? '<span class="chip">보는 중</span>' : ""}</h3>
-      <span class="muted" style="font-size:12px">${esc(t.uploader || "")} · ${(t.created_at || "").replace("T", " ").slice(0, 16)} · ${esc(t.note || "")}</span></div>
+    <div class="panel tl-card"><div class="row between"><h3 class="m0"><a href="#/p/${t.id}/overview">DD ${t.data_date}</a> ${t.id === uid ? '<span class="chip">보는 중</span>' : ""}</h3>
+      <span class="muted fs12">${esc(t.uploader || "")} · ${(t.created_at || "").replace("T", " ").slice(0, 16)} · ${esc(t.note || "")}</span></div>
       <div class="chips"><span class="chip">예상 준공 ${t.finish}</span>${t.slip === null ? "" : `<span class="chip ${t.slip > 0 ? "bad" : "ok"}">${t.slip > 0 ? "▼ +" + t.slip + "일 지연" : t.slip < 0 ? "▲ " + -t.slip + "일 단축" : "= 변화 없음"}</span>`}
         <span class="chip">공정률 ${t.progress}%</span><span class="chip ${t.health >= 75 ? "ok" : t.health >= 60 ? "warn" : "bad"}">건전성 ${t.health}</span>${t.neg ? `<span class="chip bad">음수 여유 ${t.neg}</span>` : ""}</div>
       <div class="tl-grid">
@@ -127,7 +127,7 @@ showReports = async function (preUid) {
   hit("reports");
   const cards = $(".out-cards"); if (!cards) return;
   cards.insertAdjacentHTML("afterbegin", `<div class="out-card pkg" role="listitem"><b>📦 월간 보고 패키지</b><span class="muted">Word + 엑셀 양식 + A3 공정표 + CSV를 zip 하나로</span>
-    <div class="row"><button class="btn sm primary" id="ocPkg">패키지 내려받기</button></div><div id="ocFinal" class="muted" style="font-size:12px"></div></div>`);
+    <div class="row"><button class="btn sm primary" id="ocPkg">패키지 내려받기</button></div><div id="ocFinal" class="muted fs12"></div></div>`);
   const cur = () => $("#rpUp")?.value;
   const tpl = () => document.querySelector("input[name=tpl]:checked")?.value || "builtin:monthly";
   $("#ocPkg").onclick = () => withBusy($("#ocPkg"), () => download(`/api/uploads/${cur()}/package?tpl=${encodeURIComponent(tpl())}${$("#rpBase")?.value ? "&base=" + $("#rpBase").value : ""}`, "package.zip"));
@@ -231,12 +231,12 @@ showAdmin = async function () {
   const lessonTitle = Object.fromEntries((typeof ALL_LESSONS !== "undefined" ? ALL_LESSONS : []).map((l) => [l.id, l.title]));
   const label = (k) => TAB_LABEL[k] || { home: "홈", reports: "보고서 센터", wizard: "월간 점검", settings: "설정" }[k] || k;
   const p = document.createElement("div"); p.className = "panel"; p.id = "adminUsage";
-  p.innerHTML = `<h3 style="margin-top:0">사용 현황 <span class="muted" style="font-size:13px">최근 90일 · 개인별이 아닌 화면별 집계</span></h3>
+  p.innerHTML = `<h3 class="mt0">사용 현황 <span class="muted fs13">최근 90일 · 개인별이 아닌 화면별 집계</span></h3>
     <div class="grid2"><div><h4>화면별 사용</h4>${u.screens.map((x) => `<div class="hbar"><span>${esc(label(x.screen))}</span><div><i style="width:${(100 * x.views) / maxV}%"></i></div><b>${x.views}회 · ${x.users}명</b></div>`).join("") || '<p class="muted">아직 기록이 없습니다.</p>'}
-      <p class="muted" style="font-size:12px">거의 안 쓰는 화면은 '더보기'로 접혀 있습니다. 많이 쓰는 화면은 사용자별로 자동으로 탭에 나옵니다.</p></div>
+      <p class="muted fs12">거의 안 쓰는 화면은 '더보기'로 접혀 있습니다. 많이 쓰는 화면은 사용자별로 자동으로 탭에 나옵니다.</p></div>
     <div><h4>월간 점검 진행 <span class="muted">(시작 ${u.reviews_started} · 완료 ${u.reviews_completed})</span></h4>
       ${Object.entries(stepNames).map(([k, l]) => `<div class="hbar"><span>${l}</span><div><i style="width:${(100 * (u.review_steps[k] || 0)) / Math.max(1, u.reviews_started)}%"></i></div><b>${u.review_steps[k] || 0}</b></div>`).join("")}
-      <p class="muted" style="font-size:12px">막대가 갑자기 짧아지는 단계에서 점검을 멈추는 경우가 많다는 뜻입니다.</p>
+      <p class="muted fs12">막대가 갑자기 짧아지는 단계에서 점검을 멈추는 경우가 많다는 뜻입니다.</p>
       <h4>학습 강의 완료 <span class="muted">(학습자 ${u.learners})</span></h4>
       ${Object.entries(u.lessons).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, n]) => `<div class="hbar"><span>${esc(lessonTitle[k] || k)}</span><div><i style="width:${(100 * n) / Math.max(1, u.learners)}%"></i></div><b>${n}</b></div>`).join("") || '<p class="muted">없음</p>'}</div></div>`;
   view.querySelector("h2")?.after(p);
@@ -252,18 +252,18 @@ showWizard = async function (uid) { await _showWizard1(uid); hit("wizard"); };
 async function updatePanelHtml(force = false) {
   const u = await api(`/api/admin/update${force ? "?force=1" : ""}`).catch((e) => ({ error: e.message }));
   const last = u.last;
-  return `<div class="row" style="justify-content:space-between"><h3 style="margin:0">버전·업데이트</h3>
+  return `<div class="row between"><h3 class="m0">버전·업데이트</h3>
       <button class="btn sm" id="updCheck">${icon("search", 14)} 지금 확인</button></div>
     <div class="ver-line"><b>현재 ${esc(u.version || "-")}</b> <span class="muted">${esc(u.commit || "")} · ${esc(u.branch || "")} · ${esc(u.date || "")}</span>
-      ${u.checked_at ? `<span class="muted" style="font-size:12px"> · 확인 ${u.checked_at.replace("T", " ").slice(5, 16)}</span>` : ""}</div>
+      ${u.checked_at ? `<span class="muted fs12"> · 확인 ${u.checked_at.replace("T", " ").slice(5, 16)}</span>` : ""}</div>
     ${u.error ? `<p class="warn-text">⚠ ${esc(u.error)}</p>` : u.available ? `<div class="upd-box"><b>새 업데이트 ${u.behind}건</b>${u.remote_version ? ` → ${esc(u.remote_version)}` : ""}
         <ul>${u.changes.map((c) => `<li><span class="muted">${esc(c.date)}</span> ${esc(c.title)}</li>`).join("")}</ul>
-        <p class="muted" style="font-size:12px">업데이트 전에 데이터(data/app.db)를 자동으로 백업합니다. 업데이트 중에는 1분 정도 접속이 끊깁니다.</p>
+        <p class="muted fs12">업데이트 전에 데이터(data/app.db)를 자동으로 백업합니다. 업데이트 중에는 1분 정도 접속이 끊깁니다.</p>
         <button class="btn primary" id="updGo">지금 업데이트</button></div>`
       : `<p class="ok-text">✓ 최신 버전입니다.</p>`}
-    ${last ? `<p class="muted" style="font-size:12px">마지막 ${last.rollback ? "되돌리기" : "업데이트"}: ${last.at.replace("T", " ").slice(0, 16)} · ${esc(last.by || "")} · ${esc(last.from)} → ${esc(last.to)}${last.backup ? ` · 백업 ${esc(last.backup)}` : ""}
+    ${last ? `<p class="muted fs12">마지막 ${last.rollback ? "되돌리기" : "업데이트"}: ${last.at.replace("T", " ").slice(0, 16)} · ${esc(last.by || "")} · ${esc(last.from)} → ${esc(last.to)}${last.backup ? ` · 백업 ${esc(last.backup)}` : ""}
       ${last.rollback ? "" : ` <button class="btn sm ghost" id="updBack">이 업데이트 되돌리기</button>`}</p>` : ""}
-    ${u.launcher === false && !u.error ? `<p class="muted" style="font-size:12px">시작 스크립트(start_windows.bat) 밖에서 실행 중이라 업데이트 후 자동 재시작이 되지 않습니다. 업데이트 뒤 프로그램을 직접 다시 시작하세요.</p>` : ""}`;
+    ${u.launcher === false && !u.error ? `<p class="muted fs12">시작 스크립트(start_windows.bat) 밖에서 실행 중이라 업데이트 후 자동 재시작이 되지 않습니다. 업데이트 뒤 프로그램을 직접 다시 시작하세요.</p>` : ""}`;
 }
 async function bindUpdatePanel(box) {
   box.innerHTML = await updatePanelHtml();

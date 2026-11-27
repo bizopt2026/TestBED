@@ -55,12 +55,13 @@ const ui = {
 function openDrawer(title, html, { id = "drawer", width } = {}) {
   let d = $("#" + id);
   if (!d) {
-    d = document.createElement("aside");
+    d = document.createElement("div");
     d.id = id; d.className = "drawer"; d.setAttribute("role", "dialog"); d.setAttribute("aria-modal", "false");
     document.body.appendChild(d);
   }
   if (width) d.style.width = width;
-  d.innerHTML = `<div class="drawer-head"><h3>${title}</h3><button class="btn icon" aria-label="닫기" data-close>✕</button></div><div class="drawer-body">${html}</div>`;
+  d.setAttribute("aria-labelledby", id + "-t");
+  d.innerHTML = `<div class="drawer-head"><h2 class="dh" id="${id}-t">${title}</h2><button class="btn icon" aria-label="닫기" data-close>✕</button></div><div class="drawer-body">${html}</div>`;
   d.classList.add("open");
   d.querySelector("[data-close]").onclick = () => closeDrawer(id);
   d.querySelector("[data-close]").focus();
@@ -92,7 +93,7 @@ async function openActivity(code) {
     </dl>
     <h4>선·후행 관계</h4><table class="t" data-noexport><tbody>${rel(a.preds, "선행")}${rel(a.succs, "후행")}</tbody></table>
     <div id="actExtra" class="muted">관련 리스크·제약·변경 이력을 불러오는 중...</div>
-    <div class="row" style="margin-top:12px">
+    <div class="row mt12">
       <a class="btn sm" href="#/p/${ctx.uid}/gantt" data-goto-gantt="${esc(a.code)}">공정표에서 보기</a>
       <button class="btn sm" data-whatif="${esc(a.code)}">이 작업으로 What-if</button>
       <button class="btn sm" data-ask="${esc(a.code)}">✦ AI에게 묻기</button></div>`);
@@ -279,7 +280,7 @@ async function openAiPanel(prefill) {
     <div class="examples" id="aiEx"></div>
     <form id="aiForm" class="chatbox"><textarea id="aiIn" rows="2" placeholder="공정에 대해 물어보세요 (Enter 전송)"></textarea>
       <div class="row"><button class="btn primary" id="aiSend">질문</button><button class="btn" type="button" id="aiClear">새 대화</button></div></form>
-    <p class="muted" style="font-size:12px">지금 보고 있는 화면(${esc(TAB_LABEL[ctx.tab] || "-")})을 함께 전달합니다. 숫자는 CPM 엔진 계산값이며 What-if는 원본을 바꾸지 않습니다.</p>`,
+    <p class="muted fs12">지금 보고 있는 화면(${esc(TAB_LABEL[ctx.tab] || "-")})을 함께 전달합니다. 숫자는 CPM 엔진 계산값이며 What-if는 원본을 바꾸지 않습니다.</p>`,
     { id: "aiDrawer", width: "min(520px, 100vw)" });
   const ex = { risk: ["준공을 지킬 확률과 가장 큰 리스크는?", "대응 방안이 없는 리스크에 대응책을 제안해줘"],
     health: ["건전성 점수를 올리려면 무엇부터 고쳐야 해?"], lookahead: ["이번 주 제약 때문에 막힌 작업은?"],

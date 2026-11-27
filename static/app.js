@@ -110,6 +110,7 @@ async function route() {
     if (parts[0] === "field" && parts[1]) return await showField(parts[1]);
     if (parts[0] === "print" && parts[1]) return await showPrint(parts[1]);
     if (parts[0] === "design" && typeof showDesign === "function") return await showDesign();
+    if (parts[0] === "me" && typeof showMe === "function") return await showMe();
     return await showList();
   } catch (err) {
     view.innerHTML = typeof errorPanel === "function" ? errorPanel(err) : `<div class="panel err">오류: ${esc(err.message)}</div>`;
@@ -123,18 +124,18 @@ async function showList() {
   if (!list.length) {
     view.innerHTML = `<div class="panel empty"><h2>업로드된 공정표가 없습니다</h2>
       <p>P6 XER 또는 MS Project XML 파일을 올리거나, 템플릿·문서로 초기 공정표를 만들어 보세요.</p>
-      <div class="row" style="justify-content:center"><button class="btn primary" onclick="$('#btnUpload').click()">파일 업로드</button>
+      <div class="row center"><button class="btn primary" onclick="$('#btnUpload').click()">파일 업로드</button>
       <button class="btn" onclick="showGenerate()">새 공정표 만들기</button></div></div>`;
     return;
   }
   const sig = (v, good, warn) => v === null || v === undefined ? "" : v >= good ? "ok" : v >= warn ? "warn" : "bad";
   view.innerHTML = `
   <div id="inbox"></div>
-  <div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">포트폴리오</h2>
+  <div class="row between mb10"><h2 class="m0">포트폴리오</h2>
     <div class="row"><button class="btn" onclick="showGenerate()" data-need="editor">+ 새 공정표 만들기</button></div></div>
   <div class="cards">${pf.sort((a, b) => JSON.parse(store.get("favs", "[]")).includes(b.name) - JSON.parse(store.get("favs", "[]")).includes(a.name)).map((p) => `<a class="card" data-name="${esc(p.name)}" href="#/p/${p.id}/overview">
-      <div class="row" style="justify-content:space-between"><b>${esc(p.name)}</b><span class="muted" style="font-size:12px">DD ${p.data_date}</span></div>
-      <div class="big">${p.finish}<span class="muted" style="font-size:12px"> 예상 준공</span></div>
+      <div class="row between"><b>${esc(p.name)}</b><span class="muted fs12">DD ${p.data_date}</span></div>
+      <div class="big">${p.finish}<span class="muted fs12"> 예상 준공</span></div>
       <div class="chips">
         <span class="chip ${p.margin === null ? "" : p.margin >= 0 ? "ok" : "bad"}">${p.margin === null ? "목표 준공 없음" : p.margin >= 0 ? `✓ 여유 ${p.margin}일` : `✕ 지연 ${-p.margin}일`}</span>
         ${p.slip !== null ? `<span class="chip ${p.slip > 0 ? "bad" : "ok"}">${p.slip > 0 ? "▼" : "▲"} 전회 ${p.slip > 0 ? "+" : ""}${p.slip}일</span>` : ""}
@@ -144,11 +145,11 @@ async function showList() {
         ${p.open_risks ? `<span class="chip warn">리스크 ${p.open_risks}</span>` : ""}
         ${p.negative_float ? `<span class="chip bad">음수여유 ${p.negative_float}</span>` : ""}
       </div>
-      <div class="bar"><i style="width:${p.progress}%"></i></div><div class="muted" style="font-size:12px">공정률 ${p.progress}% · 업데이트 ${p.updates}회</div>
+      <div class="bar"><i style="width:${p.progress}%"></i></div><div class="muted fs12">공정률 ${p.progress}% · 업데이트 ${p.updates}회</div>
     </a>`).join("")}</div>
   <div class="panel">
-    <div class="row" style="justify-content:space-between;margin-bottom:10px">
-      <h3 style="margin:0">팀 공정표 목록 <span class="muted">(${list.length})</span></h3>
+    <div class="row between mb10">
+      <h3 class="m0">팀 공정표 목록 <span class="muted">(${list.length})</span></h3>
       <div class="row">
         <span class="muted">업데이트 비교:</span>
         <select class="s" id="cmpA">${list.map((u) => `<option value="${u.id}">${esc(u.name)} · ${u.data_date}</option>`).join("")}</select>
@@ -161,7 +162,7 @@ async function showList() {
       <thead><tr><th>프로젝트</th><th>Data Date</th><th>예상 준공</th><th class="num">액티비티</th>
       <th>메모</th><th>업로더</th><th>업로드 시각</th><th></th></tr></thead>
       <tbody>${list.map((u) => `<tr>
-        <td><a href="#/p/${u.id}/overview"><b>${esc(u.name)}</b></a><div class="muted" style="font-size:12px">${esc(u.filename)}</div></td>
+        <td><a href="#/p/${u.id}/overview"><b>${esc(u.name)}</b></a><div class="muted fs12">${esc(u.filename)}</div></td>
         <td>${u.data_date}</td><td>${u.finish}</td><td class="num">${u.activities}</td>
         <td class="wrap">${esc(u.note)}</td><td>${esc(u.uploader)}</td><td>${u.created_at.replace("T", " ")}</td>
         <td><button class="btn sm" data-xer="${u.id}">XER</button>
@@ -216,7 +217,7 @@ async function showProject(uid, tab) {
   $("#crumb").innerHTML = `/ <a href="#/p/${uid}/overview">${esc(r.name)}</a> / ${esc(TAB_LABEL[tab] || (tab === "settings" ? "설정" : ""))}`;
   view.innerHTML = `
     <div class="phead">
-      <div><h2 style="margin:0">${esc(r.name)} <button class="btn icon fav ${favs.includes(r.name) ? "on" : ""}" id="btnFav" aria-label="관심 프로젝트" title="관심 프로젝트">★</button></h2>
+      <div><h2 class="m0">${esc(r.name)} <button class="btn icon fav ${favs.includes(r.name) ? "on" : ""}" id="btnFav" aria-label="관심 프로젝트" title="관심 프로젝트">★</button></h2>
         <div class="row muted" style="gap:6px;margin-top:4px">
           <label for="upSel">업데이트</label>
           <select class="s sm" id="upSel" aria-label="업데이트 선택">${same.map((x) => `<option value="${x.id}" ${x.id === uid ? "selected" : ""}>DD ${x.data_date} · ${esc(x.note || x.filename)}</option>`).join("")}</select>
@@ -285,12 +286,12 @@ function tabOverview(el, r) {
       ${kpi("음수 여유 액티비티", neg, neg ? "crit" : "")}
       ${kpi("DCMA 통과", `${passed} / 14`, passed < 10 ? "crit" : "")}
     </div>
-    <div class="panel"><h3 style="margin-top:0">마일스톤</h3>
+    <div class="panel"><h3 class="mt0">마일스톤</h3>
       ${ms.length ? `<table class="t"><thead><tr><th>ID</th><th>마일스톤</th><th>상태</th><th>예정일</th><th>계획일</th><th class="num">TF</th></tr></thead><tbody>
       ${ms.map((a) => `<tr><td>${esc(a.code)}</td><td>${esc(a.name)}</td><td>${statusTag(a)}</td><td>${a.act_end || a.finish}</td>
       <td>${a.bl_finish || "-"}</td><td class="num">${fmtDays(a.tf)}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">마일스톤이 없습니다.</p>`}
     </div>
-    <div class="panel"><h3 style="margin-top:0">캘린더</h3><p>${s.calendars.map(esc).join(", ")}</p></div>`;
+    <div class="panel"><h3 class="mt0">캘린더</h3><p>${s.calendars.map(esc).join(", ")}</p></div>`;
 }
 
 function statusTag(a) {
@@ -313,9 +314,9 @@ function tabCritical(el, r) {
   const near = r.activities.filter((a) => a.tf !== null && a.tf > 0 && a.tf <= thr && !a.longest)
     .sort((a, b) => a.tf - b.tf);
   el.innerHTML = `
-    <div class="panel"><h3 style="margin-top:0">최장 경로 (Longest Path) <span class="muted">${lp.length}개</span></h3>
+    <div class="panel"><h3 class="mt0">최장 경로 (Longest Path) <span class="muted">${lp.length}개</span></h3>
       <p class="muted">프로젝트 최종 종료 액티비티에서 구동(Driving) 관계를 역추적한 경로입니다.</p>${actTable(lp)}</div>
-    <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">준주공정 (Near-Critical)</h3>
+    <div class="panel"><div class="row between"><h3 class="m0">준주공정 (Near-Critical)</h3>
       <label class="muted">TF ≤ <input class="s" id="thr" type="number" value="${thr}" style="width:70px"> 일</label></div>
       ${actTable(near)}</div>`;
   $("#thr").onchange = (e) => { store.set("nearCrit", e.target.value); tabCritical(el, r); };
@@ -324,7 +325,7 @@ function tabCritical(el, r) {
 function tabDcma(el, r) {
   const passed = r.dcma.filter((d) => d.pass).length;
   el.innerHTML = `<div class="panel">
-    <h3 style="margin-top:0">DCMA 14-Point Assessment <span class="tag ${passed >= 10 ? "ok" : "fail"}">${passed}/14 통과</span></h3>
+    <h3 class="mt0">DCMA 14-Point Assessment <span class="tag ${passed >= 10 ? "ok" : "fail"}">${passed}/14 통과</span></h3>
     <p class="muted">미국 국방부 DCMA의 공정표 품질 평가 기준입니다. 행을 누르면 해당 액티비티 목록이 펼쳐집니다.</p>
     <table class="t"><thead><tr><th>#</th><th>항목</th><th>설명</th><th class="num">해당</th><th class="num">결과</th><th>기준</th><th>판정</th></tr></thead>
     <tbody>${r.dcma.map((d, i) => `<tr data-i="${i}" style="cursor:${d.items.length ? "pointer" : "default"}">
@@ -335,9 +336,9 @@ function tabDcma(el, r) {
       <tr class="dx" id="dx${i}" hidden><td></td><td colspan="6" class="dcma-items">${d.items.map(esc).join(", ")}${d.items.length >= 200 ? " …" : ""}
         <div class="guide" id="gd${d.no}"></div></td></tr>`).join("")}
     </tbody></table></div>
-    <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">조치 가이드</h3>
+    <div class="panel"><div class="row between"><h3 class="m0">조치 가이드</h3>
       <button class="btn" id="btnDcmaAi">✦ AI 우선순위 조치안</button></div>
-      <div id="dcmaGuide" class="muted" style="margin-top:8px">불러오는 중...</div></div>`;
+      <div id="dcmaGuide" class="muted mt8">불러오는 중...</div></div>`;
   const uid = el.dataset.uid;
   const showGuide = (g) => {
     const items = Object.entries(g.guides).map(([no, xs]) => {
@@ -358,7 +359,7 @@ function tabDcma(el, r) {
 function tabP6(el, r) {
   const c = r.p6_compare;
   el.innerHTML = `<div class="panel">
-    <h3 style="margin-top:0">P6 계산 결과와 비교 <span class="tag ${c.match_pct >= 90 ? "ok" : ""}">${c.match_pct}% 일치</span></h3>
+    <h3 class="mt0">P6 계산 결과와 비교 <span class="tag ${c.match_pct >= 90 ? "ok" : ""}">${c.match_pct}% 일치</span></h3>
     <p class="muted">XER 안에 저장된 P6 일정(Early Start/Finish, Total Float)과 본 엔진의 재계산 결과를 비교합니다.
       차이는 P6 스케줄 옵션(Retained Logic/Progress Override, 시간 단위 계산, Lag 캘린더 등)이나 P6에서 재계산하지 않고 내보낸 경우 생길 수 있습니다.
       검토 대상 ${c.checked}개 중 ${c.match}개 일치.</p>
@@ -373,7 +374,7 @@ function tabP6(el, r) {
 // ---------------------------------------------------------------- S-Curve
 function tabScurve(el, r) {
   const sc = r.s_curve;
-  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">S-Curve (원공기 가중 누적 공정률)</h3>
+  el.innerHTML = `<div class="panel"><h3 class="mt0">S-Curve (원공기 가중 누적 공정률)</h3>
     <div class="legend"><span><i style="background:var(--bl)"></i>계획(Target)</span><span><i style="background:var(--bar)"></i>Early</span>
     <span><i style="background:#8b5cf6"></i>Late</span><span><i style="background:var(--ok)"></i>실적 ${sc.actual_pct}%</span></div>
     <canvas id="sc" style="width:100%;height:420px"></canvas></div>`;
@@ -422,10 +423,12 @@ function tabGantt(el, r) {
       <button class="btn sm" id="gSaveView" data-need="editor" title="현재 필터·배율을 팀 공유 보기로 저장">보기 저장</button>
       <label class="muted">베이스라인 <select class="s sm" id="gBl"><option value="target">P6 계획(Target)</option></select></label>
       <label><input type="checkbox" id="fLines"> 최장경로 관계선</label>
-      <details class="cols"><summary class="btn sm">열 선택</summary><div class="menu">${COLS.map(([k, l]) => `<label><input type="checkbox" data-col="${k}" ${hidden.has(k) ? "" : "checked"}> ${l}</label>`).join("")}</div></details>
-      <span class="muted" style="font-size:12px">드래그: 이동 · Ctrl+휠: 확대 · ↑↓ Enter: 선택·상세</span>
+      <details class="cols"><summary class="btn sm">열 설정</summary><div class="menu" id="colMenu"></div></details>
+      <label class="muted">묶기 <select class="s sm" id="gGroup" aria-label="묶어 보기"><option value="wbs">WBS</option><option value="trade">공종</option><option value="crit">주공정 여부</option><option value="status">진행 상태</option></select></label>
+      <label title="막대를 끌어 옮기거나 오른쪽 끝을 늘려 What-if 계산 (원본은 그대로)"><input type="checkbox" id="fEdit"> 끌어서 What-if</label>
+      <span class="muted fs12">드래그: 이동 · Ctrl+휠: 확대 · ↑↓ Enter: 선택·상세</span>
     </div>
-    <div class="row" style="margin-bottom:10px">
+    <div class="row mb10">
       <input class="s" id="q" type="search" placeholder="ID / 이름 검색 ( / )" style="width:220px">
       <label><input type="checkbox" id="fCrit"> 주공정/최장경로만</label>
       ${highlight.size ? `<label><input type="checkbox" id="fHl" checked> AI 답변 작업만 (${highlight.size})</label>` : ""}
@@ -445,11 +448,12 @@ function tabGantt(el, r) {
       <span><i style="background:var(--done)"></i>완료</span><span><i style="background:var(--bl);height:4px"></i>계획</span>
       <span><i style="background:#16a34a;width:2px"></i>Data Date</span><span><i style="background:#ea580c;width:2px"></i>오늘</span>
       <span><i style="background:#fde68a"></i>추적 경로</span><span><i style="border:1.5px dashed #7c3aed;background:transparent"></i>비교 기준</span></div>
+    <div id="wiBar" class="wi-bar" hidden aria-live="polite"></div>
     <div class="gantt ${[...hidden].map((k) => "hide-" + k).join(" ")}" style="grid-template-columns:${+store.get("gsplit", "640")}px 6px 1fr">
       <div class="g-left"><div class="g-row hdr"><div>ID</div><div>액티비티명</div><div class="c-od">원공기</div><div class="c-rd">잔여</div><div class="c-st">시작</div><div class="c-fn">종료</div><div class="c-tf">TF</div></div>
         <div class="g-body" id="gl"><div class="g-rows" id="glr"></div></div></div>
       <div class="g-split" id="gSplit" role="separator" aria-label="표 너비 조절" aria-orientation="vertical" aria-valuemin="240" aria-valuemax="1000" aria-valuenow="${+store.get("gsplit", "640")}" tabindex="0"></div>
-      <div class="g-right"><canvas class="g-head" id="gh"></canvas><div class="g-body" id="gr" tabindex="0" role="region" aria-label="간트 차트. 위아래 화살표로 작업 선택, Enter로 상세"><div id="grs"></div><canvas id="gc" style="position:sticky;top:0;left:0"></canvas></div></div>
+      <div class="g-right"><canvas class="g-head" id="gh"></canvas><div class="g-body" id="gr" tabindex="0" role="region" aria-label="간트 차트. 위아래 화살표로 작업 선택, Enter로 상세, 좌우 화살표로 이동, +/- 확대·축소, T 오늘"><div id="grs"></div><canvas id="gc" style="position:sticky;top:0;left:0"></canvas></div></div>
     </div>
     <div class="panel detail" id="det"><span class="muted">행을 클릭하면 선·후행 관계를 볼 수 있습니다. 더블클릭하면 상세 패널이 열립니다.</span></div>`;
   let blMap = null; // 저장된 베이스라인 사용 시 code -> {start, finish}
@@ -461,11 +465,21 @@ function tabGantt(el, r) {
     else { const b = await load(e.target.value); blMap = Object.fromEntries(b.result.activities.map((a) => [a.code, { s: a.start, f: a.finish }])); }
     $("#fBl").checked = true; render();
   };
-  el.querySelectorAll("[data-col]").forEach((c) => (c.onchange = () => {
-    c.checked ? hidden.delete(c.dataset.col) : hidden.add(c.dataset.col);
-    store.set("gcols", JSON.stringify([...hidden]));
-    COLS.forEach(([k]) => el.querySelector(".gantt").classList.toggle("hide-" + k, hidden.has(k)));
-  }));
+  // 8차: 열 설정 — 보이기·순서 (보기와 함께 저장)
+  const CW = { od: "50px", rd: "40px", st: "88px", fn: "88px", tf: "44px" };
+  let colOrder = JSON.parse(store.get("gcolOrder", '["od","rd","st","fn","tf"]'));
+  const applyCols = () => {
+    const gEl = el.querySelector(".gantt");
+    COLS.forEach(([k]) => gEl.classList.toggle("hide-" + k, hidden.has(k)));
+    gEl.style.setProperty("--g-tpl", `84px minmax(0,1fr) ${colOrder.map((k) => (hidden.has(k) ? "0px" : CW[k])).join(" ")}`);
+    colOrder.forEach((k, i) => gEl.style.setProperty(`--o-${k}`, String(i + 3)));
+    $("#colMenu").innerHTML = colOrder.map((k, i) => `<div class="col-it"><label><input type="checkbox" data-col="${k}" ${hidden.has(k) ? "" : "checked"}> ${COLS.find((c) => c[0] === k)[1]}</label>
+      <span><button type="button" class="btn sm ghost" data-cup="${i}" aria-label="위로" ${i ? "" : "disabled"}>↑</button><button type="button" class="btn sm ghost" data-cdn="${i}" aria-label="아래로" ${i < colOrder.length - 1 ? "" : "disabled"}>↓</button></span></div>`).join("");
+    $("#colMenu").querySelectorAll("[data-col]").forEach((c) => (c.onchange = () => { c.checked ? hidden.delete(c.dataset.col) : hidden.add(c.dataset.col); store.set("gcols", JSON.stringify([...hidden])); applyCols(); }));
+    const mv = (i, d) => { [colOrder[i], colOrder[i + d]] = [colOrder[i + d], colOrder[i]]; store.set("gcolOrder", JSON.stringify(colOrder)); applyCols(); };
+    $("#colMenu").querySelectorAll("[data-cup]").forEach((b) => (b.onclick = (e) => { e.preventDefault(); mv(+b.dataset.cup, -1); }));
+    $("#colMenu").querySelectorAll("[data-cdn]").forEach((b) => (b.onclick = (e) => { e.preventDefault(); mv(+b.dataset.cdn, 1); }));
+  };
   // 저장된 보기
   const views = [];
   const loadViews = async () => {
@@ -476,16 +490,36 @@ function tabGantt(el, r) {
   $("#gView").onchange = (e) => {
     const v = views.find((x) => x.id === e.target.value); if (!v) return;
     const c = v.config; $("#q").value = c.q || ""; $("#fCrit").checked = !!c.crit; $("#fInc").checked = c.inc !== false;
-    $("#fLines").checked = !!c.lines; $("#zoom").value = c.zoom || "1.2"; ppd = +$("#zoom").value; build();
+    $("#fLines").checked = !!c.lines; $("#zoom").value = c.zoom || "1.2"; ppd = +$("#zoom").value;
+    if (c.group) $("#gGroup").value = c.group;
+    if (c.cols) { hidden.clear(); (c.cols.hidden || []).forEach((k) => hidden.add(k)); colOrder = c.cols.order || colOrder; applyCols(); }
+    if (c.split) { el.querySelector(".gantt").style.gridTemplateColumns = `${c.split}px 6px 1fr`; store.set("gsplit", String(c.split)); }
+    build();
   };
   $("#gSaveView").onclick = async () => {
-    const v = await ui.form("보기 저장", [{ name: "name", label: "보기 이름", required: true, placeholder: "예: 골조 주공정" }], { intro: "현재 검색어·필터·배율을 팀이 함께 쓰는 보기로 저장합니다." });
+    const v = await ui.form("보기 저장", [{ name: "name", label: "보기 이름", required: true, placeholder: "예: 골조 주공정" }], { intro: "현재 검색어·필터·배율·묶기·열 설정·표 너비를 팀이 함께 쓰는 보기로 저장합니다." });
     if (!v) return;
-    await api(`/api/uploads/${uid}/views`, { method: "POST", json: { name: v.name, config: { q: $("#q").value, crit: $("#fCrit").checked, inc: $("#fInc").checked, lines: $("#fLines").checked, zoom: $("#zoom").value } } });
+    await api(`/api/uploads/${uid}/views`, { method: "POST", json: { name: v.name, config: { q: $("#q").value, crit: $("#fCrit").checked, inc: $("#fInc").checked, lines: $("#fLines").checked, zoom: $("#zoom").value,
+      group: $("#gGroup").value, cols: { hidden: [...hidden], order: colOrder }, split: +store.get("gsplit", "640") } } });
     toast("보기를 저장했습니다"); loadViews();
   };
 
   const byId = Object.fromEntries(r.activities.map((a) => [a.id, a]));
+  // 8차: 공정표 안 품질 표시 (선후행 누락·제약·음수 여유·리스크·코멘트)
+  let riskCodes = new Set(), cmtCodes = new Set(), tradeMap = null;
+  Promise.all([api(`/api/uploads/${uid}/risks`).catch(() => []), api(`/api/uploads/${uid}/comments`).catch(() => [])]).then(([rk, cm]) => {
+    rk.filter((x) => x.status !== "closed").forEach((x) => x.codes.forEach((c) => riskCodes.add(c)));
+    cm.filter((c) => !c.resolved && c.target?.startsWith("activity:")).forEach((c) => cmtCodes.add(c.target.slice(9)));
+    render();
+  });
+  const QI = (k, ic, t) => `<span class="qi qi-${k}" title="${t}" role="img" aria-label="${t}">${icon(ic, 12)}</span>`;
+  function qIcons(a) {
+    const ms = a.milestone;
+    const open = a.status_code !== "TK_Complete" && ((!a.preds.length && ms !== "start") || (!a.succs.length && ms !== "finish"));
+    return (open ? QI("open", "link", "선후행 누락(Open End)") : "") + (a.constraint ? QI("con", "lock", `제약조건 ${a.constraint}`) : "")
+      + (a.tf !== null && a.tf < 0 && a.status_code !== "TK_Complete" ? QI("neg", "alert", `음수 여유 ${a.tf}일`) : "")
+      + (riskCodes.has(a.code) ? QI("risk", "dice", "연결된 리스크") : "") + (cmtCodes.has(a.code) ? QI("cmt", "message", "해결 안 된 코멘트") : "");
+  }
   const RH = parseInt(cssv("--row")) || 26;
   let rows = [];
   let sel = null;
@@ -499,9 +533,15 @@ function tabGantt(el, r) {
       (!q || a.code.toLowerCase().includes(q) || a.name.toLowerCase().includes(q)) &&
       (!fc || a.critical || a.longest) && (!fh || highlight.has(a.code)) && (!fi || !!fh || a.status_code !== "TK_Complete") &&
       (!$("#fChg")?.checked || changed(a)));
+    const gk = $("#gGroup").value;
+    const ST = { TK_Active: "1 진행 중", TK_NotStart: "2 미착수", TK_Complete: "3 완료" };
+    const keyOf = (a) => gk === "trade" ? (tradeMap?.[a.code] || "미분류") : gk === "crit" ? (a.longest || a.critical ? "1 주공정·최장경로" : "2 그 외")
+      : gk === "status" ? (ST[a.status_code] || a.status_code) : (a.wbs || "(WBS 없음)");
+    const list = gk === "wbs" ? acts : [...acts].sort((x, y) => keyOf(x).localeCompare(keyOf(y)) || (x.start < y.start ? -1 : x.start > y.start ? 1 : 0));
     rows = []; let last = null;
-    for (const a of acts) {
-      if (a.wbs !== last) { rows.push({ wbs: a.wbs || "(WBS 없음)" }); last = a.wbs; }
+    for (const a of list) {
+      const k = keyOf(a);
+      if (k !== last) { rows.push({ wbs: gk === "wbs" ? k : k.replace(/^\d /, "") }); last = k; }
       rows.push(a);
     }
     const all = r.activities.flatMap((a) => [a.start, a.finish, a.late_finish, a.bl_start, a.bl_finish]).filter(Boolean).map(toT);
@@ -525,7 +565,7 @@ function tabGantt(el, r) {
       const top = (first + k) * RH;
       if (a.wbs !== undefined && !a.id) return `<div class="g-row wbs" style="top:${top}px"><div>${esc(a.wbs)}</div></div>`;
       const cls = `${a.critical || a.longest ? "crit" : ""} ${sel === a.id ? "sel" : ""}`;
-      return `<div class="g-row ${cls}" data-id="${a.id}" style="top:${top}px"><div>${a.longest ? "▲ " : ""}${esc(a.code)}</div><div class="nm" title="${esc(a.name)}">${esc(a.name)}</div>
+      return `<div class="g-row ${cls}" data-id="${a.id}" style="top:${top}px"><div>${a.longest ? "▲ " : ""}${esc(a.code)}</div><div class="nm" title="${esc(a.name)}">${qIcons(a)}${esc(a.name)}</div>
         <div class="num c-od">${a.orig_dur}</div><div class="num c-rd">${a.rem_dur}</div><div class="c-st">${a.start}</div><div class="c-fn">${a.finish}</div><div class="num c-tf">${fmtDays(a.tf)}</div></div>`;
     }).join("");
     // 캔버스
@@ -583,7 +623,12 @@ function tabGantt(el, r) {
       if (sel === a.id) { g.fillStyle = cssv("--sel"); g.fillRect(0, y, W, RH); }
       const blS = blMap ? blMap[a.code]?.s : a.bl_start, blF = blMap ? blMap[a.code]?.f : a.bl_finish;
       const bl = $("#fBl").checked && blS && blF;
-      const s = toT(a.start), f = toT(a.finish) + dayMs;
+      const wi = wiMap[a.code];
+      const s = toT(wi ? wi.s : a.start), f = toT(wi ? wi.f : a.finish) + dayMs;
+      if (wi) {  // What-if 전 위치는 점선으로
+        const ox = X(toT(a.start)), ow = Math.max(2, X(toT(a.finish) + dayMs) - ox);
+        g.save(); g.setLineDash([3, 3]); g.strokeStyle = cssv("--faint") || "#98a2b3"; g.strokeRect(ox, y + 4, ow, RH - 8); g.restore();
+      }
       const color = a.status_code === "TK_Complete" ? cssv("--done") : a.critical || a.longest ? cssv("--crit") : cssv("--bar");
       const bh = Math.round(RH * (bl ? 0.38 : 0.46)), by = y + Math.round((RH - bh) / 2) - (bl ? 3 : 0);
       if (a.milestone) {
@@ -679,6 +724,7 @@ function tabGantt(el, r) {
 
   $("#glr").addEventListener("click", (e) => {
     const row = e.target.closest("[data-id]"); if (!row) return;
+    if (e.target.closest(".qi")) { openActivity(byId[row.dataset.id].code); return; }
     sel = row.dataset.id; render(); detail(byId[sel]);
   });
   gc.addEventListener("click", (e) => {
@@ -693,11 +739,11 @@ function tabGantt(el, r) {
       return `<tr><td>${dir}</td><td><a href="#" data-go="${o.id}">${esc(o.code)}</a></td><td class="wrap">${esc(o.name)}</td><td>${x.type}</td>
         <td class="num">${x.lag}</td><td>${o.start}</td><td>${o.finish}</td><td class="num">${fmtDays(o.tf)}</td></tr>`;
     }).join("");
-    $("#det").innerHTML = `<h3 style="margin-top:0">${esc(a.code)} · ${esc(a.name)} ${statusTag(a)}</h3>
+    $("#det").innerHTML = `<h3 class="mt0">${esc(a.code)} · ${esc(a.name)} ${statusTag(a)}</h3>
       <div class="muted">WBS: ${esc(a.wbs)} · 캘린더: ${esc(a.calendar)} · 공정률 ${a.pct}% ·
         Late ${a.late_start} ~ ${a.late_finish} · 계획 ${a.bl_start || "-"} ~ ${a.bl_finish || "-"}
         ${a.constraint ? ` · 제약: ${esc(a.constraint)} ${a.constraint_date}` : ""}${a.has_resource ? "" : " · 자원 미배정"}</div>
-      <table class="t" style="margin-top:8px"><thead><tr><th></th><th>ID</th><th>액티비티명</th><th>관계</th><th class="num">Lag</th><th>시작</th><th>종료</th><th class="num">TF</th></tr></thead>
+      <table class="t mt8"><thead><tr><th></th><th>ID</th><th>액티비티명</th><th>관계</th><th class="num">Lag</th><th>시작</th><th>종료</th><th class="num">TF</th></tr></thead>
       <tbody>${rel(a.preds, "선행")}${rel(a.succs, "후행")}</tbody></table>`;
     $("#det").querySelectorAll("[data-go]").forEach((l) => (l.onclick = (e) => {
       e.preventDefault(); sel = l.dataset.go;
@@ -732,6 +778,93 @@ function tabGantt(el, r) {
   gc.addEventListener("dblclick", (e) => { const i = Math.floor((e.offsetY + gr.scrollTop) / RH); if (rows[i]?.id) openActivity(rows[i].code); });
   // 드래그 이동 + Ctrl/⌘ 휠 확대
   let drag = null;
+  // 8차: 끌어서 What-if — 오른쪽 끝을 끌면 잔여공기, 막대를 끌면 선행 관계 Lag 조정 (원본은 그대로)
+  let wiChanges = [], wiMap = {}, wiDrag = null;
+  const barAt = (e) => {
+    const i = Math.floor((e.offsetY + gr.scrollTop) / RH), a = rows[i];
+    if (!a?.id || a.milestone || a.status_code === "TK_Complete") return null;
+    const X = (t) => ((t - t0) / dayMs) * ppd - gr.scrollLeft;
+    const wi = wiMap[a.code], x1 = X(toT(wi ? wi.s : a.start)), x2 = X(toT(wi ? wi.f : a.finish) + dayMs);
+    if (e.offsetX < x1 - 3 || e.offsetX > x2 + 4) return null;
+    return { a, mode: e.offsetX > x2 - 7 ? "resize" : "move", calDays: Math.max(1, (x2 - x1) / ppd) };
+  };
+  const workDays = (cal, a, span) => Math.round(cal * Math.max(1, a.rem_dur || a.orig_dur || 1) / span);
+  async function runWhatif() {
+    const bar = $("#wiBar");
+    if (!wiChanges.length) { wiMap = {}; bar.hidden = true; render(); return; }
+    try {
+      const w = await api(`/api/uploads/${uid}/whatif`, { method: "POST", json: { changes: wiChanges } });
+      wiMap = Object.fromEntries(w.changed.map((c) => [c.code, { s: c.start_after, f: c.finish_after }]));
+      bar.hidden = false;
+      bar.innerHTML = `<b>What-if</b> 변경 ${wiChanges.length}건 · 준공 ${w.finish_before} → <b>${w.finish_after}</b>
+        <span class="delta ${w.d_finish > 0 ? "bad" : w.d_finish < 0 ? "good" : "same"}">${w.d_finish > 0 ? "+" : ""}${w.d_finish}일</span>
+        <span class="muted">· 영향 작업 ${w.changed.length}개 · 원본은 바뀌지 않습니다</span><span class="spacer"></span>
+        <button class="btn sm" id="wiUndo">한 단계 되돌리기</button><button class="btn sm" id="wiOpen">What-if 화면에서 열기</button>
+        <button class="btn sm primary" id="wiSave" data-need="editor">시나리오로 저장</button><button class="btn sm ghost" id="wiClear">끝내기</button>`;
+      $("#wiUndo").onclick = () => { wiChanges.pop(); runWhatif(); };
+      $("#wiClear").onclick = () => { wiChanges = []; runWhatif(); };
+      $("#wiOpen").onclick = () => { sessionStorage.setItem("whatif:" + uid, JSON.stringify(wiChanges)); location.hash = `#/p/${uid}/whatif`; };
+      $("#wiSave").onclick = async () => {
+        const v = await ui.form("시나리오로 저장", [{ name: "name", label: "시나리오 이름", required: true, value: "공정표에서 조정" }], { submit: "저장" });
+        if (!v) return;
+        await api(`/api/uploads/${uid}/scenarios`, { method: "POST", json: { name: v.name, kind: "whatif", changes: wiChanges } }); toast("시나리오를 저장했습니다");
+      };
+      applyRole(bar);
+    } catch (err) { toast(err.message); wiChanges.pop(); runWhatif(); }
+    render();
+  }
+  function addWhatif(a, mode, calDelta, span) {
+    if (mode === "resize") {
+      const cur = wiChanges.find((c) => c.op === "set_duration" && c.code === a.code);
+      const base = cur ? cur.days : a.rem_dur;
+      const days = Math.max(0, base + workDays(calDelta, a, span));
+      if (days === base) return false;
+      if (cur) cur.days = days; else wiChanges.push({ op: "set_duration", code: a.code, days });
+    } else {
+      if (!a.preds.length) { toast("선행 작업이 없는 작업은 옮길 수 없습니다. 오른쪽 끝을 끌어 공기를 바꿔 보세요."); return false; }
+      const d = Math.round(calDelta * 5 / 7);
+      if (!d) return false;
+      for (const p of a.preds) {
+        const pa = byId[p.id]; if (!pa) continue;
+        const cur = wiChanges.find((c) => c.op === "set_lag" && c.pred === pa.code && c.succ === a.code);
+        if (cur) cur.lag += d; else wiChanges.push({ op: "set_lag", pred: pa.code, succ: a.code, lag: (p.lag || 0) + d });
+      }
+      if (d < 0) toast("앞으로 당기면 다른 선행 작업이나 Data Date 때문에 덜 당겨질 수 있습니다");
+    }
+    return true;
+  }
+  gc.addEventListener("mousemove", (e) => {
+    if (!$("#fEdit").checked || wiDrag) return;
+    const b = barAt(e); gc.style.cursor = b ? (b.mode === "resize" ? "ew-resize" : "grab") : "";
+  });
+  gc.addEventListener("mousedown", (e) => {
+    if (!$("#fEdit").checked) return;
+    const b = barAt(e); if (!b) return;
+    e.stopImmediatePropagation(); e.preventDefault();
+    wiDrag = { ...b, x0: e.clientX, dx: 0 };
+    sel = b.a.id; detail(b.a);
+  }, true);
+  window.addEventListener("mousemove", (e) => {
+    if (!wiDrag) return;
+    wiDrag.dx = e.clientX - wiDrag.x0;
+    render();
+    const g2 = gc.getContext("2d"), i = rows.indexOf(wiDrag.a), y = i * RH - gr.scrollTop;
+    const X = (t) => ((t - t0) / dayMs) * ppd - gr.scrollLeft, a = wiDrag.a, wi = wiMap[a.code];
+    let x1 = X(toT(wi ? wi.s : a.start)), x2 = X(toT(wi ? wi.f : a.finish) + dayMs);
+    if (wiDrag.mode === "resize") x2 += wiDrag.dx; else { x1 += wiDrag.dx; x2 += wiDrag.dx; }
+    g2.save(); g2.setLineDash([4, 3]); g2.strokeStyle = cssv("--accent"); g2.lineWidth = 2; g2.strokeRect(x1, y + 3, Math.max(3, x2 - x1), RH - 6); g2.restore();
+    gc.title = `${wiDrag.mode === "resize" ? "공기" : "시작"} ${wiDrag.dx > 0 ? "+" : ""}${Math.round(wiDrag.dx / ppd)}일(달력)`;
+  });
+  window.addEventListener("mouseup", () => {
+    if (!wiDrag) return;
+    const d = wiDrag; wiDrag = null; gc._suppress = true;
+    if (Math.abs(d.dx) >= ppd * 0.6 && addWhatif(d.a, d.mode, d.dx / ppd, d.calDays)) runWhatif(); else render();
+  });
+  $("#fEdit").addEventListener("change", (e) => { if (e.target.checked) toast("막대 오른쪽 끝을 끌면 공기, 가운데를 끌면 시작 시점(선행 Lag)이 바뀝니다. 키보드: 작업 선택 후 Shift+←/→"); });
+  $("#gGroup").addEventListener("change", async () => {
+    if ($("#gGroup").value === "trade" && !tradeMap) tradeMap = await api(`/api/uploads/${uid}/trades/map`).catch(() => ({}));
+    build();
+  });
   gc.addEventListener("mousedown", (e) => { drag = { x: e.clientX, y: e.clientY, sl: gr.scrollLeft, st: gr.scrollTop, moved: false }; });
   window.addEventListener("mousemove", (e) => {
     if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
@@ -756,6 +889,20 @@ function tabGantt(el, r) {
       if (ri * RH < gr.scrollTop || ri * RH > gr.scrollTop + gr.clientHeight - RH * 2) gr.scrollTop = ri * RH - 100;
       render(); detail(byId[sel]);
     } else if (e.key === "Enter" && sel) { openActivity(byId[sel].code); }
+    else if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && e.shiftKey && $("#fEdit").checked && sel) {   // 키보드로 What-if (공기 ±1일)
+      e.preventDefault(); const a = byId[sel];
+      if (a.status_code === "TK_Complete" || a.milestone) return;
+      const cur = wiChanges.find((c) => c.op === "set_duration" && c.code === a.code);
+      const days = Math.max(0, (cur ? cur.days : a.rem_dur) + (e.key === "ArrowRight" ? 1 : -1));
+      if (cur) cur.days = days; else wiChanges.push({ op: "set_duration", code: a.code, days });
+      runWhatif();
+    }
+    else if (e.key === "ArrowRight" || e.key === "ArrowLeft") { e.preventDefault(); gr.scrollLeft += (e.key === "ArrowRight" ? 1 : -1) * Math.max(40, 7 * ppd); render(); }
+    else if (e.key === "+" || e.key === "=") { e.preventDefault(); ppd = Math.min(8, ppd * 1.25); build(); }
+    else if (e.key === "-") { e.preventDefault(); ppd = Math.max(0.05, ppd / 1.25); build(); }
+    else if (e.key === "Home") { e.preventDefault(); gr.scrollLeft = 0; gr.scrollTop = 0; render(); }
+    else if (e.key === "End") { e.preventDefault(); gr.scrollLeft = gr.scrollWidth; render(); }
+    else if (e.key.toLowerCase() === "t") { e.preventDefault(); scrollToDate(new Date().toISOString().slice(0, 10)); }
   });
   // 표/차트 너비 조절
   const split = $("#gSplit");
@@ -777,8 +924,20 @@ function tabGantt(el, r) {
     ppd = +e.target.value; build(); gr.scrollLeft = center * ppd - gr.clientWidth / 2;
   });
   window.addEventListener("resize", render);
+  applyCols();
   build();
   gr.scrollLeft = Math.max(0, ((toT(r.data_date) - t0) / dayMs) * ppd - 150);
+  const focus = sessionStorage.getItem("ganttFocus");   // Ctrl+K '공정표에서 보기'
+  if (focus) {
+    sessionStorage.removeItem("ganttFocus");
+    const a = r.activities.find((x) => x.code === focus);
+    if (a) {
+      if ($("#fInc").checked && a.status_code === "TK_Complete") { $("#fInc").checked = false; build(); }
+      sel = a.id; const i = rows.findIndex((x) => x.id === a.id);
+      if (i >= 0) gr.scrollTop = Math.max(0, i * RH - 120);
+      gr.scrollLeft = Math.max(0, ((toT(a.start) - t0) / dayMs) * ppd - 150); render(); detail(a); gr.focus();
+    }
+  }
 }
 
 // ---------------------------------------------------------------- 업데이트 비교
@@ -789,12 +948,12 @@ async function showCompare(a, b) {
   view.innerHTML = `
     <h2 style="margin:0 0 12px">업데이트 비교</h2>
     <div class="kpis">
-      ${kpi("기준", `<span style="font-size:16px">${esc(c.base.name)}</span><div class="muted" style="font-size:12px">DD ${c.base.data_date} · 준공 ${c.base.finish}</div>`)}
-      ${kpi("비교 대상", `<span style="font-size:16px">${esc(c.target.name)}</span><div class="muted" style="font-size:12px">DD ${c.target.data_date} · 준공 ${c.target.finish}</div>`)}
+      ${kpi("기준", `<span style="font-size:16px">${esc(c.base.name)}</span><div class="muted fs12">DD ${c.base.data_date} · 준공 ${c.base.finish}</div>`)}
+      ${kpi("비교 대상", `<span style="font-size:16px">${esc(c.target.name)}</span><div class="muted fs12">DD ${c.target.data_date} · 준공 ${c.target.finish}</div>`)}
       ${kpi("준공일 변동", (sl > 0 ? "+" : "") + sl + "일", sl > 0 ? "crit" : "")}
       ${kpi("추가 / 삭제 / 변경", `${c.added.length} / ${c.removed.length} / ${c.changed.length}`)}
     </div>
-    <div class="panel"><h3 style="margin-top:0">일정 변경 액티비티 (종료일 변동 큰 순)</h3>
+    <div class="panel"><h3 class="mt0">일정 변경 액티비티 (종료일 변동 큰 순)</h3>
       <div class="scroll"><table class="t"><thead><tr><th>ID</th><th>액티비티명</th><th>상태</th><th>종료(기준)</th><th>종료(비교)</th>
       <th class="num">Δ종료</th><th class="num">TF 기준→비교</th><th class="num">Δ원공기</th></tr></thead><tbody>
       ${c.changed.map((x) => `<tr><td>${esc(x.code)}</td><td class="wrap">${esc(x.name)}${x.critical ? ' <span class="tag crit">주공정</span>' : ""}</td>
@@ -802,8 +961,8 @@ async function showCompare(a, b) {
         <td class="num" style="color:${x.d_finish > 0 ? "var(--crit-text)" : x.d_finish < 0 ? "var(--ok)" : ""}">${x.d_finish > 0 ? "+" : ""}${x.d_finish}</td>
         <td class="num">${fmtDays(x.tf_before)} → ${fmtDays(x.tf_after)}</td><td class="num">${x.d_dur || ""}</td></tr>`).join("")}
       </tbody></table></div></div>
-    <div class="panel"><h3 style="margin-top:0">추가된 액티비티 (${c.added.length})</h3>${simpleList(c.added)}</div>
-    <div class="panel"><h3 style="margin-top:0">삭제된 액티비티 (${c.removed.length})</h3>${simpleList(c.removed)}</div>`;
+    <div class="panel"><h3 class="mt0">추가된 액티비티 (${c.added.length})</h3>${simpleList(c.added)}</div>
+    <div class="panel"><h3 class="mt0">삭제된 액티비티 (${c.removed.length})</h3>${simpleList(c.removed)}</div>`;
 }
 
 function simpleList(xs) {
@@ -871,7 +1030,7 @@ async function tabChat(el, r, uid) {
     box.innerHTML = hist.map((m, i) => m.role === "user" ? `<div class="msg user">${esc(m.content)}</div>`
       : `<div class="msg bot">${md(m.content)}${m.codes?.length ? `<div class="row" style="margin-top:6px">
           <button class="btn sm" data-hl="${i}">공정표에서 보기 (${m.codes.length})</button>
-          <span class="muted" style="font-size:12px">${m.trace?.map((t) => t.tool).join(" → ") || ""}</span></div>` : ""}</div>`).join("")
+          <span class="muted fs12">${m.trace?.map((t) => t.tool).join(" → ") || ""}</span></div>` : ""}</div>`).join("")
       || `<div class="muted">예시 질문을 누르거나 직접 질문해 보세요.</div>`;
     box.scrollTop = box.scrollHeight;
     box.querySelectorAll("[data-hl]").forEach((b) => (b.onclick = () => {
@@ -921,8 +1080,8 @@ async function tabReport(el, r, uid) {
     });
     $("#repDocx").onclick = () => download(`/api/uploads/${uid}/report.docx`, "report.docx");
   };
-  el.innerHTML = `${aiOffNote(st)}<div class="panel"><div class="row" style="justify-content:space-between">
-    <h3 style="margin:0">월간 공정보고서</h3>
+  el.innerHTML = `${aiOffNote(st)}<div class="panel"><div class="row between">
+    <h3 class="m0">월간 공정보고서</h3>
     <div class="row"><label><input type="checkbox" id="repAi" ${st.enabled ? "checked" : "disabled"}> AI 초안 작성</label>
     <button class="btn primary" id="repGen" data-need="editor">보고서 생성</button></div></div>
     <p class="muted">업데이트 비교(지연 원인), 주공정, 향후 1개월 작업, 리스크를 모아 보고서 초안을 만듭니다. 이전 업데이트는 같은 프로젝트 이름으로 자동 선택됩니다.</p>
@@ -947,12 +1106,12 @@ async function tabDelay(el, r, uid) {
       ${kpi("예상 준공", `<span style="font-size:16px">${d.base_finish} → ${d.target_finish}</span>`)}
       ${kpi("준공 지연", (d.finish_slip > 0 ? "+" : "") + d.finish_slip + "일", d.finish_slip > 0 ? "crit" : "")}
       ${kpi("주공정 변경 작업", d.path_changed.length)}</div>
-      <div class="panel"><h3 style="margin-top:0">지연 기여 작업 (큰 순)</h3>
+      <div class="panel"><h3 class="mt0">지연 기여 작업 (큰 순)</h3>
       <table class="t"><thead><tr><th>ID</th><th>작업</th><th class="num">종료 순연</th><th class="num">선행에서 전달</th><th class="num">새로 발생</th><th>추정 원인</th></tr></thead><tbody>
       ${d.top.map((x) => `<tr><td>${esc(x.code)}</td><td class="wrap">${esc(x.name)}</td><td class="num">${x.slip}</td><td class="num">${x.inherited ?? "-"}</td>
         <td class="num" style="color:${x.introduced > 0 ? "var(--crit-text)" : "var(--ok)"}">${x.introduced > 0 ? "+" : ""}${x.introduced}</td><td class="wrap">${esc(x.note)}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">기여 작업 없음</td></tr>`}
       </tbody></table></div>
-      <div class="panel"><h3 style="margin-top:0">최장 경로 추적</h3>${pathTable(d.path)}</div>`;
+      <div class="panel"><h3 class="mt0">최장 경로 추적</h3>${pathTable(d.path)}</div>`;
   };
   const pathTable = (rows) => `<div class="scroll"><table class="t"><thead><tr><th>ID</th><th>작업</th><th class="num">종료 순연</th><th class="num">새로 발생</th><th>비고</th></tr></thead><tbody>
     ${rows.map((x) => `<tr><td>${esc(x.code)}</td><td class="wrap">${esc(x.name)}</td><td class="num">${x.slip ?? "-"}</td><td class="num">${x.introduced ?? "-"}</td><td class="wrap">${esc(x.note)}</td></tr>`).join("")}</tbody></table></div>`;
@@ -997,15 +1156,15 @@ function cleanChanges(chs) {
 
 async function tabWhatif(el, r, uid, preset) {
   let chs = preset || JSON.parse(sessionStorage.getItem("whatif:" + uid) || "null") || [{ op: "set_duration", code: "", days: "" }];
-  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">What-if 시뮬레이션</h3>
+  el.innerHTML = `<div class="panel"><h3 class="mt0">What-if 시뮬레이션</h3>
     <p class="muted">공기 단축, 관계 변경, 진도 가정을 넣고 재계산합니다. 원본은 바뀌지 않습니다. 결과는 시나리오로 저장하거나 수정된 XER로 내려받아 P6에 가져올 수 있습니다.
     AI 어시스턴트에 "A3030을 10일 단축하면?"처럼 물어봐도 됩니다.</p>
     <div id="chgs"></div>
-    <div class="row" style="margin-top:8px"><button class="btn" id="wAdd">+ 변경 추가</button><span class="spacer"></span>
+    <div class="row mt8"><button class="btn" id="wAdd">+ 변경 추가</button><span class="spacer"></span>
       <input class="s" id="wName" placeholder="시나리오 이름"><button class="btn" id="wSave" data-need="editor">시나리오 저장</button>
       <button class="btn" id="wXer">수정 XER 다운로드</button><button class="btn primary" id="wRun">재계산</button></div></div>
     <div class="panel" id="wRes" hidden></div>
-    <div class="panel"><h3 style="margin-top:0">저장된 시나리오</h3><div id="wList" class="muted">불러오는 중...</div></div>`;
+    <div class="panel"><h3 class="mt0">저장된 시나리오</h3><div id="wList" class="muted">불러오는 중...</div></div>`;
   const draw = () => {
     $("#chgs").innerHTML = chs.map(changeForm).join("");
     $("#chgs").querySelectorAll("[data-k]").forEach((inp) => (inp.oninput = () => {
@@ -1019,7 +1178,7 @@ async function tabWhatif(el, r, uid, preset) {
     const sc = await api(`/api/uploads/${uid}/scenarios`);
     $("#wList").innerHTML = sc.length ? `<table class="t"><thead><tr><th>이름</th><th>종류</th><th>준공 변화</th><th>내용</th><th>작성</th><th></th></tr></thead><tbody>
       ${sc.map((x) => `<tr><td><b>${esc(x.name)}</b></td><td>${esc(x.kind)}</td><td>${x.summary.finish_before} → ${x.summary.finish_after} (${x.summary.d_finish > 0 ? "+" : ""}${x.summary.d_finish}일)</td>
-        <td class="wrap">${x.summary.log.map(esc).join(" · ")}</td><td>${esc(x.author)}<div class="muted" style="font-size:12px">${x.created_at.replace("T", " ")}</div></td>
+        <td class="wrap">${x.summary.log.map(esc).join(" · ")}</td><td>${esc(x.author)}<div class="muted fs12">${x.created_at.replace("T", " ")}</div></td>
         <td><button class="btn sm" data-load="${x.id}">불러오기</button> <button class="btn sm danger" data-del="${x.id}">삭제</button></td></tr>`).join("")}</tbody></table>` : "저장된 시나리오가 없습니다.";
     $("#wList").classList.toggle("muted", !sc.length);
     $("#wList").querySelectorAll("[data-load]").forEach((b) => (b.onclick = () => { chs = sc.find((x) => x.id === b.dataset.load).changes.map((c) => ({ ...c })); draw(); $("#wRun").click(); }));
@@ -1028,7 +1187,7 @@ async function tabWhatif(el, r, uid, preset) {
   $("#wAdd").onclick = () => { chs.push({ op: "set_duration" }); draw(); };
   $("#wRun").onclick = () => withBusy($("#wRun"), async () => {
     const w = await api(`/api/uploads/${uid}/whatif`, { method: "POST", json: { changes: cleanChanges(chs) } });
-    $("#wRes").hidden = false; $("#wRes").innerHTML = `<h3 style="margin-top:0">결과</h3>` + whatifResult(w);
+    $("#wRes").hidden = false; $("#wRes").innerHTML = `<h3 class="mt0">결과</h3>` + whatifResult(w);
   });
   $("#wSave").onclick = () => withBusy($("#wSave"), async () => {
     await api(`/api/uploads/${uid}/scenarios`, { method: "POST", json: { name: $("#wName").value || "시나리오", kind: "whatif", changes: cleanChanges(chs) } });
@@ -1048,7 +1207,7 @@ async function downloadPost(path, json, fallback) {
 // ---------------------------------------------------------------- ⑥ 관계 추천
 async function tabRels(el, r, uid) {
   const st = await getAiStatus();
-  el.innerHTML = `${aiOffNote(st)}<div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">누락 관계 추천</h3>
+  el.innerHTML = `${aiOffNote(st)}<div class="panel"><div class="row between"><h3 class="m0">누락 관계 추천</h3>
     <div class="row"><button class="btn" id="rAi" ${st.enabled ? "" : "disabled"}>✦ AI로 다시 추천</button></div></div>
     <p class="muted">선행 또는 후행이 없는 작업(Open End)에 연결할 관계를 추천합니다. 승인한 항목만 What-if로 검증하고, 수정된 XER을 내려받아 P6에 반영하세요.</p>
     <div id="rBody" class="muted">분석 중...</div>
@@ -1071,7 +1230,7 @@ async function tabRels(el, r, uid) {
   $("#rTest").onclick = () => withBusy($("#rTest"), async () => {
     const c = chosen(); if (!c.length) return toast("항목을 선택하세요");
     const w = await api(`/api/uploads/${uid}/whatif`, { method: "POST", json: { changes: c } });
-    $("#rRes").hidden = false; $("#rRes").innerHTML = `<h3 style="margin-top:0">검증 결과</h3>` + whatifResult(w);
+    $("#rRes").hidden = false; $("#rRes").innerHTML = `<h3 class="mt0">검증 결과</h3>` + whatifResult(w);
   });
   $("#rSave").onclick = () => withBusy($("#rSave"), async () => {
     const c = chosen(); if (!c.length) return toast("항목을 선택하세요");
@@ -1086,7 +1245,7 @@ async function tabRels(el, r, uid) {
 // ---------------------------------------------------------------- ⑦ 공종 분류
 async function tabTrades(el, r, uid) {
   const st = await getAiStatus();
-  el.innerHTML = `${aiOffNote(st)}<div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">공종 분류 · 명칭 표준화</h3>
+  el.innerHTML = `${aiOffNote(st)}<div class="panel"><div class="row between"><h3 class="m0">공종 분류 · 명칭 표준화</h3>
     <div class="row"><button class="btn" id="tRule" data-need="editor">규칙으로 재분류</button><button class="btn primary" id="tAi" data-need="editor" ${st.enabled ? "" : "disabled"}>✦ AI 분류·표준화</button></div></div>
     <p class="muted">액티비티를 표준 공종으로 분류합니다. 분류 결과는 검색, 리스크, 벤치마크(프로젝트 간 실적 비교)에 쓰입니다.</p><div id="tBody">불러오는 중...</div></div>`;
   const draw = (d) => {
@@ -1118,12 +1277,12 @@ function drawHist(cv, hist) {
 // ---------------------------------------------------------------- ⑩ 벤치마크
 async function tabBench(el, r, uid) {
   const b = await api(`/api/uploads/${uid}/benchmark`);
-  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">공종별 공기 벤치마크</h3>
+  el.innerHTML = `<div class="panel"><h3 class="mt0">공종별 공기 벤치마크</h3>
     <p class="muted">팀이 올린 모든 프로젝트(${b.sample_projects}개)의 완료 작업에서 <b>실적 작업일 ÷ 계획 원공기</b> 비율을 공종별로 집계합니다. 1.2는 계획보다 20% 더 걸렸다는 뜻입니다. 업로드가 쌓일수록 정확해집니다.</p>
     <table class="t"><thead><tr><th>공종</th><th class="num">작업 수</th><th class="num">원공기 합</th><th class="num">잔여 합</th><th class="num">실적 표본</th><th class="num">실적 비율(중앙)</th><th class="num">P80</th></tr></thead><tbody>
     ${b.trades.map((x) => `<tr><td><b>${esc(x.trade)}</b></td><td class="num">${x.count}</td><td class="num">${x.orig_days}</td><td class="num">${x.rem_days}</td><td class="num">${x.hist_n}</td>
       <td class="num" style="color:${x.hist_median > 1.1 ? "var(--crit-text)" : ""}">${x.hist_median ?? "-"}</td><td class="num">${x.hist_p80 ?? "-"}</td></tr>`).join("")}</tbody></table></div>
-    <div class="panel"><h3 style="margin-top:0">과소 계획 의심 작업</h3>
+    <div class="panel"><h3 class="mt0">과소 계획 의심 작업</h3>
     ${b.flags.length ? `<table class="t"><thead><tr><th>ID</th><th>작업</th><th>공종</th><th class="num">계획 잔여</th><th class="num">실적 기준 예상</th><th class="num">TF</th></tr></thead><tbody>
       ${b.flags.map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}${x.longest ? ' <span class="tag crit">주공정</span>' : ""}</td><td>${esc(x.trade)}</td><td class="num">${x.planned}</td><td class="num">${x.expected}</td><td class="num">${fmtDays(x.tf)}</td></tr>`).join("")}</tbody></table>`
       : `<p class="muted">실적 표본이 부족하거나(공종별 3건 이상 필요) 과소 계획 의심 작업이 없습니다.</p>`}</div>`;
@@ -1132,7 +1291,7 @@ async function tabBench(el, r, uid) {
 // ---------------------------------------------------------------- ⑪ 작업일보 → 진도 입력안
 async function tabDaily(el, r, uid) {
   const st = await getAiStatus();
-  el.innerHTML = `${aiOffNote(st)}<div class="panel"><h3 style="margin-top:0">작업일보로 진도 입력안 만들기</h3>
+  el.innerHTML = `${aiOffNote(st)}<div class="panel"><h3 class="mt0">작업일보로 진도 입력안 만들기</h3>
     <p class="muted">작업일보나 회의록 문장을 붙여 넣으면 착수·완료·공정률을 추출해 액티비티에 연결합니다. 담당자가 확인한 항목만 반영됩니다.</p>
     <div class="row"><label>일보 날짜 <input class="s" type="date" id="dDate" value="${r.data_date}"></label></div>
     <textarea id="dText" rows="7" style="width:100%;margin-top:8px" placeholder="예) 기초 철근/거푸집 작업 금일 착수, 30% 진행. 지하 배관 매설 완료."></textarea>
@@ -1143,7 +1302,7 @@ async function tabDaily(el, r, uid) {
   $("#dRun").onclick = () => withBusy($("#dRun"), async () => {
     data = await api(`/api/uploads/${uid}/daily`, { method: "POST", json: { text: $("#dText").value, date: $("#dDate").value } });
     $("#dOut").hidden = false;
-    $("#dOut").innerHTML = `<h3 style="margin-top:0">추출 결과 <span class="muted" style="font-size:13px">(${data.method})</span></h3>
+    $("#dOut").innerHTML = `<h3 class="mt0">추출 결과 <span class="muted fs13">(${data.method})</span></h3>
       ${data.items.length ? `<table class="t"><thead><tr><th></th><th>ID</th><th>작업</th><th>현재</th><th>구분</th><th>날짜</th><th class="num">공정률</th><th>근거</th><th class="num">신뢰도</th></tr></thead><tbody>
       ${data.items.map((x, i) => `<tr><td><input type="checkbox" class="dc" data-i="${i}" ${x.confidence >= 70 ? "checked" : ""}></td><td>${esc(x.code)}</td><td>${esc(x.name)}</td><td>${esc(x.current)}</td>
         <td>${esc(x.event)}</td><td>${esc(x.date || "")}</td><td class="num">${x.pct ?? ""}</td><td class="wrap muted">${esc(x.evidence)}</td><td class="num">${x.confidence}</td></tr>`).join("")}</tbody></table>
@@ -1152,7 +1311,7 @@ async function tabDaily(el, r, uid) {
     if (!data.items.length) return;
     $("#dTest").onclick = () => withBusy($("#dTest"), async () => {
       const w = await api(`/api/uploads/${uid}/whatif`, { method: "POST", json: { changes: chosen() } });
-      $("#dRes").hidden = false; $("#dRes").innerHTML = `<h3 style="margin-top:0">반영 후 일정</h3>` + whatifResult(w);
+      $("#dRes").hidden = false; $("#dRes").innerHTML = `<h3 class="mt0">반영 후 일정</h3>` + whatifResult(w);
     });
     $("#dSave").onclick = () => withBusy($("#dSave"), async () => {
       await api(`/api/uploads/${uid}/scenarios`, { method: "POST", json: { name: `작업일보 ${$("#dDate").value}`, kind: "진도 입력", changes: chosen() } }); toast("저장했습니다");
@@ -1196,11 +1355,11 @@ async function tabHealth(el, r, uid) {
   const groups = [...new Set(h.metrics.map((m) => m.group))];
   el.innerHTML = `<div class="row" style="gap:16px;align-items:stretch;margin-bottom:16px">
       <div class="panel score"><div class="muted">종합 건전성 점수</div><div class="big" style="color:${color}">${h.score}<small>/100</small></div>
-        <div class="grade" style="background:${color}">${h.grade}</div><div class="muted" style="font-size:12px">${h.passed}/${h.evaluated} 항목 통과</div></div>
-      <div class="panel" style="flex:1"><h4 style="margin-top:0">그룹별 점수</h4>
+        <div class="grade" style="background:${color}">${h.grade}</div><div class="muted fs12">${h.passed}/${h.evaluated} 항목 통과</div></div>
+      <div class="panel" style="flex:1"><h4 class="mt0">그룹별 점수</h4>
         ${Object.entries(h.groups).map(([g, v]) => `<div class="hbar"><span>${g}</span><div><i style="width:${v}%;background:${v >= 75 ? "var(--ok)" : v >= 60 ? "var(--warn)" : "var(--crit)"}"></i></div><b>${v}</b></div>`).join("")}
         <p class="muted" style="font-size:12px;margin-bottom:0">DCMA 14-Point, GAO 일정 평가 모범사례, AACE 권고에서 쓰는 점검 항목 ${h.metrics.length}개를 가중 평균했습니다. 기준값과 가중치는 <a href="#/p/${uid}/settings">설정</a>에서 바꿀 수 있습니다.</p></div></div>
-    ${groups.map((g) => `<div class="panel"><h3 style="margin-top:0">${g}</h3><table class="t"><thead><tr><th>ID</th><th>항목</th><th>설명</th><th class="num">결과</th><th>기준</th><th class="num">점수</th><th>판정</th></tr></thead><tbody>
+    ${groups.map((g) => `<div class="panel"><h3 class="mt0">${g}</h3><table class="t"><thead><tr><th>ID</th><th>항목</th><th>설명</th><th class="num">결과</th><th>기준</th><th class="num">점수</th><th>판정</th></tr></thead><tbody>
       ${h.metrics.filter((m) => m.group === g).map((m, i) => `<tr class="${m.items.length ? "clickable" : ""}" data-m="${m.id}">
         <td>${m.id}</td><td><b>${esc(m.name)}</b></td><td class="wrap muted">${esc(m.desc)}</td>
         <td class="num">${m.unit === "%" && m.total ? `${m.count}/${m.total} · ` : ""}${m.value}${m.unit === "%" ? "%" : m.unit === "개" ? "개" : ""}</td>
@@ -1218,7 +1377,7 @@ async function tabForensic(el, r, uid) {
   const draw = async () => {
     const f = await api(`/api/uploads/${uid}/forensic${$("#fBase").value ? "?base=" + $("#fBase").value : ""}`);
     const tr = f.trend;
-    let html = `<div class="panel"><h3 style="margin-top:0">업데이트 추세</h3>
+    let html = `<div class="panel"><h3 class="mt0">업데이트 추세</h3>
       ${legend([["#dc2626", "예상 준공 변동(누적, 일)"], ["#2563eb", "건전성 점수"], ["#16a34a", "공정률 %"]])}
       <canvas id="trendCv" style="width:100%;height:240px"></canvas>
       <table class="t"><thead><tr><th>Data Date</th><th>예상 준공</th><th class="num">변동</th><th class="num">공정률</th><th class="num">최장경로</th><th class="num">음수여유</th><th class="num">건전성</th><th class="num">DCMA</th></tr></thead><tbody>
@@ -1227,11 +1386,11 @@ async function tabForensic(el, r, uid) {
     if (!f.available) html += `<div class="panel empty">${esc(f.message)}</div>`;
     else {
       const c = f.compression;
-      html += `<div class="panel ${c.suspected ? "warn" : ""}"><h3 style="margin-top:0">공기 압축(Compression) 탐지 ${c.suspected ? '<span class="tag fail">의심</span>' : '<span class="tag ok">특이 없음</span>'}</h3>
+      html += `<div class="panel ${c.suspected ? "warn" : ""}"><h3 class="mt0">공기 압축(Compression) 탐지 ${c.suspected ? '<span class="tag fail">의심</span>' : '<span class="tag ok">특이 없음</span>'}</h3>
         <p class="muted">${esc(c.note)} 최장경로 단축 합계 <b>${c.longest_path_cut_days}일</b>, 준공 변동 ${signed(c.finish_slip)}일.</p>
         ${c.items.length ? `<table class="t"><thead><tr><th>ID</th><th>작업</th><th class="num">잔여(전)</th><th class="num">예상 잔여</th><th class="num">잔여(후)</th><th class="num">진척 없는 단축</th><th>공정률</th></tr></thead><tbody>
         ${c.items.map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}${x.longest ? ' <span class="tag crit">주공정</span>' : ""}</td><td class="num">${x.rem_before}</td><td class="num">${x.expected}</td><td class="num">${x.rem_after}</td><td class="num" style="color:var(--crit-text)">-${x.cut}</td><td>${x.pct_before}% → ${x.pct_after}%</td></tr>`).join("")}</tbody></table>` : ""}</div>
-        <div class="panel"><h3 style="margin-top:0">변경 로그 (${f.changes.items.length}건)</h3>
+        <div class="panel"><h3 class="mt0">변경 로그 (${f.changes.items.length}건)</h3>
         <div class="chips">${Object.entries(f.changes.counts).map(([k, v]) => `<span class="chip filter" data-cat="${esc(k)}">${esc(k)} ${v}</span>`).join("")}<span class="chip filter on" data-cat="">전체</span></div>
         <div class="scroll"><table class="t" id="chgTable"><thead><tr><th>구분</th><th>ID</th><th>대상</th><th>변경 전</th><th>변경 후</th><th>비고</th></tr></thead><tbody>
         ${f.changes.items.map((x) => `<tr data-cat="${esc(x.category)}"><td>${esc(x.category)}</td><td>${esc(x.code)}</td><td class="wrap">${esc(x.name)}</td><td>${esc(x.before)}</td><td>${esc(x.after)}</td><td class="wrap ${x.note ? "warn-text" : ""}">${esc(x.note)}</td></tr>`).join("")}</tbody></table></div></div>`;
@@ -1254,14 +1413,14 @@ async function tabForensic(el, r, uid) {
 // ---------------------------------------------------------------- 리스크 레지스터 + 시뮬레이션
 async function tabRisk(el, r, uid) {
   const st = await getAiStatus();
-  el.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">리스크 레지스터</h3>
+  el.innerHTML = `<div class="panel"><div class="row between"><h3 class="m0">리스크 레지스터</h3>
       <div class="row"><button class="btn" id="rkExtract" data-need="editor" ${st.enabled ? "" : "disabled title='AI 미설정'"}>✦ 문서에서 리스크 찾기</button><button class="btn primary" id="rkAdd" data-need="editor">+ 리스크 추가</button></div></div>
       <p class="muted">리스크(아직 일어나지 않은 사건)를 영향받는 액티비티에 연결하면 몬테카를로 시뮬레이션에 반영됩니다. 노출도 = 확률 × 평균 영향일.</p>
       <div id="rkList"></div></div>
-    <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">준공 리스크 시뮬레이션</h3>
+    <div class="panel"><div class="row between"><h3 class="m0">준공 리스크 시뮬레이션</h3>
       <div class="row"><label><input type="checkbox" id="simRisk" checked> 리스크 사건 반영</label><label><input type="checkbox" id="simUnc" checked> 공기 불확실성</label>
       <label class="muted">반복 <input class="s" id="simN" type="number" value="1000" style="width:80px"></label><button class="btn primary" id="simRun">실행</button></div></div>
-      <div id="simBody" class="muted" style="margin-top:8px">실행하면 P50/P80/P90 준공일, 목표 달성 확률, 민감도(Tornado)를 계산합니다.</div></div>
+      <div id="simBody" class="muted mt8">실행하면 P50/P80/P90 준공일, 목표 달성 확률, 민감도(Tornado)를 계산합니다.</div></div>
     <dialog id="dlgRisk"><form method="dialog" id="fRisk"><h3>리스크</h3>
       <label>제목<input name="title" required></label><label>설명<input name="desc"></label>
       <label>분류<select name="category">${["설계", "인허가", "자재·장비", "인력", "기상", "민원·환경", "발주처", "협력업체", "기술", "기타"].map((c) => `<option>${c}</option>`).join("")}</select></label>
@@ -1279,8 +1438,8 @@ async function tabRisk(el, r, uid) {
   const load = async () => {
     list = await api(`/api/uploads/${uid}/risks`);
     $("#rkList").innerHTML = list.length ? `<table class="t"><thead><tr><th>리스크</th><th>분류</th><th>영향 작업</th><th class="num">확률</th><th>영향(일)</th><th class="num">노출도</th><th>대응</th><th>상태</th><th></th></tr></thead><tbody>
-      ${list.map((x) => `<tr><td class="wrap"><b>${esc(x.title)}</b><div class="muted" style="font-size:12px">${esc(x.desc || "")}</div></td><td>${esc(x.category || "")}</td><td>${x.codes.map(esc).join(", ")}</td>
-        <td class="num">${x.prob}%</td><td>${x.impact_min}/${x.impact_ml}/${x.impact_max}</td><td class="num"><b>${x.exposure_days}</b></td><td class="wrap">${esc(x.mitigation || "")}<div class="muted" style="font-size:12px">${esc(x.owner || "")}</div></td>
+      ${list.map((x) => `<tr><td class="wrap"><b>${esc(x.title)}</b><div class="muted fs12">${esc(x.desc || "")}</div></td><td>${esc(x.category || "")}</td><td>${x.codes.map(esc).join(", ")}</td>
+        <td class="num">${x.prob}%</td><td>${x.impact_min}/${x.impact_ml}/${x.impact_max}</td><td class="num"><b>${x.exposure_days}</b></td><td class="wrap">${esc(x.mitigation || "")}<div class="muted fs12">${esc(x.owner || "")}</div></td>
         <td><span class="tag ${x.status === "closed" ? "done" : x.status === "mitigating" ? "" : "fail"}">${{ open: "열림", mitigating: "대응중", closed: "종결" }[x.status]}</span></td>
         <td><button class="btn sm" data-edit="${x.id}">수정</button> <button class="btn sm danger" data-rm="${x.id}">삭제</button></td></tr>`).join("")}</tbody></table>`
       : `<p class="muted">등록된 리스크가 없습니다.</p>`;
@@ -1302,7 +1461,7 @@ async function tabRisk(el, r, uid) {
           const ok = await saveRec(`/api/uploads/${uid}/risks`, { ...x, [inp.dataset.inl]: v, base_updated_at: x.updated_at }, load);
           if (ok) { inp.classList.add("saved"); toast("저장했습니다"); load(); }
         }));
-      } else if (x.assignee || x.due) tds[0].insertAdjacentHTML("beforeend", `<div class="muted" style="font-size:12px">👤 ${esc(x.assignee || "-")}${x.due ? ` · 기한 ${x.due}` : ""}</div>`);
+      } else if (x.assignee || x.due) tds[0].insertAdjacentHTML("beforeend", `<div class="muted fs12">👤 ${esc(x.assignee || "-")}${x.due ? ` · 기한 ${x.due}` : ""}</div>`);
       b.parentElement.querySelector("[data-rcmt]").onclick = () => openComments(uid, "risk:" + x.id, x.title);
     });
     applyRole($("#rkList"));
@@ -1354,13 +1513,13 @@ async function tabRisk(el, r, uid) {
 async function tabPredict(el, r, uid) {
   const [rk, pr] = await Promise.all([api(`/api/uploads/${uid}/risk`), api(`/api/uploads/${uid}/prediction`)]);
   const md_ = pr.model;
-  el.innerHTML = `<div class="panel ${md_.trained ? "" : "warn"}"><h3 style="margin-top:0">학습 기반 예측 모델</h3>
+  el.innerHTML = `<div class="panel ${md_.trained ? "" : "warn"}"><h3 class="mt0">학습 기반 예측 모델</h3>
       ${md_.trained ? `<p>업데이트 이력 표본 <b>${md_.samples}</b>개로 학습했습니다. 검증 오차(MAE) <b>${md_.mae_days}일</b>, 설명력 R² <b>${md_.r2}</b>.</p>
         <p class="muted">영향 큰 요인: ${md_.importance.slice(0, 5).map((x) => `${x.feature}(${x.weight > 0 ? "+" : ""}${x.weight})`).join(", ")}</p>
         <table class="t"><thead><tr><th>ID</th><th>작업</th><th class="num">다음 업데이트 예상 순연(일)</th><th class="num">TF</th></tr></thead><tbody>
         ${pr.items.slice(0, 20).map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}${x.longest ? ' <span class="tag crit">주공정</span>' : ""}</td><td class="num" style="color:${x.predicted_slip > 3 ? "var(--crit-text)" : ""}">${x.predicted_slip}</td><td class="num">${fmtDays(x.tf)}</td></tr>`).join("")}</tbody></table>`
       : `<p>${esc(md_.message)}</p><p class="muted">그동안은 아래의 설명 가능한 규칙 기반 위험 점수를 사용하세요.</p>`}</div>
-    <div class="panel"><h3 style="margin-top:0">지연 위험 점수</h3><p class="muted">${esc(rk.note)} (누적 업데이트 ${rk.history_updates}회)</p>
+    <div class="panel"><h3 class="mt0">지연 위험 점수</h3><p class="muted">${esc(rk.note)} (누적 업데이트 ${rk.history_updates}회)</p>
     <div class="scroll"><table class="t"><thead><tr><th>ID</th><th>작업</th><th>공종</th><th>상태</th><th>종료</th><th class="num">TF</th><th class="num">위험</th><th>사유</th></tr></thead><tbody>
     ${rk.items.map((x) => `<tr><td>${esc(x.code)}</td><td class="wrap">${esc(x.name)}</td><td>${esc(x.trade)}</td><td>${esc(x.status)}</td><td>${x.finish}</td><td class="num">${fmtDays(x.tf)}</td>
       <td class="num"><span class="tag ${x.score >= 50 ? "fail" : x.score >= 30 ? "" : "ok"}">${x.score}</span></td><td class="wrap">${x.reasons.map(esc).join(", ")}</td></tr>`).join("")}</tbody></table></div></div>`;
@@ -1368,20 +1527,20 @@ async function tabPredict(el, r, uid) {
 
 // ---------------------------------------------------------------- 자동 만회안
 async function tabRecovery(el, r, uid) {
-  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">자동 만회안 탐색</h3>
+  el.innerHTML = `<div class="panel"><h3 class="mt0">자동 만회안 탐색</h3>
     <p class="muted">목표 일수만큼 준공을 당기기 위해 최장경로 작업의 공기 단축(Crashing)과 병행(Fast-tracking) 조합을 자동으로 찾고, 재계산으로 검증합니다.</p>
     <div class="row"><label>만회 목표 <input class="s" id="rvDays" type="number" value="10" style="width:80px"> 일</label>
       <label>작업별 최대 단축률 <select class="s" id="rvRatio"><option value="0.2">20%</option><option value="0.3" selected>30%</option><option value="0.5">50%</option></select></label>
       <label>제외 작업 <input class="s" id="rvEx" placeholder="A1050, A2000" style="width:180px"></label>
       <button class="btn primary" id="rvRun">탐색</button></div>
-    <details style="margin-top:8px"><summary class="muted">작업별 일당 단축 비용 입력 (선택)</summary><textarea id="rvCost" rows="3" style="width:100%" placeholder="A2010=3&#10;A3030=1.5"></textarea></details></div>
+    <details class="mt8"><summary class="muted">작업별 일당 단축 비용 입력 (선택)</summary><textarea id="rvCost" rows="3" style="width:100%" placeholder="A2010=3&#10;A3030=1.5"></textarea></details></div>
     <div id="rvOut"></div>`;
   $("#rvRun").onclick = async () => {
     const costs = Object.fromEntries($("#rvCost").value.split("\n").map((l) => l.split("=").map((x) => x.trim())).filter((x) => x.length === 2 && x[1]));
     const res = await runLong(`${$("#rvDays").value}일 만회안 탐색 중 (3가지 전략)`, "recovery", (signal) => api(`/api/uploads/${uid}/recovery`, { method: "POST", signal, json: { days: +$("#rvDays").value, max_ratio: +$("#rvRatio").value, costs, exclude: $("#rvEx").value.split(/[,\s]+/).filter(Boolean) } }));
     if (!res) return;
     $("#rvOut").innerHTML = `<p class="muted">${esc(res.note)}</p><div class="grid3">${res.options.map((o, i) => `<div class="panel option ${o.achieved ? "" : "dim"}">
-      <div class="row" style="justify-content:space-between"><b>${esc(o.policy)}</b>${i === 0 && o.achieved ? '<span class="tag ok">추천</span>' : ""}</div>
+      <div class="row between"><b>${esc(o.policy)}</b>${i === 0 && o.achieved ? '<span class="tag ok">추천</span>' : ""}</div>
       <div class="big">${o.gained_days}<small>일 만회</small></div><div class="muted">목표 ${o.target_days}일 ${o.achieved ? "달성" : "미달"} · 상대 비용 ${o.relative_cost}${o.finish_after ? ` · 준공 ${o.finish_after}` : ""}</div>
       ${o.crashed.length ? `<h4>공기 단축</h4><ul>${o.crashed.map((c) => `<li>${esc(c.code)} ${esc(c.name)} <b>-${c.days}일</b></li>`).join("")}</ul>` : ""}
       ${o.fast_tracked.length ? `<h4>병행 (FS→SS)</h4><ul>${o.fast_tracked.map((f) => `<li>${esc(f.pred)} → ${esc(f.succ)} SS+${f.lag}</li>`).join("")}</ul>` : ""}
@@ -1398,7 +1557,7 @@ async function tabRecovery(el, r, uid) {
 async function tabEvm(el, r, uid) {
   const [bls, ups] = await Promise.all([api(`/api/uploads/${uid}/baselines`), api("/api/uploads")]);
   const same = ups.filter((u) => u.name === r.name);
-  el.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><div class="row"><b>베이스라인</b>
+  el.innerHTML = `<div class="panel"><div class="row between"><div class="row"><b>베이스라인</b>
       <select class="s" id="blSel"><option value="target">P6 계획(Target) 날짜</option>${bls.map((b) => `<option value="${b.id}">${esc(b.label)} (DD ${b.data_date})</option>`).join("")}</select></div>
       <div class="row"><select class="s" id="blSrc">${same.map((u) => `<option value="${u.id}">${u.data_date} · ${esc(u.note || u.filename)}</option>`).join("")}</select>
       <input class="s" id="blLabel" placeholder="이름 (예: 최초 승인)"><button class="btn" id="blAdd" data-need="editor">베이스라인 지정</button></div></div></div>
@@ -1411,9 +1570,9 @@ async function tabEvm(el, r, uid) {
       ${kpi("BAC (총예산)", won(e.bac))}${kpi("PV / EV / AC", `<span style="font-size:15px">${won(e.pv)} / ${won(e.ev)} / ${won(e.ac)}</span>`)}
       ${kpi("SPI", e.spi ?? "-", e.spi < 0.95 ? "crit" : "")}${kpi("CPI", e.cpi ?? "-", e.cpi < 0.95 ? "crit" : "")}
       ${kpi("EAC (실적+잔여)", won(e.eac))}${kpi("VAC", won(e.vac), e.vac < 0 ? "crit" : "")}</div>
-      <div class="panel"><h3 style="margin-top:0">비용 S-Curve</h3>${legend([["#f59e0b", "PV (계획)"], ["#3b82f6", "현재 일정 예측"], ["#16a34a", "EV (업데이트별)"], ["#dc2626", "AC (업데이트별)"]])}
+      <div class="panel"><h3 class="mt0">비용 S-Curve</h3>${legend([["#f59e0b", "PV (계획)"], ["#3b82f6", "현재 일정 예측"], ["#16a34a", "EV (업데이트별)"], ["#dc2626", "AC (업데이트별)"]])}
       <canvas id="evCv" style="width:100%;height:280px"></canvas></div>
-      ${e.worst_cv.length ? `<div class="panel"><h3 style="margin-top:0">원가 초과 작업 (CV 작은 순)</h3><table class="t"><thead><tr><th>ID</th><th>작업</th><th class="num">BAC</th><th class="num">EV</th><th class="num">AC</th><th class="num">CV</th></tr></thead><tbody>
+      ${e.worst_cv.length ? `<div class="panel"><h3 class="mt0">원가 초과 작업 (CV 작은 순)</h3><table class="t"><thead><tr><th>ID</th><th>작업</th><th class="num">BAC</th><th class="num">EV</th><th class="num">AC</th><th class="num">CV</th></tr></thead><tbody>
         ${e.worst_cv.map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}</td><td class="num">${won(x.bac)}</td><td class="num">${won(x.ev)}</td><td class="num">${won(x.ac)}</td><td class="num" style="color:${x.cv < 0 ? "var(--crit-text)" : ""}">${won(x.cv)}</td></tr>`).join("")}</tbody></table></div>` : ""}`;
     if (e.available) {
       const labels = e.curve.map((c) => c.date);
@@ -1423,7 +1582,7 @@ async function tabEvm(el, r, uid) {
         { name: "PV", color: "#f59e0b", values: e.curve.map((c) => c.pv) }, { name: "예측", color: "#3b82f6", values: e.curve.map((c) => c.forecast), dash: [5, 4] },
         { name: "EV", color: "#16a34a", values: near("ev"), dots: true }, { name: "AC", color: "#dc2626", values: near("ac"), dots: true }], { fmt: won, left: 52 });
     }
-    $("#varBody").innerHTML = `<div class="panel"><h3 style="margin-top:0">베이스라인 대비 편차 <span class="muted" style="font-size:13px">(기준: ${esc(v.source)})</span></h3>
+    $("#varBody").innerHTML = `<div class="panel"><h3 class="mt0">베이스라인 대비 편차 <span class="muted fs13">(기준: ${esc(v.source)})</span></h3>
       <div class="kpis">${kpi("베이스라인 준공", v.bl_project_finish || "-")}${kpi("현재 예상 준공", v.project_finish)}${kpi("준공 편차", v.project_var === null ? "-" : signed(v.project_var) + "일", v.project_var > 0 ? "crit" : "")}${kpi("지연 작업 수", v.late_count)}</div>
       <div class="scroll"><table class="t"><thead><tr><th>ID</th><th>작업</th><th>상태</th><th>BL 시작</th><th>시작</th><th class="num">Δ</th><th>BL 종료</th><th>종료</th><th class="num">Δ</th></tr></thead><tbody>
       ${v.rows.slice(0, 300).map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}${x.longest ? ' <span class="tag crit">주공정</span>' : ""}</td><td>${esc(x.status)}</td><td>${x.bl_start || "-"}</td><td>${x.start}</td><td class="num">${x.start_var ?? "-"}</td><td>${x.bl_finish}</td><td>${x.finish}</td>
@@ -1437,7 +1596,7 @@ async function tabResources(el, r, uid) {
   const h = await api(`/api/uploads/${uid}/resources`);
   if (!h.series.length) { el.innerHTML = `<div class="panel empty">XER에 잔여 물량(TASKRSRC remain_qty)이 있는 자원 배정이 없습니다.</div>`; return; }
   const colors = ["#3b82f6", "#f59e0b", "#16a34a", "#8b5cf6", "#dc2626", "#0891b2", "#db2777"];
-  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">자원 히스토그램 (주간 잔여 물량, Early 일정 기준)</h3>
+  el.innerHTML = `<div class="panel"><h3 class="mt0">자원 히스토그램 (주간 잔여 물량, Early 일정 기준)</h3>
     ${legend(h.series.map((s, i) => [colors[i % colors.length], `${s.name} (최대 ${s.peak})`]))}<canvas id="rsCv" style="width:100%;height:300px"></canvas>
     <p class="muted">막대가 급격히 솟는 주는 자원 과부하 가능성이 있습니다. 여유가 있는 작업을 뒤로 미루면 평준화할 수 있습니다(What-if).</p></div>`;
   const cv = $("#rsCv"), dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
@@ -1455,14 +1614,14 @@ async function tabResources(el, r, uid) {
 // ---------------------------------------------------------------- 국내 기준
 async function tabKorea(el, r, uid) {
   const k = await api(`/api/uploads/${uid}/korea`);
-  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">캘린더 법정공휴일 점검</h3>
+  el.innerHTML = `<div class="panel"><h3 class="mt0">캘린더 법정공휴일 점검</h3>
       <p class="muted">Data Date부터 예상 준공까지의 법정공휴일·대체공휴일(${k.holidays.length}일)이 공정 캘린더에 비작업일로 들어 있는지 확인합니다. 임시공휴일·선거일은 <a href="#/admin">관리자 화면</a>에서 추가하세요.</p>
       ${k.calendars.map((c) => `<div class="cal-row"><b>${esc(c.name)}</b> ${c.missing.length ? `<span class="tag fail">누락 ${c.missing.length}일</span>` : '<span class="tag ok">이상 없음</span>'}
         ${c.note ? `<span class="muted"> ${esc(c.note)}</span>` : ""}
         ${c.missing.length ? `<div class="muted" style="font-size:12px;margin:4px 0">${c.missing.map((m) => `${m.date.slice(5)} ${esc(m.name)}`).join(", ")}</div>
           <button class="btn sm" data-fix="${c.clndr_id}">공휴일 반영 XER 다운로드</button> <button class="btn sm" data-wi="${c.clndr_id}">반영 시 일정 영향 보기</button>` : ""}</div>`).join("")}
       <div id="kWi"></div></div>
-    <div class="panel"><h3 style="margin-top:0">기상 비작업일 기반 적정 공기 검토</h3>
+    <div class="panel"><h3 class="mt0">기상 비작업일 기반 적정 공기 검토</h3>
       <p class="muted">월별 기상 비작업일(강우·강설·한파·폭염 등)을 현장 지역의 기상청 통계로 산정해 입력하세요. 필요 비작업일보다 캘린더 비작업일이 적은 달은 작업일을 과다하게 잡은 것입니다. 기준 캘린더: ${esc(k.default_calendar || "-")}</p>
       <div class="months">${Array.from({ length: 12 }, (_, i) => `<label>${i + 1}월<input class="s" type="number" step="0.5" min="0" data-m="${i + 1}" value="${k.weather_days[i + 1] ?? ""}"></label>`).join("")}</div>
       <div class="row end"><button class="btn primary" id="kSave" data-need="editor">저장 후 재검토</button></div>
@@ -1484,24 +1643,24 @@ const REASONS = ["선행작업 미완료", "자재 미입고", "인력 부족", 
 async function tabLookahead(el, r, uid) {
   const [la, p] = await Promise.all([api(`/api/uploads/${uid}/lookahead`), api(`/api/uploads/${uid}/ppc`)]);
   const thisWeek = la.weeks[0];
-  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">3주 룩어헤드 <span class="muted" style="font-size:13px">(${la.weeks[0]} 주부터)</span></h3>
+  el.innerHTML = `<div class="panel"><h3 class="mt0">3주 룩어헤드 <span class="muted fs13">(${la.weeks[0]} 주부터)</span></h3>
       <p class="muted">CPM 일정에서 향후 3주 작업을 뽑았습니다. 협력업체가 이번 주에 하겠다고 약속한 작업을 등록하고, 주말에 완료 여부를 체크하면 PPC(계획 대비 완료율)가 집계됩니다. 착수를 막는 제약(도면·자재 등)도 함께 관리하세요.</p>
       <div class="scroll"><table class="t la"><thead><tr><th>ID</th><th>작업</th><th>기간</th><th class="num">TF</th>${la.weeks.map((w) => `<th>${w.slice(5)} 주</th>`).join("")}<th>제약</th><th>이번 주 약속</th></tr></thead><tbody>
       ${la.rows.map((a) => {
         const c = a.commitments.find((x) => x.week === thisWeek);
-        return `<tr><td>${esc(a.code)}</td><td class="wrap">${esc(a.name)}${a.longest ? ' <span class="tag crit">주공정</span>' : ""}</td><td style="font-size:12px">${a.start.slice(5)}~${a.finish.slice(5)}</td><td class="num">${fmtDays(a.tf)}</td>
+        return `<tr><td>${esc(a.code)}</td><td class="wrap">${esc(a.name)}${a.longest ? ' <span class="tag crit">주공정</span>' : ""}</td><td class="fs12">${a.start.slice(5)}~${a.finish.slice(5)}</td><td class="num">${fmtDays(a.tf)}</td>
         ${la.weeks.map((w) => `<td class="wk ${a.weeks.includes(w) ? (a.longest ? "on crit" : "on") : ""}"></td>`).join("")}
         <td>${a.constraints.map((x) => `<span class="tag fail" title="${esc(x.desc)}">${esc(x.type)}</span>`).join(" ")} <button class="btn sm" data-con="${esc(a.code)}">+</button></td>
         <td>${c ? `<label><input type="checkbox" data-done="${c.id}" ${c.done ? "checked" : ""}> ${esc(c.company || "")}</label>
             ${!c.done ? `<select class="s sm" data-reason="${c.id}"><option value="">미완료 사유</option>${REASONS.map((x) => `<option ${c.reason === x ? "selected" : ""}>${x}</option>`).join("")}</select>` : ""}`
           : `<button class="btn sm" data-commit="${esc(a.code)}" data-name="${esc(a.name)}">약속 등록</button>`}</td></tr>`;
       }).join("")}</tbody></table></div></div>
-    <div class="grid2"><div class="panel"><h3 style="margin-top:0">주간 PPC</h3><canvas id="ppcCv" style="width:100%;height:200px"></canvas>
+    <div class="grid2"><div class="panel"><h3 class="mt0">주간 PPC</h3><canvas id="ppcCv" style="width:100%;height:200px"></canvas>
       <table class="t"><tbody>${p.weeks.map((w) => `<tr><td>${w.week}</td><td class="num">${w.done}/${w.planned}</td><td class="num"><b>${w.ppc ?? "-"}%</b></td></tr>`).join("") || '<tr><td class="muted">아직 약속이 없습니다.</td></tr>'}</tbody></table></div>
-      <div class="panel"><h3 style="margin-top:0">미완료 사유 · 협력업체별 PPC</h3>
+      <div class="panel"><h3 class="mt0">미완료 사유 · 협력업체별 PPC</h3>
       ${p.reasons.map(([k, v]) => `<div class="hbar"><span>${esc(k)}</span><div><i style="width:${(100 * v) / p.reasons[0][1]}%;background:var(--warn)"></i></div><b>${v}</b></div>`).join("") || '<p class="muted">없음</p>'}
       <table class="t" style="margin-top:10px"><tbody>${p.companies.map((c) => `<tr><td>${esc(c.company)}</td><td class="num">${c.done}/${c.planned}</td><td class="num">${c.ppc}%</td></tr>`).join("")}</tbody></table></div></div>
-    <div class="panel"><h3 style="margin-top:0">제약 로그</h3><table class="t"><thead><tr><th>ID</th><th>유형</th><th>내용</th><th>담당</th><th>해소 기한</th><th>상태</th><th></th></tr></thead><tbody>
+    <div class="panel"><h3 class="mt0">제약 로그</h3><table class="t"><thead><tr><th>ID</th><th>유형</th><th>내용</th><th>담당</th><th>해소 기한</th><th>상태</th><th></th></tr></thead><tbody>
       ${la.constraints.map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.type)}</td><td class="wrap">${esc(x.desc)}</td><td>${esc(x.owner || "")}</td>
         <td style="color:${x.status !== "해결" && x.due && x.due < la.data_date ? "var(--crit-text)" : ""}">${x.due || ""}</td>
         <td><select class="s sm" data-cst="${x.id}">${["미해결", "진행", "해결"].map((s) => `<option ${x.status === s ? "selected" : ""}>${s}</option>`).join("")}</select></td>
@@ -1538,11 +1697,11 @@ async function tabSettings(el, r, uid) {
   const memBox = document.createElement("div");
   setTimeout(() => { el.prepend(memBox); renderMembers(memBox, r.name); }, 0);
   const ov = st.metric_overrides;
-  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">일정 계산 옵션</h3>
+  el.innerHTML = `<div class="panel"><h3 class="mt0">일정 계산 옵션</h3>
       <label><input type="checkbox" id="optPO" ${st.schedule_options.progress_override ? "checked" : ""}> Progress Override (착수된 작업은 선행 논리를 무시하고 Data Date부터 잔여 작업 진행)</label>
       <p class="muted">기본값은 Retained Logic(P6 기본)입니다. P6의 Schedule Options와 같게 맞추면 'P6 일정 비교' 일치율이 올라갑니다. 변경하면 이 프로젝트의 모든 업데이트를 다시 계산합니다.</p>
       <button class="btn primary" id="optSave" data-need="editor">저장 및 재계산</button></div>
-    <div class="panel"><h3 style="margin-top:0">건전성 지표 기준값 (이 프로젝트)</h3>
+    <div class="panel"><h3 class="mt0">건전성 지표 기준값 (이 프로젝트)</h3>
       <p class="muted">비워 두면 팀 기본값(${Object.keys(st.team_metric_overrides).length ? "관리자 설정" : "표준값"})을 씁니다. 가중치 0은 점수에서 제외합니다.</p>
       <div class="scroll"><table class="t"><thead><tr><th>ID</th><th>그룹</th><th>항목</th><th>비교</th><th>기본 기준</th><th>기준</th><th>가중치</th><th>사용</th></tr></thead><tbody>
       ${defs.map((d) => { const o = ov[d.id] || {}; return `<tr><td>${d.id}</td><td>${d.group}</td><td>${esc(d.name)}</td><td>${d.cmp === "le" ? "≤" : d.cmp === "ge" ? "≥" : "참고"}</td><td>${d.threshold ?? "-"}${d.unit === "%" ? "%" : ""}</td>
@@ -1575,7 +1734,7 @@ async function showGenerate() {
     <div id="gAi" hidden><label>목표 공기(달력일, 선택)<input name="target_days" type="number"></label>
       <label>입찰·설계 문서 (PDF, DOCX, TXT · 20MB 이하)<input name="file" type="file" accept=".pdf,.docx,.txt"></label>
       <label>또는 내용 붙여넣기<textarea name="text" rows="5" style="width:100%"></textarea></label>
-      <p class="muted" style="font-size:12px">문서 내용이 AI 서비스로 전송됩니다. 생성된 공정표는 초안이며 공기·논리를 반드시 검토하세요.</p></div>
+      <p class="muted fs12">문서 내용이 AI 서비스로 전송됩니다. 생성된 공정표는 초안이며 공기·논리를 반드시 검토하세요.</p></div>
     <div class="row end"><button class="btn" value="cancel" formnovalidate>취소</button><button class="btn primary" value="ok" id="gRun">만들기</button></div><p class="err" id="gErr"></p></form>`;
   const f = $("#fGen");
   f.querySelectorAll("[name=mode]").forEach((x) => (x.onchange = () => { $("#gTpl").hidden = f.mode.value !== "template"; $("#gAi").hidden = f.mode.value !== "ai"; }));
@@ -1631,23 +1790,23 @@ async function showAdmin() {
   const anyUid = (await api("/api/uploads"))[0]?.id;
   const st = anyUid ? await api(`/api/uploads/${anyUid}/settings`) : { extra_holidays: [] };
   view.innerHTML = `<h2>관리</h2>
-    <div class="panel"><h3 style="margin-top:0">사용자</h3>${cfg.login_required ? "" : `<p class="warn-text">아직 사용자 계정이 없어 누구나 접근할 수 있는 공개 모드입니다. 서버에서 <code>python -m app.auth create-admin 아이디</code>로 관리자를 만들거나 <code>ADMIN_USERNAME</code>/<code>ADMIN_PASSWORD</code> 환경변수를 설정하면 로그인이 켜집니다.</p>`}
+    <div class="panel"><h3 class="mt0">사용자</h3>${cfg.login_required ? "" : `<p class="warn-text">아직 사용자 계정이 없어 누구나 접근할 수 있는 공개 모드입니다. 서버에서 <code>python -m app.auth create-admin 아이디</code>로 관리자를 만들거나 <code>ADMIN_USERNAME</code>/<code>ADMIN_PASSWORD</code> 환경변수를 설정하면 로그인이 켜집니다.</p>`}
       <table class="t"><thead><tr><th>아이디</th><th>역할</th><th>상태</th><th>최근 로그인</th><th></th></tr></thead><tbody>
       ${users.map((u) => `<tr><td>${esc(u.username)}</td><td><select class="s sm" data-role="${esc(u.username)}" aria-label="${esc(u.username)} 역할">${["viewer", "editor", "admin"].map((r) => `<option ${u.role === r ? "selected" : ""}>${r}</option>`).join("")}</select></td>
         <td>${u.active ? "사용" : '<span class="tag fail">중지</span>'}</td><td>${(u.last_login || "").replace("T", " ")}</td>
         <td><button class="btn sm" data-act="${esc(u.username)}" data-v="${u.active ? 0 : 1}">${u.active ? "중지" : "재사용"}</button> <button class="btn sm" data-pw="${esc(u.username)}">비밀번호 재설정</button></td></tr>`).join("")}</tbody></table>
-      ${cfg.login_required ? `<div class="row" style="margin-top:8px"><input class="s" id="nu" placeholder="아이디"><input class="s" id="np" type="password" placeholder="임시 비밀번호(10자 이상)">
+      ${cfg.login_required ? `<div class="row mt8"><input class="s" id="nu" placeholder="아이디"><input class="s" id="np" type="password" placeholder="임시 비밀번호(10자 이상)">
         <select class="s" id="nr" aria-label="새 사용자 역할"><option>viewer</option><option selected>editor</option><option>admin</option></select><button class="btn primary" id="nAdd">추가</button></div>
-        <p class="muted" style="font-size:12px">viewer: 조회·What-if 계산 / editor: 업로드·AI·리스크·시나리오 편집 / admin: 삭제·사용자·팀 설정</p>` : ""}</div>
-    <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">프로젝트 권한</h3><a class="btn" href="#/projects">프로젝트별 멤버 관리 →</a></div>
+        <p class="muted fs12">viewer: 조회·What-if 계산 / editor: 업로드·AI·리스크·시나리오 편집 / admin: 삭제·사용자·팀 설정</p>` : ""}</div>
+    <div class="panel"><div class="row between"><h3 class="m0">프로젝트 권한</h3><a class="btn" href="#/projects">프로젝트별 멤버 관리 →</a></div>
       <p class="muted">읽기는 모든 사용자에게 열려 있고, 쓰기는 프로젝트 소유자·멤버(와 관리자)만 할 수 있습니다. 새 프로젝트를 처음 올린 사람이 소유자가 됩니다.</p></div>
-    <div class="panel"><h3 style="margin-top:0">추가 휴일 (임시공휴일·선거일 등)</h3>
+    <div class="panel"><h3 class="mt0">추가 휴일 (임시공휴일·선거일 등)</h3>
       <textarea id="exHol" rows="4" style="width:100%" placeholder="2026-06-03 지방선거">${st.extra_holidays.map((h) => `${h.date} ${h.name}`).join("\n")}</textarea>
       <div class="row end"><button class="btn primary" id="hSave">저장</button></div></div>
-    <div class="panel"><h3 style="margin-top:0">AI 사용량</h3><p class="muted">모델 ${esc(aist.model)} · ${aist.enabled ? "사용 중" : "미설정"}</p>
+    <div class="panel"><h3 class="mt0">AI 사용량</h3><p class="muted">모델 ${esc(aist.model)} · ${aist.enabled ? "사용 중" : "미설정"}</p>
       <table class="t"><thead><tr><th>기능</th><th class="num">호출</th><th class="num">입력 토큰</th><th class="num">출력 토큰</th><th class="num">실패</th></tr></thead><tbody>
       ${aist.usage.map((u) => `<tr><td>${esc(u.feature)}</td><td class="num">${u.n}</td><td class="num">${(u.tin || 0).toLocaleString()}</td><td class="num">${(u.tout || 0).toLocaleString()}</td><td class="num">${u.failed}</td></tr>`).join("") || '<tr><td class="muted">기록 없음</td></tr>'}</tbody></table></div>
-    <div class="panel"><h3 style="margin-top:0">감사 로그 (최근 300건)</h3><div class="scroll"><table class="t"><thead><tr><th>시각</th><th>사용자</th><th>요청</th><th class="num">결과</th></tr></thead><tbody>
+    <div class="panel"><h3 class="mt0">감사 로그 (최근 300건)</h3><div class="scroll"><table class="t"><thead><tr><th>시각</th><th>사용자</th><th>요청</th><th class="num">결과</th></tr></thead><tbody>
       ${audit.map((a) => `<tr><td>${a.at.replace("T", " ")}</td><td>${esc(a.username)}</td><td>${a.method} ${esc(a.path)}</td><td class="num">${a.status}</td></tr>`).join("")}</tbody></table></div></div>`;
   const reload = () => showAdmin();
   view.querySelectorAll("[data-role]").forEach((s) => (s.onchange = async () => { try { await api(`/api/admin/users/${encodeURIComponent(s.dataset.role)}`, { method: "PUT", json: { role: s.value } }); toast("변경했습니다"); } catch (e) { reload(); } }));
@@ -1674,9 +1833,9 @@ async function showPrint(uid) {
   const head = `<g font-size="10" fill="#111">${months.map((t) => `<line x1="${X(t)}" y1="0" x2="${X(t)}" y2="${rowsPerPage * RH + 30}" stroke="#e5e7eb"/><text x="${X(t) + 2}" y="12">${new Date(t).getFullYear() % 100}.${new Date(t).getMonth() + 1}</text>`).join("")}
     <text x="4" y="24" font-weight="bold">ID</text><text x="70" y="24" font-weight="bold">액티비티명</text><text x="380" y="24" font-weight="bold">잔여</text><text x="410" y="24" font-weight="bold">시작</text><text x="470" y="24" font-weight="bold">종료</text><text x="530" y="24" font-weight="bold">TF</text></g>`;
   $("#crumb").textContent = "/ 인쇄";
-  view.innerHTML = `<div class="noprint row" style="margin-bottom:10px"><button class="btn primary" onclick="window.print()">인쇄 / PDF 저장</button>
+  view.innerHTML = `<div class="noprint row mb10"><button class="btn primary" onclick="window.print()">인쇄 / PDF 저장</button>
       <a class="btn" href="#/p/${uid}/gantt">돌아가기</a><span class="muted">A3 가로에 맞춰 ${pages.length}쪽으로 나눕니다. 브라우저 인쇄에서 'PDF로 저장'을 고르세요.</span></div>
-    ${pages.map((pg, pi) => `<div class="print-page"><div class="ph"><b>${esc(r.name)}</b> 공정표 · Data Date ${r.data_date} · 예상 준공 ${r.finish}<span>${pi + 1} / ${pages.length}</span></div>
+    ${pages.map((pg, pi) => `<div class="print-page"><div class="ph"><span class="ph-l"><img class="print-logo" src="/api/logo" alt="" onerror="this.remove()"><b>${esc(r.name)}</b> 공정표 · Data Date ${r.data_date} · 예상 준공 ${r.finish}</span><span>${pi + 1} / ${pages.length}</span></div>
       <svg viewBox="0 0 ${W} ${rowsPerPage * RH + 34}" width="100%" font-family="sans-serif">${head}<g transform="translate(0,30)">
       ${pg.map((a, i) => { const y = i * RH; if (!a.id) return `<rect x="0" y="${y}" width="${W}" height="${RH}" fill="#f3f4f6"/><text x="4" y="${y + 11}" font-size="10" font-weight="bold">${esc(a.wbs)}</text>`;
         const s = toT(a.start), f = toT(a.finish) + dayMs, col = a.status_code === "TK_Complete" ? "#9ca3af" : a.longest || a.critical ? "#dc2626" : "#3b82f6";
@@ -1719,8 +1878,8 @@ async function renderInbox(container) {
   const rest = favs.length ? items.filter((x) => !favs.includes(x.project)) : [];
   const row = (x) => `<a class="inbox-item ${x.level}" href="#/p/${x.uid}/${x.tab}"><span class="sev" aria-label="${x.level === "high" ? "높음" : "보통"}">${x.level === "high" ? "✕" : "!"}</span>
     <b>${esc(x.project)}</b><span>${esc(x.text)}</span><span class="go">→</span></a>`;
-  container.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">오늘 확인할 것 <span class="muted">(${items.length})</span></h3>
-      <span class="muted" style="font-size:12px">${favs.length ? "★ 관심 프로젝트 우선" : "프로젝트 이름 옆 ★로 관심 프로젝트를 지정하세요"}</span></div>
+  container.innerHTML = `<div class="panel"><div class="row between"><h3 class="m0">오늘 확인할 것 <span class="muted">(${items.length})</span></h3>
+      <span class="muted fs12">${favs.length ? "★ 관심 프로젝트 우선" : "프로젝트 이름 옆 ★로 관심 프로젝트를 지정하세요"}</span></div>
     ${items.length ? `<div class="inbox">${mine.map(row).join("")}${rest.length ? `<details><summary class="muted">다른 프로젝트 ${rest.length}건</summary>${rest.map(row).join("")}</details>` : ""}</div>`
       : '<p class="muted">확인할 항목이 없습니다. 👍</p>'}</div>`;
 }
@@ -1730,19 +1889,19 @@ async function renderMembers(box, name) {
   if (!box.isConnected && box.parentNode === null) return;
   const cfg = await fetch("/api/config").then((x) => x.json());
   if (!cfg.login_required) {
-    box.innerHTML = `<div class="panel"><h3 style="margin-top:0">프로젝트 멤버</h3><p class="muted">사용자 계정이 아직 없어 공개 모드입니다. 관리자 계정을 만들면 '읽기는 모두, 쓰기는 자기 프로젝트만' 규칙이 적용됩니다.</p></div>`;
+    box.innerHTML = `<div class="panel"><h3 class="mt0">프로젝트 멤버</h3><p class="muted">사용자 계정이 아직 없어 공개 모드입니다. 관리자 계정을 만들면 '읽기는 모두, 쓰기는 자기 프로젝트만' 규칙이 적용됩니다.</p></div>`;
     return;
   }
   const [ms, users] = await Promise.all([api(`/api/projects/${encodeURIComponent(name)}/members`), ctx.canManage ? api("/api/users") : Promise.resolve([])]);
   const roleKo = { owner: "소유자", member: "멤버" };
-  box.innerHTML = `<div class="panel"><h3 style="margin-top:0">프로젝트 멤버 <span class="muted" style="font-size:13px">${esc(name)}</span></h3>
+  box.innerHTML = `<div class="panel"><h3 class="mt0">프로젝트 멤버 <span class="muted fs13">${esc(name)}</span></h3>
     <p class="muted">이 프로젝트는 모든 사용자가 볼 수 있고, 아래 멤버(와 관리자)만 편집할 수 있습니다. 소유자는 멤버를 관리하고 업로드를 삭제할 수 있습니다.</p>
     <table class="t" data-noexport><thead><tr><th>사용자</th><th>프로젝트 역할</th><th>지정</th><th></th></tr></thead><tbody>
     ${ms.map((m) => `<tr><td><b>${esc(m.username)}</b></td><td>${ctx.canManage ? `<select class="s sm" data-mrole="${esc(m.username)}" aria-label="${esc(m.username)} 역할">${["owner", "member"].map((x) => `<option value="${x}" ${m.role === x ? "selected" : ""}>${roleKo[x]}</option>`).join("")}</select>` : roleKo[m.role]}</td>
       <td class="muted">${esc(m.added_by || "")} ${(m.added_at || "").slice(0, 10)}</td><td>${ctx.canManage ? `<button class="btn sm danger" data-mdel="${esc(m.username)}">제외</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="4" class="muted">멤버가 없습니다. 관리자만 편집할 수 있습니다.</td></tr>'}</tbody></table>
-    ${ctx.canManage ? `<div class="row" style="margin-top:8px"><select class="s" id="mAddU" aria-label="추가할 사용자"><option value="">사용자 선택</option>${users.filter((u) => u.role !== "viewer" && !ms.some((m) => m.username === u.username)).map((u) => `<option>${esc(u.username)}</option>`).join("")}</select>
+    ${ctx.canManage ? `<div class="row mt8"><select class="s" id="mAddU" aria-label="추가할 사용자"><option value="">사용자 선택</option>${users.filter((u) => u.role !== "viewer" && !ms.some((m) => m.username === u.username)).map((u) => `<option>${esc(u.username)}</option>`).join("")}</select>
       <select class="s" id="mAddR" aria-label="추가할 역할"><option value="member">멤버</option><option value="owner">소유자</option></select><button class="btn primary" id="mAdd">추가</button>
-      <span class="muted" style="font-size:12px">조회 전용(viewer) 계정은 멤버로 추가할 수 없습니다.</span></div>`
+      <span class="muted fs12">조회 전용(viewer) 계정은 멤버로 추가할 수 없습니다.</span></div>`
       : `<p class="muted">편집이 필요하면 소유자(${esc(ms.filter((m) => m.role === "owner").map((m) => m.username).join(", ") || "관리자")})에게 멤버 추가를 요청하세요.</p>`}</div>`;
   const reload = () => renderMembers(box, name);
   renderAccessRequests(box, name);
@@ -1765,11 +1924,11 @@ async function showProjectsAccess() {
   const [ps, cfg] = await Promise.all([api("/api/projects"), fetch("/api/config").then((x) => x.json())]);
   const roleKo = { admin: "관리자", owner: "소유자", member: "멤버" };
   const mine = ps.filter((p) => p.my_role && p.my_role !== "admin");
-  view.innerHTML = `<h2 style="margin-top:0">👥 프로젝트 권한</h2>
+  view.innerHTML = `<h2 class="mt0">👥 프로젝트 권한</h2>
     <p class="muted">규칙: <b>읽기는 모든 프로젝트</b>, <b>쓰기는 자기 프로젝트(소유자·멤버)만</b>. 관리자는 모든 프로젝트를 편집할 수 있습니다. 새 프로젝트를 처음 올린 사람이 소유자가 되고, 소유자가 멤버를 추가합니다.</p>
     ${cfg.login_required ? "" : `<div class="panel warn">아직 사용자 계정이 없어 공개 모드(모두 편집 가능)입니다. 관리 화면의 안내에 따라 관리자 계정을 만들면 규칙이 적용됩니다.</div>`}
     <div class="kpis">${kpi("전체 프로젝트", ps.length)}${kpi("내가 편집 가능", ps.filter((p) => p.can_write).length)}${kpi("내 소유", mine.filter((p) => p.my_role === "owner").length)}${kpi("소유자 없는 프로젝트", ps.filter((p) => !p.members.some((m) => m.role === "owner")).length, ps.some((p) => !p.members.some((m) => m.role === "owner")) ? "crit" : "")}</div>
-    <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">프로젝트 목록</h3>
+    <div class="panel"><div class="row between"><h3 class="m0">프로젝트 목록</h3>
       <label><input type="checkbox" id="onlyMine"> 내가 편집할 수 있는 것만</label></div>
     <table class="t" id="pTable"><thead><tr><th>프로젝트</th><th>최근 Data Date</th><th>소유자</th><th>멤버</th><th>내 권한</th><th></th></tr></thead><tbody>
     ${ps.map((p) => `<tr data-w="${p.can_write ? 1 : 0}"><td><a href="#/p/${p.latest_id}/overview"><b>${esc(p.name)}</b></a></td><td>${p.data_date}</td>
@@ -1793,7 +1952,7 @@ async function showMyInfo() {
   const projects = Object.entries(m.projects || {});
   const d = _modal(`<form method="dialog" id="fMe"><h3>👤 내 정보</h3>
     <p><b>${esc(m.username)}</b> · 전역 역할 <span class="tag">${roleKo[m.role]}</span></p>
-    <p class="muted" style="font-size:13px">${m.role === "viewer" ? "조회 전용 계정입니다. 모든 프로젝트를 볼 수 있지만 편집할 수 없습니다." : m.role === "admin" ? "모든 프로젝트를 편집하고 사용자·권한을 관리할 수 있습니다." : "모든 프로젝트를 볼 수 있고, 아래 프로젝트와 내가 새로 올린 프로젝트를 편집할 수 있습니다."}</p>
+    <p class="muted fs13">${m.role === "viewer" ? "조회 전용 계정입니다. 모든 프로젝트를 볼 수 있지만 편집할 수 없습니다." : m.role === "admin" ? "모든 프로젝트를 편집하고 사용자·권한을 관리할 수 있습니다." : "모든 프로젝트를 볼 수 있고, 아래 프로젝트와 내가 새로 올린 프로젝트를 편집할 수 있습니다."}</p>
     <h4>편집할 수 있는 프로젝트 (${projects.length})</h4>${projects.map(([n, r]) => `<div class="mini">${esc(n)} · ${pr[r]}</div>`).join("") || '<div class="muted">없음</div>'}
     <h4>비밀번호 변경</h4><label>현재 비밀번호<input type="password" name="current" autocomplete="current-password"></label>
     <label>새 비밀번호 (10자 이상)<input type="password" name="new" autocomplete="new-password"></label>

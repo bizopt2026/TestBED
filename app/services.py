@@ -183,8 +183,8 @@ def whatif(uid: str, changes: list[dict]) -> dict:
         if not b:
             continue
         df = (date.fromisoformat(a["finish"]) - date.fromisoformat(b["finish"])).days
-        if df or (a["tf"] != b["tf"]):
-            moved.append({"code": a["code"], "name": a["name"], "finish_before": b["finish"], "finish_after": a["finish"],
+        if df or (a["tf"] != b["tf"]) or a["start"] != b["start"]:
+            moved.append({"code": a["code"], "name": a["name"], "finish_before": b["finish"], "finish_after": a["finish"], "start_before": b["start"], "start_after": a["start"],
                           "d_finish": df, "tf_before": b["tf"], "tf_after": a["tf"], "longest": a["longest"]})
     moved.sort(key=lambda x: (-abs(x["d_finish"]), x["code"]))
     return {"log": log, "finish_before": before["finish"], "finish_after": after["finish"],
@@ -457,6 +457,14 @@ def report_docx(rep: dict) -> bytes:
     st.element.rPr.rFonts.set(qn("w:eastAsia"), "맑은 고딕")
     st.font.size = Pt(10)
 
+    lg = logo()
+    if lg:
+        import io as _io
+        try:
+            hp = doc.sections[0].header.paragraphs[0]
+            hp.add_run().add_picture(_io.BytesIO(lg[0]), height=Pt(20))
+        except Exception:  # 지원하지 않는 이미지 형식이면 로고 없이
+            pass
     t = doc.add_paragraph()
     t.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = t.add_run(f"{d['project']} 월간 공정보고")
@@ -689,7 +697,8 @@ TAB_CONTEXT = {"overview": "개요", "gantt": "공정표", "critical": "주공�
 def chat(uid: str, messages: list[dict], user: str = "", context: str = "") -> dict:
     r = result(uid)
     by = {a["code"]: a for a in r["activities"]}
-    today = date.today().isoformat()
+    from .clock import today as _today
+    today = _today().isoformat()
     where = TAB_CONTEXT.get(context)
     system = (SYSTEM_BASE + f"\n지금 보고 있는 프로젝트: {r['name']} (Data Date {r['data_date']}, 오늘 {today}). "
               + (f"사용자는 지금 '{where}' 화면을 보고 있으므로, 질문이 모호하면 그 화면과 관련된 내용으로 해석하세요. " if where else "")
@@ -1020,6 +1029,10 @@ def portfolio() -> list[dict]:
                     "open_risks": sum(1 for x in rs if x.get("status") != "closed"),
                     "spi": e.get("spi"), "cpi": e.get("cpi"),
                     "review": _review_status(p["id"]), "created_at": p.get("created_at"),
+                    "milestones": [{"code": a["code"], "name": a["name"], "finish": a["finish"] if a["milestone"] != "start" else a["start"],
+                                    "bl": a.get("bl_finish"), "done": a["status_code"] == "TK_Complete", "longest": a.get("longest")}
+                                   for a in r["activities"] if a.get("milestone")][:12],
+                    "start": min((a["start"] for a in r["activities"] if a.get("start")), default=r["data_date"]),
                     "level": _level(r["name"], margin, sum(1 for a in inc if a["tf"] is not None and a["tf"] < 0), slip, p["id"], e.get("spi")),
                     "history": [{"id": h["id"], "data_date": h["data_date"], "finish": h["result"]["finish"], "created_at": h.get("created_at"),
                                  "note": h.get("note") or h.get("filename")} for h in reversed(hist)][:12]})
@@ -1087,7 +1100,8 @@ def generate_from_text(project: str, start: date, text: str, target_days: int | 
 # ================================================================ 3차: UX 지원
 def inbox(username: str = "") -> list[dict]:
     """홈 화면 '오늘 확인할 것' 목록."""
-    today = date.today()
+    from .clock import today as _today
+    today = _today()
     this_week = monday(today).isoformat()
     items = []
     for p in storage.latest_by_project():
@@ -1206,7 +1220,7 @@ def a3_html(uid: str) -> str:
         chunk = acts[p0:p0 + PER]
         H = 60 + len(chunk) * RH + 20
         g = [f'<rect x="0" y="0" width="{W}" height="{H}" fill="#fff"/>',
-             f'<text x="8" y="20" font-size="15" font-weight="700">{escape(r["name"])} · Data Date {r["data_date"]} · 예상 준공 {r["finish"]}</text>']
+             f'<text x="8" y="20" font-size="13" font-weight="700" fill="#344054">공정표 {p0 // PER + 1}쪽</text>']
         m = date(t0.year, t0.month, 1)
         while m <= t1:
             x = X(m.isoformat()) if m >= t0 else L
@@ -1215,21 +1229,27 @@ def a3_html(uid: str) -> str:
         for i, a in enumerate(chunk):
             y = 56 + i * RH
             crit = a.get("longest") or a.get("critical")
-            col = "#9ca3af" if a["status_code"] == "TK_Complete" else "#dc2626" if crit else "#3b82f6"
+            col = "#a4acb9" if a["status_code"] == "TK_Complete" else "#e5484d" if crit else "#6366f1"
             g.append(f'<text x="8" y="{y + 12}" font-size="10">{escape(a["code"])}</text><text x="90" y="{y + 12}" font-size="10">{escape(a["name"][:34])}</text>'
                      f'<text x="400" y="{y + 12}" font-size="9" fill="#374151">{a["start"][2:]}~{a["finish"][2:]}</text><text x="530" y="{y + 12}" font-size="9" text-anchor="end">{a["tf"] if a["tf"] is not None else ""}</text>')
             x1, x2 = X(a["start"]), X((date.fromisoformat(a["finish"]) + timedelta(days=1)).isoformat())
             if a.get("milestone"):
                 g.append(f'<path d="M{x1:.1f} {y + 3} l6 6 l-6 6 l-6 -6z" fill="{col}"/>')
             else:
-                g.append(f'<rect x="{x1:.1f}" y="{y + 4}" width="{max(2, x2 - x1):.1f}" height="9" fill="{col}"/>')
+                g.append(f'<rect x="{x1:.1f}" y="{y + 4}" width="{max(2, x2 - x1):.1f}" height="9" rx="3" fill="{col}"/>')
         xd = X(r["data_date"])
         g.append(f'<line x1="{xd:.1f}" y1="34" x2="{xd:.1f}" y2="{H - 20}" stroke="#16a34a" stroke-dasharray="5 4"/>')
         pages.append(f'<section class="pg"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="100%">{"".join(g)}</svg>'
                      f'<div class="ft">{p0 // PER + 1} / {(len(acts) - 1) // PER + 1} · 빨강 최장경로/주공정 · 파랑 일반 · 회색 완료 · 초록 점선 Data Date</div></section>')
+    lg = logo()
+    import base64
+    img = ('<img src="data:%s;base64,%s" alt="회사 로고">' % (lg[1], base64.b64encode(lg[0]).decode())) if lg else ""
+    head = "<div class='hd'>" + img + "<b>" + escape(r["name"]) + "</b><span>Data Date " + r["data_date"] + " · 예상 준공 " + r["finish"] + "</span></div>"
     return ("<!doctype html><html lang='ko'><meta charset='utf-8'><title>A3 공정표</title><style>@page{size:A3 landscape;margin:10mm}"
-            "body{font-family:sans-serif;margin:0}.pg{page-break-after:always}.ft{font-size:11px;color:#6b7280;margin:4px 0 12px}</style>"
-            "<body>" + "".join(pages) + "<script>if(location.hash==='#print')print()</script></body></html>")
+            "body{font-family:Pretendard,'Malgun Gothic',sans-serif;margin:0;color:#101828}.pg{page-break-after:always}"
+            ".hd{display:flex;align-items:center;gap:14px;border-bottom:2px solid #4f46e5;padding:4px 0 8px;margin-bottom:6px}.hd img{height:28px}"
+            ".hd b{font-size:16px}.hd span{color:#5d6879;font-size:12px;margin-left:auto}.ft{font-size:11px;color:#5d6879;margin:4px 0 12px}</style>"
+            "<body>" + "".join(head + p for p in pages) + "<script>if(location.hash==='#print')print()</script></body></html>")
 
 
 def activities_csv(uid: str) -> bytes:
@@ -1280,3 +1300,11 @@ def package(uid: str, tpl_raw: bytes, tpl_name: str, user: str, base: str | None
             "- 액티비티.csv: 전체 액티비티 표",
             *([""] + notes if notes else [])]).encode("utf-8"))
     return buf.getvalue(), notes
+
+
+
+# ---------------------------------------------------------------- 8차: 회사 로고 (A3 공정표·Word 보고서 머리)
+def logo() -> tuple[bytes, str] | None:
+    fid = storage.setting("*", "logo_file")
+    f = storage.file_get(fid) if fid else None
+    return (f["data"], f["mime"]) if f else None

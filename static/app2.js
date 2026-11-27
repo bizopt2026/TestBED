@@ -25,15 +25,15 @@ tabOverview = async function (el, r, uid) {
   const lvl = { ok: ["ok", "✓ 정상 범위"], warn: ["warn", "! 주의"], bad: ["bad", "✕ 위험"] }[s.level];
   el.innerHTML = `
     <div class="sit ${lvl[0]}"><span class="sit-badge">${lvl[1]}</span><div><div class="sit-line">${esc(s.headline)}</div>
-      <div class="muted" style="font-size:12px">${s.base_data_date ? `비교 기준: DD ${s.base_data_date}` : "비교할 이전 업데이트 없음"} · <a href="#/wizard/${uid}">월간 업데이트 점검 열기 →</a></div></div></div>
+      <div class="muted fs12">${s.base_data_date ? `비교 기준: DD ${s.base_data_date}` : "비교할 이전 업데이트 없음"} · <a href="#/wizard/${uid}">월간 업데이트 점검 열기 →</a></div></div></div>
     <div class="kpis kpis6">${s.kpis.map((k) => `<div class="kpi"><div class="l">${esc(k.label)}</div>
       <div class="v ${k.key === "neg" && k.value ? "crit" : ""}">${k.value === null || k.value === undefined ? "-" : esc(String(k.value))}${k.unit && k.value !== null && typeof k.value === "number" ? `<small>${k.unit}</small>` : ""}</div>
       <div class="row" style="justify-content:space-between;gap:4px">${fmtDelta(k)}<span class="spk">${spark(k.series)}</span></div></div>`).join("")}</div>
     <div class="grid2">
-      <div class="panel"><h3 style="margin-top:0">이번 주 할 일 <span class="muted" style="font-size:13px">${s.todo_total > s.todo.length ? `(${s.todo_total}건 중 5건)` : ""}</span></h3>
+      <div class="panel"><h3 class="mt0">이번 주 할 일 <span class="muted fs13">${s.todo_total > s.todo.length ? `(${s.todo_total}건 중 5건)` : ""}</span></h3>
         ${s.todo.map((t) => `<a class="inbox-item ${t.level}" href="#/p/${uid}/${t.tab}"><span class="sev">${t.level === "high" ? "✕" : t.level === "mid" ? "!" : "·"}</span><span style="grid-column:2/4">${esc(t.text)}</span><span class="go">→</span></a>`).join("")
           || '<p class="muted">✓ 급한 일이 없습니다.</p>'}</div>
-      <div class="panel"><h3 style="margin-top:0">마일스톤</h3>
+      <div class="panel"><h3 class="mt0">마일스톤</h3>
         <table class="t" data-noexport><thead><tr><th>ID</th><th>마일스톤</th><th>예정</th><th>계획</th><th class="num">편차</th></tr></thead><tbody>
         ${s.milestones.map((m) => `<tr><td>${esc(m.code)}</td><td>${m.done ? "✓ " : ""}${esc(m.name)}</td><td>${m.finish}</td><td>${m.bl || "-"}</td>
           <td class="num" style="color:${(m.var || 0) > 0 ? "var(--crit-text)" : ""}">${m.var === null ? "-" : (m.var > 0 ? "+" : "") + m.var}</td></tr>`).join("") || '<tr><td colspan="5" class="muted">마일스톤이 없습니다.</td></tr>'}</tbody></table></div></div>
@@ -43,10 +43,10 @@ tabOverview = async function (el, r, uid) {
 // ---------------------------------------------------------------- ⑤ 데이터 준비도
 function readinessPanel(items, uid, compact = false) {
   const miss = items.filter((x) => !x.ok);
-  return `<div class="panel readiness ${miss.length ? "" : "done"}"><div class="row" style="justify-content:space-between"><h3 style="margin:0">데이터 준비도 <span class="muted" style="font-size:13px">${items.length - miss.length}/${items.length}</span></h3>
-      ${miss.length ? `<span class="muted" style="font-size:12px">빠진 데이터를 채우면 잠긴 분석이 열립니다</span>` : '<span class="chip ok">✓ 모든 분석 사용 가능</span>'}</div>
+  return `<div class="panel readiness ${miss.length ? "" : "done"}"><div class="row between"><h3 class="m0">데이터 준비도 <span class="muted fs13">${items.length - miss.length}/${items.length}</span></h3>
+      ${miss.length ? `<span class="muted fs12">빠진 데이터를 채우면 잠긴 분석이 열립니다</span>` : '<span class="chip ok">✓ 모든 분석 사용 가능</span>'}</div>
     <div class="ready-grid">${items.map((x) => `<div class="ready ${x.ok ? "ok" : "no"}"><span class="mk" aria-label="${x.ok ? "준비됨" : "없음"}">${x.ok ? "✓" : "✕"}</span>
-      <div><b>${esc(x.label)}</b> <span class="muted">${esc(x.detail)}</span><div class="muted" style="font-size:12px">${x.ok ? "사용 가능: " : "잠김: "}${esc(x.unlocks)}</div>
+      <div><b>${esc(x.label)}</b> <span class="muted">${esc(x.detail)}</span><div class="muted fs12">${x.ok ? "사용 가능: " : "잠김: "}${esc(x.unlocks)}</div>
       ${x.ok || compact ? "" : `<div class="fix">${esc(x.fix)} <a href="#/p/${uid}/${x.tab}">이동 →</a></div>`}</div></div>`).join("")}</div></div>`;
 }
 
@@ -67,7 +67,7 @@ renderInbox = async function (container) {
     const main = xs.filter((x) => !stale.includes(x));
     const row = (x) => `<div class="inbox-item ${x.level}"><span class="sev">${x.level === "high" ? "✕" : "!"}</span>
       <a href="#/p/${x.uid}/${x.tab}"><b>${esc(x.project)}</b> ${esc(x.text)}</a><button class="btn sm ghost" data-seen="${esc(key(x))}" title="확인함(숨기기)" aria-label="확인함">${icon("check", 14)}</button></div>`;
-    container.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">오늘 확인할 것 <span class="muted">(${main.length})</span></h3>
+    container.innerHTML = `<div class="panel"><div class="row between"><h3 class="m0">오늘 확인할 것 <span class="muted">(${main.length})</span></h3>
       <div class="row" role="group" aria-label="필터"><div class="seg-tabs sm">${[["all", "전체"], ["high", "높음"], ["mid", "보통"]].map(([k, l]) => `<button class="${st.lv === k ? "on" : ""}" data-lv="${k}">${l}</button>`).join("")}</div>
         ${mine.size || favs.size ? `<label><input type="checkbox" id="ibMine" ${st.mine ? "checked" : ""}> 내 프로젝트·관심만</label>` : ""}
         ${dismissed.size ? `<button class="btn sm" id="ibReset">숨긴 항목 ${dismissed.size}개 다시 보기</button>` : ""}</div></div>
@@ -92,18 +92,18 @@ async function showWizard(uid) {
   const cur = Math.min(+(sessionStorage.getItem("wizStep:" + uid) || 0), rv.steps.length - 1);
   const badge = (s) => s.ok === null ? '<span class="chip">정보</span>' : s.ok ? '<span class="chip ok">✓ 이상 없음</span>' : '<span class="chip warn">! 확인 필요</span>';
   const st = rv.steps[cur];
-  view.innerHTML = `<div class="row" style="justify-content:space-between"><div><h2 style="margin:0">월간 업데이트 점검</h2>
+  view.innerHTML = `<div class="row between"><div><h2 class="m0">월간 업데이트 점검</h2>
       <div class="muted">${esc(r.name)} · DD ${rv.data_date}${rv.base_data_date ? ` (비교: DD ${rv.base_data_date})` : ""}</div></div>
       <div class="row"><button class="btn" id="wzUpload" data-need="editor">${icon("upload")} 새 업데이트 올리기</button><a class="btn" href="#/p/${uid}/overview">상황판</a></div></div>
     <ol class="stepper">${rv.steps.map((x, i) => `<li class="${i === cur ? "on" : ""} ${done.includes(x.key) ? "done" : ""}"><button data-st="${i}">
       <span class="n">${done.includes(x.key) ? "✓" : i + 1}</span><span>${esc(x.title)}</span>${x.ok === false ? '<span class="dot" aria-label="확인 필요"></span>' : ""}</button></li>`).join("")}</ol>
-    <div class="panel wiz"><div class="row" style="justify-content:space-between"><h3 style="margin:0">${cur + 1}. ${esc(st.title)}</h3>${badge(st)}</div>
+    <div class="panel wiz"><div class="row between"><h3 class="m0">${cur + 1}. ${esc(st.title)}</h3>${badge(st)}</div>
       <p style="font-size:16px">${esc(st.summary)}</p>
       ${st.issues.length ? `<ul>${st.issues.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
       ${(st.detail || []).length ? `<details><summary>주의 변경 ${st.detail.length}건</summary><ul>${st.detail.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></details>` : ""}
       ${st.key === "report" ? `<p>엑셀 양식을 골라 이번 달 보고서를 만듭니다. 비교 기준(${rv.base_data_date || "없음"})이 그대로 적용됩니다.</p><a class="btn primary" href="#/reports/${uid}">엑셀 리포트 만들기 →</a>`
         : `<a class="btn" href="#/p/${uid}/${st.tab}">자세히 보기 →</a>`}
-      <div class="nav" style="margin-top:16px"><button class="btn" id="wzPrev" ${cur ? "" : "disabled"}>← 이전</button>
+      <div class="nav mt16"><button class="btn" id="wzPrev" ${cur ? "" : "disabled"}>← 이전</button>
         <button class="btn primary" id="wzNext">${cur < rv.steps.length - 1 ? "확인했습니다 · 다음 →" : "점검 완료 ✓"}</button></div></div>`;
   applyRole(view);
   const go = (i) => { sessionStorage.setItem("wizStep:" + uid, String(i)); showWizard(uid); };
@@ -119,7 +119,7 @@ async function showWizard(uid) {
 // ---------------------------------------------------------------- ⑭ S-Curve · 자원 · 히스토그램 SVG 화면
 tabScurve = function (el, r) {
   const sc = r.s_curve;
-  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">S-Curve (원공기 가중 누적 공정률)</h3><div id="scHost"></div>
+  el.innerHTML = `<div class="panel"><h3 class="mt0">S-Curve (원공기 가중 누적 공정률)</h3><div id="scHost"></div>
     <p class="muted">초록 점선은 Data Date, 실적 공정률은 ${sc.actual_pct}%입니다.</p></div>`;
   const ddIdx = sc.dates.findIndex((d) => d >= sc.data_date);
   const series = [];
@@ -132,7 +132,7 @@ tabResources = async function (el, r, uid) {
   const h = await api(`/api/uploads/${uid}/resources`);
   if (!h.series.length) { el.innerHTML = `<div class="panel empty">XER에 잔여 물량(TASKRSRC remain_qty)이 있는 자원 배정이 없습니다. <a href="#/p/${uid}/overview">데이터 준비도 보기</a></div>`; return; }
   const colors = ["#2563eb", "#d97706", "#16a34a", "#7c3aed", "#dc2626", "#0891b2", "#db2777"];
-  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">자원 히스토그램 (주간 잔여 물량, Early 일정 기준)</h3><div id="rsHost"></div>
+  el.innerHTML = `<div class="panel"><h3 class="mt0">자원 히스토그램 (주간 잔여 물량, Early 일정 기준)</h3><div id="rsHost"></div>
     <p class="muted">막대가 급격히 솟는 주는 자원 과부하 가능성이 있습니다. 여유가 있는 작업을 뒤로 미루면 평준화할 수 있습니다(What-if).</p></div>`;
   chartSvg($("#rsHost"), { type: "bar", stacked: true, labels: h.weeks.map((w) => w.slice(2)), series: h.series.map((s, i) => ({ name: `${s.name} (최대 ${s.peak})`, color: colors[i % colors.length], values: s.values })), height: 320, title: "자원 히스토그램", yTitle: "물량" });
 };
@@ -150,7 +150,7 @@ async function renderAccessRequests(box, name) {
   if (!rq.length) return;
   const d = document.createElement("div");
   d.className = "panel warn";
-  d.innerHTML = `<h3 style="margin-top:0">편집 권한 요청 ${rq.length}건</h3>${rq.map((x) => `<div class="row" style="justify-content:space-between;padding:6px 0;border-bottom:1px dashed var(--line)">
+  d.innerHTML = `<h3 class="mt0">편집 권한 요청 ${rq.length}건</h3>${rq.map((x) => `<div class="row" style="justify-content:space-between;padding:6px 0;border-bottom:1px dashed var(--line)">
     <span><b>${esc(x.username)}</b> ${esc(x.message || "")} <span class="muted">${x.created_at.replace("T", " ").slice(5, 16)}</span></span>
     <span class="row"><select class="s sm" data-rr="${x.id}"><option value="member">멤버로</option><option value="owner">소유자로</option></select>
       <button class="btn sm primary" data-ok="${x.id}">승인</button><button class="btn sm" data-no="${x.id}">거절</button></span></div>`).join("")}`;

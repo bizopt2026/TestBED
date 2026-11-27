@@ -25,15 +25,15 @@ async function step(name, fn) {
 }
 function assert(c, msg) { if (!c) throw new Error(msg); }
 
-async function startServer() {
+async function startServer(port = PORT, extra = {}, users = true) {
   const db = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "e2e-")), "e2e.db");
-  const env = { ...process.env, DB_PATH: db, AI_PROVIDER: "off", PYTHONPATH: ROOT };
-  execFileSync(PY, ["-c", `from app import auth, storage, access
+  const env = { ...process.env, DB_PATH: db, AI_PROVIDER: "off", PYTHONPATH: ROOT, ...extra };
+  if (users) execFileSync(PY, ["-c", `from app import auth, storage, access
 storage.init(); access.init()
 for u, r in (("admin", "admin"), ("alice", "editor"), ("bob", "editor"), ("vic", "viewer")): auth.create_user(u, "${PW}", r)`], { cwd: ROOT, env });
-  const srv = spawn(PY, ["-m", "uvicorn", "app.main:app", "--port", String(PORT), "--log-level", "warning"], { cwd: ROOT, env, stdio: ["ignore", "inherit", "inherit"] });
+  const srv = spawn(PY, ["-m", "uvicorn", "app.main:app", "--port", String(port), "--log-level", "warning"], { cwd: ROOT, env, stdio: ["ignore", "inherit", "inherit"] });
   for (let i = 0; i < 60; i++) {
-    try { const r = await fetch(BASE + "/api/config"); if (r.ok) return srv; } catch {}
+    try { const r = await fetch(`http://127.0.0.1:${port}/api/config`); if (r.ok) return srv; } catch {}
     await new Promise((r) => setTimeout(r, 250));
   }
   srv.kill(); throw new Error("서버가 시작되지 않았습니다");
@@ -58,11 +58,11 @@ async function a11y(page, label) {
   await page.addScriptTag({ content: AXE });
   const r = await page.evaluate(async () => {
     const res = await window.axe.run(document, { resultTypes: ["violations"] });
-    return res.violations.map((v) => ({ id: v.id, impact: v.impact, n: v.nodes.length, help: v.help, target: v.nodes[0]?.target?.join(" ") }));
+    return res.violations.map((v) => ({ id: v.id, impact: v.impact, n: v.nodes.length, help: v.help, target: v.nodes[0]?.target?.join(" "), html: (v.nodes[0]?.html || "").slice(0, 160) }));
   });
   const serious = r.filter((v) => v.impact === "critical" || v.impact === "serious");
   axeFindings.push(...r.map((v) => `${label}: [${v.impact}] ${v.id} ×${v.n} - ${v.help} (${v.target})`));
-  assert(!serious.length, `${label} 접근성 심각 위반 ${serious.length}건: ${serious.map((v) => `${v.id}(${v.target})`).join(", ")}`);
+  assert(!serious.length, `${label} 접근성 심각 위반 ${serious.length}건: ${serious.map((v) => `${v.id}(${v.target} ${v.html})`).join(", ")}`);
 }
 // 기준 이미지 비교(시각 회귀): 기준이 없거나 E2E_UPDATE_BASELINE=1 이면 새로 저장
 const { PNG } = require("pngjs");
@@ -88,7 +88,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
 (async () => {
   const srv = await startServer();
   const browser = await chromium.launch();
-  let uid;
+  let uid, up2;
   try {
     const alice = await login(browser, "alice");
     await step("디자인 가이드 화면 + 기준 이미지 비교", async () => {
@@ -187,7 +187,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
       await alice.click("#sideMini");
     });
     await step("공정표 비교 겹쳐보기", async () => {
-      const up2 = await alice.evaluate(async () => {
+      up2 = await alice.evaluate(async () => {
         const raw = await (await fetch(`/api/uploads/${ctx.uid}/xer`)).text();
         let cols = null, tbl = "";
         const out = raw.split(/\r?\n/).map((l) => {
@@ -273,6 +273,62 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
       await adm.goto(`${BASE}/#/admin`); await adm.waitForSelector("#adminUsage .hbar");
       await a11y(adm, "관리");
     });
+    await step("Ctrl+K 명령: 리스크 추가", async () => {
+      await alice.goto(`${BASE}/#/p/${uid}/overview`); await alice.waitForSelector(".sit");
+      await alice.keyboard.press("Control+k"); await alice.waitForSelector("#palQ");
+      await alice.fill("#palQ", "리스크 추가"); await alice.waitForSelector('#palList li[data-i]:has-text("리스크 추가")'); await alice.keyboard.press("Enter");
+      await alice.waitForSelector("#dlgRisk[open]"); await alice.keyboard.press("Escape");
+    });
+    await step("공정표: 묶기·품질 표시·끌어서 What-if(키보드)", async () => {
+      await alice.goto(`${BASE}/#/p/${uid}/gantt`); await alice.waitForSelector("#gc");
+      await alice.selectOption("#gGroup", "status"); await alice.waitForSelector('.g-row.wbs:has-text("미착수")');
+      assert(await alice.locator("#glr .qi").count() > 0, "품질 표시 아이콘 없음");
+      await alice.check("#fEdit");
+      const id = await alice.evaluate(() => ctx.result.activities.find((a) => a.status_code === "TK_NotStart" && !a.milestone).id);
+      await alice.locator(`#glr [data-id="${id}"]`).click();
+      await alice.focus("#gr"); await alice.keyboard.press("Shift+ArrowRight"); await alice.keyboard.press("Shift+ArrowRight");
+      await alice.waitForSelector("#wiBar:not([hidden]):has-text('What-if')");
+      await shot(alice, "08_gantt_whatif");
+      await a11y(alice, "공정표 What-if");
+      await alice.click("#wiClear"); await alice.waitForSelector("#wiBar[hidden]", { state: "attached" });
+    });
+    await step("S-Curve 클릭 → 작업 목록", async () => {
+      await alice.goto(`${BASE}/#/p/${uid}/scurve`); await alice.waitForSelector("svg .hit");
+      const box = await alice.locator("svg .hit").first().boundingBox();
+      await alice.mouse.click(box.x + box.width * 0.4, box.y + box.height / 2);
+      await alice.waitForSelector("#drawer.open table, #drawer.open .empty-state");
+    });
+    await step("홈 구성(본사 PM) · 포트폴리오 마일스톤", async () => {
+      await alice.goto(`${BASE}/#/`); await alice.waitForSelector("#btnHomeCfg");
+      await alice.click("#btnHomeCfg"); await alice.click('[data-pre="pm"]'); await alice.click("#fHome button[value=ok]");
+      await alice.waitForSelector("#msGantt svg");
+      await a11y(alice, "홈(PM)");
+    });
+    await step("내 설정", async () => {
+      await alice.goto(`${BASE}/#/me`); await alice.waitForSelector("#meDensity");
+      await alice.selectOption("#meDensity", "compact");
+      assert(await alice.evaluate(() => document.body.classList.contains("density-compact")), "표 간격 적용 안 됨");
+      await alice.selectOption("#meDensity", "normal");
+      await a11y(alice, "내 설정");
+    });
+    await step("업데이트 비교 화면", async () => {
+      await alice.goto(`${BASE}/#/cmp/${uid}/${up2}`); await alice.waitForSelector("#cmpTbl table");
+      await alice.click('[data-cf="late"]');
+      await a11y(alice, "비교");
+    });
+    await step("새로 바뀐 점 안내", async () => {
+      await alice.evaluate(() => localStorage.setItem("seenVersion", "0.0"));
+      await alice.reload(); await alice.waitForSelector("dialog[open] .wn-list", { timeout: 8000 });
+      await a11y(alice, "새로 바뀐 점");
+      await alice.click("dialog[open] button[value=ok]");
+    });
+    await step("현장 모드(휴대폰)", async () => {
+      const m = await login(browser, "alice", { width: 390, height: 844 });
+      await m.goto(`${BASE}/#/field/${uid}`); await m.waitForSelector(".fm-status");
+      assert(await m.locator(".fab-cam").count() === 1, "사진 버튼 없음");
+      await a11y(m, "현장 모드");
+      await shot(m, "09_field");
+    });
     const bob = await login(browser, "bob");
     await step("편집 권한 요청 → 승인", async () => {
       await bob.goto(`${BASE}/#/p/${uid}/overview`);
@@ -336,6 +392,40 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
   } finally {
     await browser.close();
     srv.kill();
+  }
+  // ---- 데이터 화면 기준 이미지 비교: 날짜를 고정한 별도 서버(계정 없음) + 교육용 샘플
+  {
+    const VPORT = PORT + 1, VB = `http://127.0.0.1:${VPORT}`;
+    const vsrv = await startServer(VPORT, { APP_TODAY: "2026-04-15" }, false);
+    const vb = await chromium.launch();
+    try {
+      const page = async (viewport = { width: 1440, height: 900 }, dark = false, fixClock = true) => {
+        const c = await vb.newContext({ viewport, locale: "ko-KR", colorScheme: dark ? "dark" : "light", deviceScaleFactor: 1 });
+        const p = await c.newPage();
+        if (fixClock) await p.clock.setFixedTime(new Date("2026-04-15T09:00:00"));
+        await p.addInitScript((d) => { localStorage.setItem("onboarded", "1"); localStorage.setItem("seenVersion", "9.9"); localStorage.setItem("theme", d ? "dark" : "light"); }, dark);
+        p.on("pageerror", (e) => { failed++; results.push(`✕ [기준 이미지] 화면 스크립트 오류: ${e.message}`); });
+        return p;
+      };
+      const p = await page();
+      await p.goto(VB + "/");
+      const sid = (await p.evaluate(async () => api("/api/learn/sample", { method: "POST" }))).id;
+      const MASK = ["#helpFab", ".tl-card .row > .muted", "#toast"];
+      for (const [name, hash, wait] of [["v_home", "#/", ".pc-stats"], ["v_overview", `#/p/${sid}/overview`, ".sit"], ["v_gantt", `#/p/${sid}/gantt`, "#gc"], ["v_timeline", `#/p/${sid}/timeline`, ".timeline"]]) {
+        await step(`기준 이미지: ${name}`, async () => { await p.goto(VB + "/" + hash); await p.waitForSelector(wait); await p.waitForTimeout(700); await visual(p, name, MASK); });
+      }
+      await step("기준 이미지: v_dark_overview", async () => { const d = await page(undefined, true); await d.goto(VB + `/#/p/${sid}/overview`); await d.waitForSelector(".sit"); await d.waitForTimeout(700); await visual(d, "v_dark_overview", MASK); });
+      await step("기준 이미지: v_mobile_home", async () => { const m = await page({ width: 390, height: 844 }); await m.goto(VB + "/#/"); await m.waitForSelector(".pc-stats"); await m.waitForTimeout(700); await visual(m, "v_mobile_home", MASK); });
+      await step("첫 화면 속도(참고)", async () => {
+        const q = await page(undefined, false, false);
+        await q.goto(VB + "/"); await q.waitForSelector(".pc-stats");
+        const first = await q.evaluate(() => Math.round(performance.getEntriesByType("navigation")[0].domContentLoadedEventEnd));
+        await q.reload(); await q.waitForSelector(".pc-stats");
+        const again = await q.evaluate(() => Math.round(performance.getEntriesByType("navigation")[0].domContentLoadedEventEnd));
+        const cached = await q.evaluate(() => performance.getEntriesByType("resource").filter((r) => r.name.includes("/static/") && r.transferSize === 0).length);
+        results.push(`  · 첫 화면 ${first}ms → 다시 열기 ${again}ms (캐시에서 읽은 정적 파일 ${cached}개)`);
+      });
+    } finally { await vb.close(); vsrv.kill(); }
   }
   fs.writeFileSync(path.join(OUT, "axe.txt"), axeFindings.join("\n") + "\n");
   console.log(results.join("\n"));

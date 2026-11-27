@@ -10,33 +10,33 @@ async function showReports(preUid) {
   Object.values(projects).forEach((xs) => xs.sort((a, b) => (a.data_date < b.data_date ? 1 : -1)));
   const pre = ups.find((u) => u.id === preUid);
   const selTpl = store.get("rptTpl", tpls[0]?.id);
-  view.innerHTML = `<h2 style="margin-top:0">📊 엑셀 리포트</h2>
+  view.innerHTML = `<h2 class="mt0">📊 엑셀 리포트</h2>
     <p class="muted">회사 보고 양식(엑셀)에 <code>{{project.finish}}</code> 같은 자리표시자를 넣어 올리면, 선택한 프로젝트의 공정 현황을 양식 그대로 채워 엑셀로 내려받습니다. 서식·차트·수식은 유지됩니다.</p>
     <div class="steps3">
-      <div class="panel"><h3 style="margin-top:0">① 양식 선택</h3>
+      <div class="panel"><h3 class="mt0">① 양식 선택</h3>
         <div id="tplList" role="radiogroup" aria-label="양식">${tpls.map((t) => `<label class="tpl ${t.id === selTpl ? "on" : ""}"><input type="radio" name="tpl" value="${esc(t.id)}" ${t.id === selTpl ? "checked" : ""}>
-          <div><b>${esc(t.name)}</b> ${t.builtin ? '<span class="tag">기본 제공</span>' : ""}<div class="muted" style="font-size:12px">${esc(t.desc || "")}
+          <div><b>${esc(t.name)}</b> ${t.builtin ? '<span class="tag">기본 제공</span>' : ""}<div class="muted fs12">${esc(t.desc || "")}
           ${t.scan ? ` · 필드 ${t.scan.fields}개 · 표 ${t.scan.lists.length}개${t.scan.unknown?.length ? ` · <span style="color:var(--crit-text)">알 수 없는 필드 ${t.scan.unknown.length}</span>` : ""}` : ""}
           ${t.author ? ` · ${esc(t.author)}` : ""}</div></div>
           <span class="row" style="gap:4px"><button class="btn sm" data-dl="${esc(t.id)}" title="양식 내려받기" aria-label="양식 내려받기">⭳</button>${t.builtin ? "" : `<button class="btn sm" data-ver="${esc(t.id)}" title="버전 기록" aria-label="버전 기록">이력</button>`}${t.builtin ? "" : `<button class="btn sm danger" data-rm="${esc(t.id)}" data-need="editor" data-scope="global" title="삭제">✕</button>`}</span></label>`).join("")}</div>
         <div class="row" style="margin-top:10px"><button class="btn primary" id="tplUp" data-need="editor" data-scope="global">+ 내 양식 올리기 (.xlsx)</button>
           <button class="btn" id="tplGuide">작성 방법</button></div></div>
-      <div class="panel"><h3 style="margin-top:0">② 프로젝트 선택</h3>
+      <div class="panel"><h3 class="mt0">② 프로젝트 선택</h3>
         <label>프로젝트<select class="s" id="rpProj" style="width:100%">${Object.keys(projects).map((n) => `<option ${pre?.name === n ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
-        <label style="display:block;margin-top:8px">업데이트(Data Date)<select class="s" id="rpUp" style="width:100%"></select></label>
-        <label style="display:block;margin-top:8px">비교 기준<select class="s" id="rpBase" style="width:100%"></select></label>
-        <label class="chk" style="display:block;margin-top:10px"><input type="checkbox" id="rpAi" data-need="editor"> ✦ 요약 문장을 AI로 작성 <span class="muted" style="font-size:12px">(summary.* 필드, 서버 Claude CLI)</span></label>
-        <p class="muted" style="font-size:12px">직전 업데이트 비교 값(prev.*, 지연 원인, 변경 로그)은 같은 프로젝트의 바로 이전 업데이트와 자동 비교합니다.</p></div>
-      <div class="panel"><h3 style="margin-top:0">③ 생성</h3>
+        <label class="db mt8">업데이트(Data Date)<select class="s" id="rpUp" style="width:100%"></select></label>
+        <label class="db mt8">비교 기준<select class="s" id="rpBase" style="width:100%"></select></label>
+        <label class="chk" style="display:block;margin-top:10px"><input type="checkbox" id="rpAi" data-need="editor"> ✦ 요약 문장을 AI로 작성 <span class="muted fs12">(summary.* 필드, 서버 Claude CLI)</span></label>
+        <p class="muted fs12">직전 업데이트 비교 값(prev.*, 지연 원인, 변경 로그)은 같은 프로젝트의 바로 이전 업데이트와 자동 비교합니다.</p></div>
+      <div class="panel"><h3 class="mt0">③ 생성</h3>
         <button class="btn big" id="rpPrev">미리보기</button>
         <button class="btn primary big" id="rpGo" style="margin-top:8px">엑셀 리포트 만들기</button>
         <div id="rpOut" aria-live="polite" style="margin-top:10px"></div></div>
     </div>
     <div class="grid2">
-      <div class="panel"><h3 style="margin-top:0">필드 목록 <span class="muted" style="font-size:13px">누르면 복사</span></h3>
+      <div class="panel"><h3 class="mt0">필드 목록 <span class="muted fs13">누르면 복사</span></h3>
         <input class="s" type="search" id="fq" placeholder="필드 검색 (예: 준공, spi, 리스크)" style="width:100%">
         <div id="fList" class="fields"></div></div>
-      <div class="panel"><h3 style="margin-top:0">최근 생성 이력</h3>
+      <div class="panel"><h3 class="mt0">최근 생성 이력</h3>
         <table class="t" data-noexport><thead><tr><th>시각</th><th>프로젝트</th><th>양식</th><th>작성자</th><th>경고</th></tr></thead><tbody>
         ${hist.slice(0, 15).map((h) => `<tr><td>${h.created_at.replace("T", " ").slice(5, 16)}</td><td>${esc(h.project)} <span class="muted">${h.data_date}</span></td><td>${esc(h.template)}</td><td>${esc(h.author)}</td><td class="num">${h.warnings?.length || ""}</td></tr>`).join("") || '<tr><td colspan="5" class="muted">아직 없습니다.</td></tr>'}</tbody></table></div>
     </div>`;
@@ -98,7 +98,7 @@ async function showReports(preUid) {
 
 async function copyText(t) {
   try { await navigator.clipboard.writeText(t); toast(`복사했습니다: ${t.length > 40 ? t.slice(0, 40) + "…" : t}`); }
-  catch { ui.notice("복사", `<textarea style="width:100%" rows="4">${esc(t)}</textarea>`); }
+  catch { ui.notice("복사", `<textarea class="w100" rows="4">${esc(t)}</textarea>`); }
 }
 
 async function uploadTemplate(preUid) {
@@ -136,7 +136,7 @@ function templateGuide() {
 function showPreview(pv) {
   const unk = new Set(pv.unknown.map((u) => u.sheet + "!" + u.cell));
   const colName = (i) => { let s = "", n = i + 1; while (n) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s; };
-  const d = _modal(`<div><div class="row" style="justify-content:space-between"><h3 style="margin:0">미리보기 · ${esc(pv.template)}</h3><button class="btn" value="x" onclick="this.closest('dialog').close()">닫기</button></div>
+  const d = _modal(`<div><div class="row between"><h3 class="m0">미리보기 · ${esc(pv.template)}</h3><button class="btn" value="x" onclick="this.closest('dialog').close()">닫기</button></div>
     <p class="muted">값 ${pv.stats.values}개, 표 행 ${pv.stats.rows}개. 시트마다 앞부분(최대 60행 × 14열)만 보여 줍니다. 노란 칸은 알 수 없는 필드입니다.</p>
     ${pv.warnings.length ? `<div class="panel warn"><b>확인할 점 ${pv.warnings.length}건</b><ul>${pv.warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>` : ""}
     <div class="seg-tabs" role="tablist">${pv.sheets.map((s, i) => `<button role="tab" class="${i ? "" : "on"}" data-sh="${i}">${esc(s.name)}</button>`).join("")}</div>
@@ -152,7 +152,7 @@ function showPreview(pv) {
 
 async function templateVersions(tid, preUid) {
   const vs = await api(`/api/reports/templates/${encodeURIComponent(tid)}/versions`);
-  const d = _modal(`<div><h3 style="margin-top:0">양식 버전 기록</h3><p class="muted">같은 이름으로 다시 올리면 새 버전이 되고, 이전 버전은 최대 10개까지 보관됩니다.</p>
+  const d = _modal(`<div><h3 class="mt0">양식 버전 기록</h3><p class="muted">같은 이름으로 다시 올리면 새 버전이 되고, 이전 버전은 최대 10개까지 보관됩니다.</p>
     <table class="t" data-noexport><thead><tr><th>버전</th><th>올린 사람</th><th>시각</th><th class="num">필드</th><th></th></tr></thead><tbody>
     ${vs.map((v, i) => `<tr><td>${v.current ? "<b>현재</b>" : `v${vs.length - i}`}</td><td>${esc(v.author || "")}</td><td>${(v.at || "").replace("T", " ").slice(0, 16)}</td><td class="num">${v.fields ?? "-"}</td>
       <td>${v.current ? "" : `<button class="btn sm" data-restore="${esc(v.file_id)}" data-need="editor" data-scope="global">이 버전으로 되돌리기</button>`}</td></tr>`).join("")}</tbody></table>

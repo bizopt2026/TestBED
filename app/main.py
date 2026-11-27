@@ -497,6 +497,11 @@ def rel_suggest(uid: str, ai_: int = Query(0, alias="ai"), user: str = Depends(_
     return services.rel_suggest(uid, bool(ai_), user)
 
 
+@app.get("/api/uploads/{uid}/trades/map")
+def trades_map(uid: str):
+    return services.trade_map(uid)
+
+
 @app.get("/api/uploads/{uid}/trades", dependencies=[Depends(auth)])
 def trades(uid: str):
     return services.trade_summary(uid)
@@ -1453,9 +1458,67 @@ def admin_audit(limit: int = 300):
     return storage.audit_list(min(limit, 2000))
 
 
+_INDEX = {}
+
+
 @app.get("/")
 def index():
-    return FileResponse(os.path.join(STATIC, "index.html"))
+    """index.html 의 정적 파일 주소에 버전을 붙여(?v=), 새 버전이 아니면 브라우저 캐시를 그대로 쓰게 한다."""
+    path = os.path.join(STATIC, "index.html")
+    mtime = os.path.getmtime(path)
+    if _INDEX.get("mtime") != mtime:
+        from . import updater
+        v = updater.version()
+        tag = re.sub(r"[^0-9A-Za-z.]", "", f"{v['version']}.{v['commit'] or int(mtime)}")
+        html = open(path, encoding="utf-8").read()
+        html = re.sub(r'((?:src|href)="/static/[^"?]+\.(?:js|css))"', rf'\1?v={tag}"', html)
+        _INDEX.update(mtime=mtime, html=html)
+    return Response(_INDEX["html"], media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-cache"})
+
+
+@app.middleware("http")
+async def static_cache(request: Request, call_next):
+    resp = await call_next(request)
+    p = request.url.path
+    if p.startswith("/static/") and resp.status_code == 200:
+        if request.query_params.get("v") or p.startswith("/static/fonts/"):
+            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+# ---- 8차: 회사 로고 (관리자)
+@app.get("/api/logo")
+def get_logo():
+    lg = services.logo()
+    if not lg:
+        raise HTTPException(404)
+    return Response(lg[0], media_type=lg[1], headers={"Cache-Control": "private, max-age=300"})
+
+
+@app.post("/api/admin/logo")
+async def put_logo(file: UploadFile = File(...), user: str = Depends(_user)):
+    raw = await file.read()
+    mime = {b"\x89PNG": "image/png", b"\xff\xd8\xff": "image/jpeg"}
+    kind = next((m for sig, m in mime.items() if raw.startswith(sig)), None)
+    if not kind or len(raw) > 512 * 1024:
+        raise HTTPException(400, "PNG 또는 JPG, 512KB 이하 이미지만 올릴 수 있습니다")
+    old = storage.setting("*", "logo_file")
+    fid = storage.file_put("*", "logo", kind, raw, user)
+    storage.set_setting("*", "logo_file", fid, user)
+    if old:
+        storage.file_del(old)
+    return {"ok": True}
+
+
+@app.delete("/api/admin/logo")
+def del_logo(user: str = Depends(_user)):
+    old = storage.setting("*", "logo_file")
+    if old:
+        storage.file_del(old)
+    storage.set_setting("*", "logo_file", None, user)
+    return {"ok": True}
 
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

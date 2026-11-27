@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+from .clock import today as _clock_today  # noqa: E402
+
 from datetime import date, timedelta
 
 from . import evm as _evm
@@ -202,7 +204,7 @@ class Context:
             cs = [c for c in storage.rec_list("constraint", r["name"]) if c.get("status") != "해결"]
             if key == "constraint.open_count":
                 return len(cs)
-            return sum(1 for c in cs if c.get("due") and c["due"] < date.today().isoformat())
+            return sum(1 for c in cs if c.get("due") and c["due"] < _clock_today().isoformat())
         if key.startswith("summary."):
             sec = self.report()
             return {"summary.headline": sec["headline"], "summary.text": sec["summary"],

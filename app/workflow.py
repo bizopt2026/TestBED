@@ -100,7 +100,8 @@ def situation(uid: str, base_uid: str | None = None) -> dict:
     level = status_level(r["name"], margin, len(neg), _dd(r["finish"], base["finish"]) if base else None, hs,
                          e.get("spi") if e.get("available") else None)
     # 이번 주 할 일
-    today = date.today()
+    from .clock import today as _today
+    today = _today()
     todo = []
     for c in storage.rec_list("constraint", r["name"]):
         if c.get("status") != "해결" and c.get("due") and c["due"] <= (today + timedelta(days=7)).isoformat():

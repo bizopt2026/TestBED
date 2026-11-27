@@ -96,7 +96,7 @@ async function openNotifications() {
 async function openPalette() {
   if ($("#palette")) return;
   const d = document.createElement("dialog"); d.id = "palette"; d.className = "palette";
-  d.innerHTML = `<input type="search" id="palQ" placeholder="프로젝트, Activity ID, 화면, 리스크 검색…" aria-label="검색" autocomplete="off"><ul id="palList" role="listbox"></ul>
+  d.innerHTML = `<input type="search" id="palQ" placeholder="검색하거나 명령 입력 (예: 리스크 추가, 보고 패키지, A2000)…" aria-label="검색" autocomplete="off"><ul id="palList" role="listbox"></ul>
     <div class="muted pal-foot">↑↓ 이동 · Enter 열기 · Esc 닫기</div>`;
   document.body.appendChild(d); d.showModal();
   d.addEventListener("close", () => d.remove());
@@ -109,8 +109,10 @@ async function openPalette() {
     items.push({ kind: "화면", label: "월간 업데이트 점검", sub: ctx.result.name, go: `#/wizard/${ctx.uid}` });
     Object.entries(TAB_LABEL).forEach(([k, l]) => items.push({ kind: "화면", label: l, sub: ctx.result.name, go: `#/p/${ctx.uid}/${k}` }));
     ctx.result.activities.forEach((a) => items.push({ kind: "작업", label: `${a.code} ${a.name}`, sub: `${a.status} · ${a.start}~${a.finish}${a.longest ? " · 최장경로" : ""}`, act: a.code }));
+    ctx.result.activities.forEach((a) => items.push({ kind: "명령", label: `${a.code} 공정표에서 보기`, sub: a.name, run: () => { highlight.clear(); highlight.add(a.code); sessionStorage.setItem("ganttFocus", a.code); location.hash = `#/p/${ctx.uid}/gantt`; } }));
     (await api(`/api/uploads/${ctx.uid}/risks`).catch(() => [])).forEach((x) => items.push({ kind: "리스크", label: x.title, sub: `${x.prob}% · ${x.impact_ml}일`, go: `#/p/${ctx.uid}/risk` }));
   }
+  if (typeof paletteCommands === "function") items.unshift(...paletteCommands());
   let sel = 0, shown = [];
   const draw = () => {
     const q = $("#palQ").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -120,7 +122,7 @@ async function openPalette() {
       || '<li class="muted">결과가 없습니다</li>';
     $("#palList").querySelector(".on")?.scrollIntoView({ block: "nearest" });
   };
-  const open = (x) => { d.close(); if (!x) return; if (x.act) openActivity(x.act); else location.hash = x.go; };
+  const open = (x) => { d.close(); if (!x) return; if (x.run) x.run(); else if (x.act) openActivity(x.act); else location.hash = x.go; };
   $("#palQ").oninput = () => { sel = 0; draw(); };
   $("#palQ").onkeydown = (e) => {
     if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(sel + 1, shown.length - 1); draw(); }
@@ -223,7 +225,7 @@ function enhanceTables(root) {
 
 // ---------------------------------------------------------------- ⑭ SVG 차트 공통 모듈 (툴팁·범례·패턴·표 보기·인쇄 대응)
 const DASHES = ["", "6 4", "2 3", "8 3 2 3", "1 4"];
-function chartSvg(host, { type = "line", labels = [], series = [], yFmt = (v) => v, height = 260, min, max, title = "", xTitle = "", yTitle = "", stacked = false, refLines = [] }) {
+function chartSvg(host, { type = "line", labels = [], series = [], yFmt = (v) => v, height = 260, min, max, title = "", xTitle = "", yTitle = "", stacked = false, refLines = [], onPick = null }) {
   if (!host) return;
   const id = "c" + Math.random().toString(36).slice(2, 8);
   const W = Math.max(320, host.clientWidth || host.parentElement?.clientWidth || 640), H = height, P = { l: 58, r: 14, t: 14, b: 34 };
@@ -282,6 +284,15 @@ function chartSvg(host, { type = "line", labels = [], series = [], yFmt = (v) =>
     tip.style.left = e.pageX + 12 + "px"; tip.style.top = e.pageY + 12 + "px"; tip.hidden = false;
   });
   hit.addEventListener("mouseleave", () => { tip.hidden = true; hl.setAttribute("visibility", "hidden"); });
+  if (onPick) {  // 8차: 차트에서 바로 들어가기 — 점·막대를 누르면 해당 시점의 작업 목록
+    hit.style.cursor = "pointer";
+    hit.addEventListener("click", (e) => {
+      const r = svg.getBoundingClientRect(); const x = ((e.clientX - r.left) / r.width) * W;
+      let i = type === "line" ? Math.round(((x - P.l) / (W - P.l - P.r)) * (n - 1)) : Math.floor((x - P.l) / bw);
+      onPick(Math.max(0, Math.min(n - 1, i)));
+    });
+    host.querySelector("figure")?.insertAdjacentHTML("beforeend", '<figcaption class="muted pick-hint">차트를 누르면 그 시점의 작업 목록이 열립니다</figcaption>');
+  }
   const tg = host.querySelector(".tbl-toggle");
   tg.onclick = () => { const tb = host.querySelector(".chart-table"); tb.hidden = !tb.hidden; tg.setAttribute("aria-pressed", String(!tb.hidden)); tg.textContent = tb.hidden ? "표로 보기" : "차트만 보기"; };
 }
