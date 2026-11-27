@@ -97,7 +97,8 @@ def situation(uid: str, base_uid: str | None = None) -> dict:
         if top:
             cause = top[0]
             parts.append(f"주원인 {cause['code']} {cause['name']}(+{cause['introduced']}일)")
-    level = "bad" if (margin is not None and margin < 0) or neg else "warn" if base and _dd(r["finish"], base["finish"]) > 0 else "ok"
+    level = status_level(r["name"], margin, len(neg), _dd(r["finish"], base["finish"]) if base else None, hs,
+                         e.get("spi") if e.get("available") else None)
     # 이번 주 할 일
     today = date.today()
     todo = []
@@ -241,12 +242,75 @@ def my_tasks(username: str) -> list[dict]:
         name, uid = p["name"], p["id"]
         for x in storage.rec_list("risk", name):
             if x.get("assignee") == username and x.get("status") != "closed":
-                out.append({"kind": "리스크", "project": name, "uid": uid, "tab": "risk", "text": x["title"], "due": x.get("due"), "id": x["id"]})
+                out.append({"kind": "리스크", "project": name, "uid": uid, "tab": "risk", "text": x["title"], "due": x.get("due"), "id": x["id"], "record": x})
         for c in storage.rec_list("constraint", name):
             if c.get("assignee") == username and c.get("status") != "해결":
-                out.append({"kind": "제약", "project": name, "uid": uid, "tab": "lookahead", "text": f"{c.get('code')} {c.get('type')} - {c.get('desc', '')}", "due": c.get("due"), "id": c["id"]})
+                out.append({"kind": "제약", "project": name, "uid": uid, "tab": "lookahead", "text": f"{c.get('code')} {c.get('type')} - {c.get('desc', '')}", "due": c.get("due"), "id": c["id"], "record": c})
         for m in storage.rec_list("comment", name):
             if username in (m.get("mentions") or []) and not m.get("resolved"):
                 out.append({"kind": "멘션", "project": name, "uid": uid, "tab": "overview", "text": f"{m['author']}: {m['text'][:60]}", "due": None,
                             "id": m["id"], "target": m.get("target")})
     return sorted(out, key=lambda x: (x["due"] or "9999", x["project"]))
+
+
+# ---------------------------------------------------------------- 6차: 상태 기준(프로젝트별), 타임라인
+TH_DEFAULT = {"margin_bad": 0, "margin_warn": None, "health_bad": None, "health_warn": None, "spi_warn": None, "slip_warn": 1}
+
+
+def thresholds(name: str) -> dict:
+    t = dict(TH_DEFAULT)
+    t.update({k: v for k, v in (storage.setting(name, "status_thresholds", {}) or {}).items() if k in TH_DEFAULT})
+    return t
+
+
+def clean_thresholds(body: dict) -> dict:
+    out = {}
+    for k in TH_DEFAULT:
+        v = body.get(k)
+        if v in (None, ""):
+            continue
+        out[k] = float(v) if k == "spi_warn" else int(v)
+    return out
+
+
+def status_level(name: str, margin, neg: int, slip, health, spi) -> str:
+    """정상(ok)·주의(warn)·위험(bad) 판정. 프로젝트별 기준값을 쓰고, 지정하지 않은 기준은 판정에 쓰지 않는다."""
+    t = thresholds(name)
+    lt = lambda v, th: v is not None and th is not None and v < th  # noqa: E731
+    if lt(margin, t["margin_bad"]) or neg or lt(health, t["health_bad"]):
+        return "bad"
+    if (slip is not None and t["slip_warn"] is not None and slip >= t["slip_warn"]) or lt(margin, t["margin_warn"]) \
+            or lt(health, t["health_warn"]) or lt(spi, t["spi_warn"]):
+        return "warn"
+    return "ok"
+
+
+def timeline(name: str) -> list[dict]:
+    """프로젝트의 월별 이력: 준공 변화, 점검, 코멘트, 출력물, 확정본."""
+    ups = {u["id"]: u for u in storage.listing() if u["name"] == name}
+    hist = storage.history(name)
+    comments = storage.rec_list("comment", name)
+    outputs = storage.rec_list("report_log", name)
+    finals = {f["upload_id"]: f for f in storage.rec_list("final", name)}
+    out, prev = [], None
+    for i, h in enumerate(hist):
+        r = h["result"]
+        start = h.get("created_at") or ""
+        end = hist[i + 1].get("created_at") if i + 1 < len(hist) else "9999"
+        so = signoffs(h["id"])
+        u = ups.get(h["id"], {})
+        out.append({
+            "id": h["id"], "data_date": h["data_date"], "finish": r["finish"], "created_at": start,
+            "uploader": u.get("uploader"), "note": u.get("note") or u.get("filename"),
+            "slip": _dd(r["finish"], prev["finish"]) if prev else None,
+            "progress": r["summary"]["progress_pct"], "health": services.health_score(h["id"]),
+            "neg": sum(1 for a in r["activities"] if a["status_code"] != "TK_Complete" and a["tf"] is not None and a["tf"] < 0),
+            "review": {"steps": len(so.get("steps") or {}), "completed_by": so.get("completed_by"), "completed_at": so.get("completed_at"),
+                       "notes": [{"key": k, **v} for k, v in (so.get("steps") or {}).items() if v.get("note")]},
+            "comments": [{"author": c["author"], "text": c["text"][:120], "resolved": c.get("resolved")}
+                         for c in comments if start <= c["created_at"] < end][:5],
+            "outputs": [{"type": o.get("type") or "엑셀 양식", "author": o["author"], "created_at": o["created_at"]} for o in outputs if o.get("upload_id") == h["id"]],
+            "final": finals.get(h["id"]),
+        })
+        prev = r
+    return list(reversed(out))

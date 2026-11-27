@@ -18,7 +18,9 @@ async function api(path, opts = {}) {
   opts.headers = { ...(opts.headers || {}), "X-App-Token": store.get("token"), "X-User": encodeURIComponent(store.get("uploader")), "X-Requested-With": "fetch" };
   opts.credentials = "same-origin";
   if (opts.json !== undefined) { opts.body = JSON.stringify(opts.json); opts.headers["Content-Type"] = "application/json"; delete opts.json; }
-  const r = await fetch(path, opts);
+  let r;
+  try { r = await fetch(path, opts); }
+  catch (err) { if (err.name === "AbortError") throw err; const e = new Error("서버에 연결할 수 없습니다"); e.status = 0; throw e; }
   if (r.status === 401 && path !== "/api/login") {
     const cfg = await fetch("/api/config").then((x) => x.json());
     if (cfg.login_required) { await showLogin(); return api(path, opts); }
@@ -29,9 +31,11 @@ async function api(path, opts = {}) {
     return api(path, opts);
   }
   if (!r.ok) {
-    let msg = r.statusText;
-    try { msg = (await r.json()).detail || msg; } catch {}
-    throw new Error(msg);
+    let detail = r.statusText;
+    try { detail = (await r.json()).detail || detail; } catch {}
+    const e = new Error(typeof detail === "string" ? detail : detail?.message || r.statusText);
+    e.status = r.status; e.detail = detail; e.path = path;
+    throw e;
   }
   return r.headers.get("content-type")?.includes("json") ? r.json() : r;
 }
@@ -107,7 +111,7 @@ async function route() {
     if (parts[0] === "print" && parts[1]) return await showPrint(parts[1]);
     return await showList();
   } catch (err) {
-    view.innerHTML = `<div class="panel err">오류: ${esc(err.message)}</div>`;
+    view.innerHTML = typeof errorPanel === "function" ? errorPanel(err) : `<div class="panel err">오류: ${esc(err.message)}</div>`;
   }
 }
 
@@ -431,13 +435,15 @@ function tabGantt(el, r) {
       <label class="muted">날짜 이동 <input class="s sm" type="date" id="gDate" aria-label="날짜로 이동"></label>
       <button class="btn sm" id="gToday" title="오늘 날짜로 이동">오늘</button>
       <button class="btn sm" id="gDD" title="Data Date로 이동">Data Date</button>
+      <label title="비교 기준 업데이트(보기 설정)의 막대를 점선으로 겹쳐 봅니다"><input type="checkbox" id="fCmp"> 비교 겹쳐보기</label>
+      <label><input type="checkbox" id="fChg" disabled> 바뀐 작업만 <span class="muted" id="chgN"></span></label>
       <label class="muted" title="작업을 클릭하면 연결된 선행·후행 체인을 강조">경로 추적 <select class="s sm" id="fTrace"><option value="">끄기</option><option value="drive">구동 경로(Driving)</option><option value="all">전체 선·후행</option></select></label>
       <span class="spacer"></span><a class="btn sm" href="#/print/${el.dataset.uid}">A3 인쇄</a>
     </div>
     <div class="legend legend-sticky" aria-label="범례"><span><i style="background:var(--bar)"></i>일반</span><span><i style="background:var(--crit)"></i>주공정</span>
       <span><i style="background:var(--done)"></i>완료</span><span><i style="background:var(--bl);height:4px"></i>계획</span>
       <span><i style="background:#16a34a;width:2px"></i>Data Date</span><span><i style="background:#ea580c;width:2px"></i>오늘</span>
-      <span><i style="background:#fde68a"></i>추적 경로</span></div>
+      <span><i style="background:#fde68a"></i>추적 경로</span><span><i style="border:1.5px dashed #7c3aed;background:transparent"></i>비교 기준</span></div>
     <div class="gantt ${[...hidden].map((k) => "hide-" + k).join(" ")}" style="grid-template-columns:${+store.get("gsplit", "640")}px 6px 1fr">
       <div class="g-left"><div class="g-row hdr"><div>ID</div><div>액티비티명</div><div class="c-od">원공기</div><div class="c-rd">잔여</div><div class="c-st">시작</div><div class="c-fn">종료</div><div class="c-tf">TF</div></div>
         <div class="g-body" id="gl"><div class="g-rows" id="glr"></div></div></div>
@@ -446,6 +452,8 @@ function tabGantt(el, r) {
     </div>
     <div class="panel detail" id="det"><span class="muted">행을 클릭하면 선·후행 관계를 볼 수 있습니다. 더블클릭하면 상세 패널이 열립니다.</span></div>`;
   let blMap = null; // 저장된 베이스라인 사용 시 code -> {start, finish}
+  let cmpMap = null, cmpLabel = "";  // 비교 겹쳐보기: 비교 기준 업데이트의 code -> {s, f}
+  const changed = (a) => cmpMap && (!cmpMap[a.code] || cmpMap[a.code].s !== a.start || cmpMap[a.code].f !== a.finish);
   api(`/api/uploads/${uid}/baselines`).then((bls) => { $("#gBl").insertAdjacentHTML("beforeend", bls.map((b) => `<option value="${b.upload_id}">${esc(b.label)} (DD ${b.data_date})</option>`).join("")); }).catch(() => {});
   $("#gBl").onchange = async (e) => {
     if (e.target.value === "target") blMap = null;
@@ -488,7 +496,8 @@ function tabGantt(el, r) {
     const fc = $("#fCrit").checked, fi = $("#fInc").checked, fh = $("#fHl")?.checked;
     const acts = r.activities.filter((a) =>
       (!q || a.code.toLowerCase().includes(q) || a.name.toLowerCase().includes(q)) &&
-      (!fc || a.critical || a.longest) && (!fh || highlight.has(a.code)) && (!fi || !!fh || a.status_code !== "TK_Complete"));
+      (!fc || a.critical || a.longest) && (!fh || highlight.has(a.code)) && (!fi || !!fh || a.status_code !== "TK_Complete") &&
+      (!$("#fChg")?.checked || changed(a)));
     rows = []; let last = null;
     for (const a of acts) {
       if (a.wbs !== last) { rows.push({ wbs: a.wbs || "(WBS 없음)" }); last = a.wbs; }
@@ -567,6 +576,10 @@ function tabGantt(el, r) {
         if (a.tf > 0 && a.status_code !== "TK_Complete") {
           const lf = X(toT(a.late_finish) + dayMs); g.strokeStyle = "#9ca3af"; g.beginPath(); g.moveTo(x + w, by + bh / 2); g.lineTo(lf, by + bh / 2); g.stroke();
         }
+      }
+      if (cmpMap && cmpMap[a.code]) {
+        const c = cmpMap[a.code], cx = X(toT(c.s)), cw = Math.max(2, X(toT(c.f) + dayMs) - cx);
+        g.save(); g.setLineDash([4, 3]); g.strokeStyle = "#7c3aed"; g.lineWidth = 1.5; g.strokeRect(cx, y + 3, cw, RH - 6); g.restore();
       }
       if (bl) { g.fillStyle = "#f59e0b"; const x = X(toT(blS)); g.fillRect(x, y + 18, Math.max(2, X(toT(blF) + dayMs) - x), 4); }
       if (ppd >= 1) { g.fillStyle = cssv("--text"); g.font = "11px sans-serif"; g.fillText(a.name, X(f) + 8, y + 17); }
@@ -674,6 +687,19 @@ function tabGantt(el, r) {
   $("#fLines").addEventListener("input", render);
   $("#fTrace").addEventListener("input", () => { traceCache.sel = null; render(); if (!sel && $("#fTrace").value) toast("작업을 클릭하면 연결된 전체 경로를 강조합니다"); });
   $("#gFit").onclick = fit;
+  $("#fCmp").onchange = async (e) => {
+    $("#fChg").disabled = !e.target.checked;
+    if (!e.target.checked) { cmpMap = null; $("#fChg").checked = false; $("#chgN").textContent = ""; return build(); }
+    const same = (uploadsCache || await api("/api/uploads")).filter((x) => x.name === r.name && x.id !== uid && x.data_date <= r.data_date).sort((a, b) => b.data_date.localeCompare(a.data_date));
+    const bid = getBase(r.name) || same[0]?.id;
+    if (!bid) { toast("비교할 이전 업데이트가 없습니다"); e.target.checked = false; $("#fChg").disabled = true; return; }
+    const b = await load(bid);
+    cmpMap = Object.fromEntries(b.result.activities.map((a) => [a.code, { s: a.start, f: a.finish }]));
+    cmpLabel = `DD ${b.result.data_date}`;
+    $("#chgN").textContent = `(${r.activities.filter(changed).length}개 · 기준 ${cmpLabel})`;
+    build();
+  };
+  $("#fChg").onchange = build;
   $("#gDate").onchange = (e) => scrollToDate(e.target.value);
   $("#gToday").onclick = () => scrollToDate(new Date().toISOString().slice(0, 10));
   $("#gDD").onclick = () => scrollToDate(r.data_date);
@@ -1241,12 +1267,23 @@ async function tabRisk(el, r, uid) {
     $("#rkList").querySelectorAll("[data-edit]").forEach((b) => {
       const x = list.find((y) => y.id === b.dataset.edit); const n = cm.filter((c) => c.target === "risk:" + x.id && !c.resolved).length;
       b.insertAdjacentHTML("beforebegin", `<button class="btn sm" data-rcmt="${x.id}" aria-label="코멘트 ${n}건">💬${n ? " " + n : ""}</button> `);
-      if (x.assignee || x.due) b.closest("tr").querySelector("td").insertAdjacentHTML("beforeend", `<div class="muted" style="font-size:12px">👤 ${esc(x.assignee || "-")}${x.due ? ` · 기한 ${x.due}` : ""}</div>`);
+      const tr = b.closest("tr"), tds = tr.querySelectorAll("td");
+      if (ctx.canWrite) {  // 6차: 표에서 바로 고치기 (상태·확률·담당자·기한)
+        tds[0].insertAdjacentHTML("beforeend", `<div class="row inl" style="gap:4px;margin-top:4px"><select class="s sm" data-inl="assignee" aria-label="담당자"><option value="">👤 담당자 없음</option>${(_users || []).map((u) => `<option ${x.assignee === u.username ? "selected" : ""}>${esc(u.username)}</option>`).join("")}</select>
+          <input class="s sm" type="date" data-inl="due" value="${x.due || ""}" aria-label="기한"></div>`);
+        tds[3].innerHTML = `<input class="s sm" type="number" min="0" max="100" data-inl="prob" value="${x.prob}" style="width:64px" aria-label="발생확률 %">`;
+        const tag = tr.querySelector("td .tag"); if (tag) tag.outerHTML = `<select class="s sm" data-inl="status" aria-label="상태">${[["open", "열림"], ["mitigating", "대응중"], ["closed", "종결"]].map(([v, l]) => `<option value="${v}" ${x.status === v ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+        tr.querySelectorAll("[data-inl]").forEach((inp) => (inp.onchange = async () => {
+          const v = inp.type === "number" ? +inp.value : inp.value;
+          const ok = await saveRec(`/api/uploads/${uid}/risks`, { ...x, [inp.dataset.inl]: v, base_updated_at: x.updated_at }, load);
+          if (ok) { inp.classList.add("saved"); toast("저장했습니다"); load(); }
+        }));
+      } else if (x.assignee || x.due) tds[0].insertAdjacentHTML("beforeend", `<div class="muted" style="font-size:12px">👤 ${esc(x.assignee || "-")}${x.due ? ` · 기한 ${x.due}` : ""}</div>`);
       b.parentElement.querySelector("[data-rcmt]").onclick = () => openComments(uid, "risk:" + x.id, x.title);
     });
     applyRole($("#rkList"));
   };
-  userList().then((us) => { const sel = $("#fRisk [name=assignee]"); if (sel) sel.insertAdjacentHTML("beforeend", us.map((u) => `<option>${esc(u.username)}</option>`).join("")); });
+  await userList(); userList().then((us) => { const sel = $("#fRisk [name=assignee]"); if (sel) sel.insertAdjacentHTML("beforeend", us.map((u) => `<option>${esc(u.username)}</option>`).join("")); });
   let editing = null;
   const openForm = (x = {}) => {
     editing = x.id || null; const f = $("#fRisk"); f.reset();
@@ -1255,8 +1292,9 @@ async function tabRisk(el, r, uid) {
   };
   $("#fRisk").onsubmit = async (e) => {
     if (e.submitter?.value !== "ok") return; e.preventDefault();
-    const d = Object.fromEntries(new FormData(e.target)); d.codes = d.codes.split(/[,\s]+/).filter(Boolean); if (editing) d.id = editing;
-    try { await api(`/api/uploads/${uid}/risks`, { method: "POST", json: d }); $("#dlgRisk").close(); load(); } catch (err) { toast(err.message); }
+    const d = Object.fromEntries(new FormData(e.target)); d.codes = d.codes.split(/[,\s]+/).filter(Boolean);
+    if (editing) { d.id = editing; d.base_updated_at = list.find((y) => y.id === editing)?.updated_at; }
+    if (await saveRec(`/api/uploads/${uid}/risks`, d, () => { $("#dlgRisk").close(); load(); })) { $("#dlgRisk").close(); load(); }
   };
   $("#rkAdd").onclick = () => openForm();
   $("#rkAdd").insertAdjacentHTML("beforebegin", `<button class="btn" id="rkBulk" data-need="editor">엑셀 붙여넣기</button>`);
@@ -1465,7 +1503,7 @@ async function tabLookahead(el, r, uid) {
     if (!v) return;
     try { await save("constraint", { code: b.dataset.con, ...v, status: "미해결" }); reload(); } catch (e) { toast(e.message); }
   }));
-  el.querySelectorAll("[data-cst]").forEach((sel) => (sel.onchange = async () => { const x = la.constraints.find((y) => y.id === sel.dataset.cst); await save("constraint", { ...x, status: sel.value }); }));
+  el.querySelectorAll("[data-cst]").forEach((sel) => (sel.onchange = async () => { const x = la.constraints.find((y) => y.id === sel.dataset.cst); if (await saveRec(`/api/uploads/${uid}/records/constraint`, { ...x, status: sel.value, base_updated_at: x.updated_at }, reload)) reload(); }));
   el.querySelectorAll("[data-cdel]").forEach((b) => (b.onclick = () => deleteWithUndo(`/api/uploads/${uid}/records/constraint/${b.dataset.cdel}`, "제약", reload)));
   if (p.weeks.length) lineChart($("#ppcCv"), p.weeks.map((w) => w.week.slice(5)), [{ name: "PPC %", color: "#2563eb", values: p.weeks.map((w) => w.ppc), dots: true }, { name: "목표 80%", color: "#9ca3af", values: p.weeks.map(() => 80), dash: [4, 4] }], { min: 0, max: 100, left: 30 });
 }
@@ -1571,11 +1609,11 @@ async function showAdmin() {
   view.innerHTML = `<h2>관리</h2>
     <div class="panel"><h3 style="margin-top:0">사용자</h3>${cfg.login_required ? "" : `<p class="warn-text">아직 사용자 계정이 없어 누구나 접근할 수 있는 공개 모드입니다. 서버에서 <code>python -m app.auth create-admin 아이디</code>로 관리자를 만들거나 <code>ADMIN_USERNAME</code>/<code>ADMIN_PASSWORD</code> 환경변수를 설정하면 로그인이 켜집니다.</p>`}
       <table class="t"><thead><tr><th>아이디</th><th>역할</th><th>상태</th><th>최근 로그인</th><th></th></tr></thead><tbody>
-      ${users.map((u) => `<tr><td>${esc(u.username)}</td><td><select class="s sm" data-role="${esc(u.username)}">${["viewer", "editor", "admin"].map((r) => `<option ${u.role === r ? "selected" : ""}>${r}</option>`).join("")}</select></td>
+      ${users.map((u) => `<tr><td>${esc(u.username)}</td><td><select class="s sm" data-role="${esc(u.username)}" aria-label="${esc(u.username)} 역할">${["viewer", "editor", "admin"].map((r) => `<option ${u.role === r ? "selected" : ""}>${r}</option>`).join("")}</select></td>
         <td>${u.active ? "사용" : '<span class="tag fail">중지</span>'}</td><td>${(u.last_login || "").replace("T", " ")}</td>
         <td><button class="btn sm" data-act="${esc(u.username)}" data-v="${u.active ? 0 : 1}">${u.active ? "중지" : "재사용"}</button> <button class="btn sm" data-pw="${esc(u.username)}">비밀번호 재설정</button></td></tr>`).join("")}</tbody></table>
       ${cfg.login_required ? `<div class="row" style="margin-top:8px"><input class="s" id="nu" placeholder="아이디"><input class="s" id="np" type="password" placeholder="임시 비밀번호(10자 이상)">
-        <select class="s" id="nr"><option>viewer</option><option selected>editor</option><option>admin</option></select><button class="btn primary" id="nAdd">추가</button></div>
+        <select class="s" id="nr" aria-label="새 사용자 역할"><option>viewer</option><option selected>editor</option><option>admin</option></select><button class="btn primary" id="nAdd">추가</button></div>
         <p class="muted" style="font-size:12px">viewer: 조회·What-if 계산 / editor: 업로드·AI·리스크·시나리오 편집 / admin: 삭제·사용자·팀 설정</p>` : ""}</div>
     <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">프로젝트 권한</h3><a class="btn" href="#/projects">프로젝트별 멤버 관리 →</a></div>
       <p class="muted">읽기는 모든 사용자에게 열려 있고, 쓰기는 프로젝트 소유자·멤버(와 관리자)만 할 수 있습니다. 새 프로젝트를 처음 올린 사람이 소유자가 됩니다.</p></div>

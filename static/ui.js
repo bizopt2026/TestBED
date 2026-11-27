@@ -33,7 +33,7 @@ const ui = {
         else if (x.type === "textarea") input = `<textarea ${common} rows="${x.rows || 4}">${esc(x.value ?? "")}</textarea>`;
         else if (x.type === "checkbox") return `<label class="chk"><input type="checkbox" name="${x.name}" ${x.value ? "checked" : ""}> ${esc(x.label)}</label>`;
         else input = `<input type="${x.type || "text"}" ${common} value="${esc(x.value ?? "")}" ${x.step ? `step="${x.step}"` : ""}>`;
-        return `<label>${esc(x.label)}${input}${x.help ? `<small class="muted">${esc(x.help)}</small>` : ""}</label>`;
+        return `<label>${esc(x.label)}${x.required ? ' <span class="req" aria-hidden="true">*</span>' : ""}${input}${x.help ? `<small class="muted">${esc(x.help)}</small>` : ""}</label>`;
       };
       const d = _modal(`<form method="dialog"><h3>${esc(title)}</h3>${intro ? `<p class="muted">${intro}</p>` : ""}${fields.map(f).join("")}
         <div class="row end"><button class="btn" value="cancel" formnovalidate>취소</button><button class="btn primary" value="ok">${esc(submit)}</button></div></form>`);

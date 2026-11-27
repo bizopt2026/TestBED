@@ -1020,6 +1020,7 @@ def portfolio() -> list[dict]:
                     "open_risks": sum(1 for x in rs if x.get("status") != "closed"),
                     "spi": e.get("spi"), "cpi": e.get("cpi"),
                     "review": _review_status(p["id"]), "created_at": p.get("created_at"),
+                    "level": _level(r["name"], margin, sum(1 for a in inc if a["tf"] is not None and a["tf"] < 0), slip, p["id"], e.get("spi")),
                     "history": [{"id": h["id"], "data_date": h["data_date"], "finish": h["result"]["finish"], "created_at": h.get("created_at"),
                                  "note": h.get("note") or h.get("filename")} for h in reversed(hist)][:12]})
     return out
@@ -1154,3 +1155,128 @@ def learn_sample(user: str = "") -> str:
                                                 "prob": 50.0, "impact_min": 5.0, "impact_ml": 12.0, "impact_max": 25.0, "cost": 0.0,
                                                 "owner": "구매팀", "mitigation": "", "status": "open", "category": "자재·장비"}, "교육")
     return ids[-1]
+
+
+
+def _level(name, margin, neg, slip, uid, spi):
+    from .workflow import status_level
+    return status_level(name, margin, neg, slip, health_score(uid), spi)
+
+
+# ---------------------------------------------------------------- 6차: 상황판 '왜?' AI 설명
+def why_ai(uid: str, key: str, user: str = "") -> dict:
+    from .workflow import situation
+    s = situation(uid)
+    k = next((x for x in s["kpis"] if x["key"] == key), None)
+    if not k:
+        raise KeyError(key)
+    rule = (s["why"].get(key) or {}).get("text", "")
+    cache_key = f"why_ai:{key}"
+    cached = storage.get_extra(uid, cache_key)
+    if cached:
+        return {"text": cached, "cached": True}
+    r = result(uid)
+    prompt = (f"공정관리 상황판의 '{k['label']}' 지표를 현장 관리자에게 설명하세요. 3~5문장, 원인과 확인할 일 순서로. "
+              "숫자·작업 ID는 제공된 것만 쓰고 추측하지 마세요.\n\n"
+              f"프로젝트: {r['name']} / Data Date {r['data_date']} / 한 줄 상황: {s['headline']}\n"
+              f"지표: {k['label']} = {k['value']}{k['unit']} (비교 기준 대비 변화 {k['delta']}, 최근 추세 {k['series']})\n"
+              f"규칙 기반 설명: {rule or '없음'}\n"
+              f"이번 주 할 일: {[t['text'] for t in s['todo']]}\n"
+              f"마일스톤: {[(m['code'], m['name'], m['finish'], m['var']) for m in s['milestones']][:8]}")
+    text, usage = ai.complete(SYSTEM_BASE, prompt, effort="low")
+    storage.log_ai(uid, "why", user, usage, 0, True)
+    storage.set_extra(uid, cache_key, text)
+    return {"text": text, "cached": False}
+
+
+# ---------------------------------------------------------------- 6차: A3 공정표(인쇄용 HTML·SVG), 월간 보고 패키지
+def a3_html(uid: str) -> str:
+    from html import escape
+    r = result(uid)
+    acts = [a for a in r["activities"] if a.get("start") and a.get("finish")]
+    if not acts:
+        return "<p>액티비티가 없습니다</p>"
+    t0 = min(date.fromisoformat(a["start"]) for a in acts) - timedelta(days=7)
+    t1 = max(date.fromisoformat(a["finish"]) for a in acts) + timedelta(days=14)
+    W, L, RH, PER = 1500, 560, 17, 52
+    span = max(1, (t1 - t0).days)
+    X = lambda d: L + (date.fromisoformat(d) - t0).days / span * (W - L - 10)  # noqa: E731
+    pages = []
+    for p0 in range(0, len(acts), PER):
+        chunk = acts[p0:p0 + PER]
+        H = 60 + len(chunk) * RH + 20
+        g = [f'<rect x="0" y="0" width="{W}" height="{H}" fill="#fff"/>',
+             f'<text x="8" y="20" font-size="15" font-weight="700">{escape(r["name"])} · Data Date {r["data_date"]} · 예상 준공 {r["finish"]}</text>']
+        m = date(t0.year, t0.month, 1)
+        while m <= t1:
+            x = X(m.isoformat()) if m >= t0 else L
+            g.append(f'<line x1="{x:.1f}" y1="34" x2="{x:.1f}" y2="{H - 20}" stroke="#e5e7eb"/><text x="{x + 2:.1f}" y="48" font-size="10" fill="#6b7280">{m.year % 100}.{m.month}</text>')
+            m = date(m.year + (m.month == 12), m.month % 12 + 1, 1)
+        for i, a in enumerate(chunk):
+            y = 56 + i * RH
+            crit = a.get("longest") or a.get("critical")
+            col = "#9ca3af" if a["status_code"] == "TK_Complete" else "#dc2626" if crit else "#3b82f6"
+            g.append(f'<text x="8" y="{y + 12}" font-size="10">{escape(a["code"])}</text><text x="90" y="{y + 12}" font-size="10">{escape(a["name"][:34])}</text>'
+                     f'<text x="400" y="{y + 12}" font-size="9" fill="#374151">{a["start"][2:]}~{a["finish"][2:]}</text><text x="530" y="{y + 12}" font-size="9" text-anchor="end">{a["tf"] if a["tf"] is not None else ""}</text>')
+            x1, x2 = X(a["start"]), X((date.fromisoformat(a["finish"]) + timedelta(days=1)).isoformat())
+            if a.get("milestone"):
+                g.append(f'<path d="M{x1:.1f} {y + 3} l6 6 l-6 6 l-6 -6z" fill="{col}"/>')
+            else:
+                g.append(f'<rect x="{x1:.1f}" y="{y + 4}" width="{max(2, x2 - x1):.1f}" height="9" fill="{col}"/>')
+        xd = X(r["data_date"])
+        g.append(f'<line x1="{xd:.1f}" y1="34" x2="{xd:.1f}" y2="{H - 20}" stroke="#16a34a" stroke-dasharray="5 4"/>')
+        pages.append(f'<section class="pg"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="100%">{"".join(g)}</svg>'
+                     f'<div class="ft">{p0 // PER + 1} / {(len(acts) - 1) // PER + 1} · 빨강 최장경로/주공정 · 파랑 일반 · 회색 완료 · 초록 점선 Data Date</div></section>')
+    return ("<!doctype html><html lang='ko'><meta charset='utf-8'><title>A3 공정표</title><style>@page{size:A3 landscape;margin:10mm}"
+            "body{font-family:sans-serif;margin:0}.pg{page-break-after:always}.ft{font-size:11px;color:#6b7280;margin:4px 0 12px}</style>"
+            "<body>" + "".join(pages) + "<script>if(location.hash==='#print')print()</script></body></html>")
+
+
+def activities_csv(uid: str) -> bytes:
+    import csv
+    import io
+    r = result(uid)
+    cols = [("code", "Activity ID"), ("name", "Activity Name"), ("wbs", "WBS"), ("status", "상태"),
+            ("orig_dur", "원공기(일)"), ("rem_dur", "잔여공기(일)"), ("pct", "공정률(%)"),
+            ("start", "시작"), ("finish", "종료"), ("late_start", "Late Start"), ("late_finish", "Late Finish"),
+            ("tf", "Total Float"), ("ff", "Free Float"), ("critical", "주공정"),
+            ("bl_start", "계획시작"), ("bl_finish", "계획종료"), ("constraint", "제약조건")]
+    buf = io.StringIO()
+    buf.write("\ufeff")
+    w = csv.writer(buf)
+    w.writerow([c[1] for c in cols])
+    for a in r["activities"]:
+        w.writerow([("Y" if a.get(k) else "") if k == "critical" else (a.get(k) if a.get(k) is not None else "") for k, _ in cols])
+    return buf.getvalue().encode("utf-8")
+
+
+def package(uid: str, tpl_raw: bytes, tpl_name: str, user: str, base: str | None = None) -> tuple[bytes, list[str]]:
+    """월간 보고 패키지 zip: Word 보고서 + 엑셀 양식 리포트 + A3 공정표(HTML, 인쇄→PDF) + CSV."""
+    import io
+    import zipfile
+
+    from . import xlsx_report
+    from .report_context import Context
+    r = result(uid)
+    stem = f"{r['name']}_{r['data_date']}"
+    notes = []
+    rep = storage.get_extra(uid, "report") or report(uid, base, False, user)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(f"{stem}_월간공정보고.docx", report_docx(rep))
+        try:
+            out, warnings, _ = xlsx_report.render(tpl_raw, Context(uid, user, False, base))
+            z.writestr(f"{stem}_{tpl_name}.xlsx", out)
+            notes += [f"엑셀: {w}" for w in warnings[:10]]
+        except xlsx_report.TemplateError as e:
+            notes.append(f"엑셀 양식 오류로 제외: {e}")
+        z.writestr(f"{stem}_A3공정표.html", a3_html(uid))
+        z.writestr(f"{stem}_액티비티.csv", activities_csv(uid))
+        z.writestr("읽어보기.txt", "\n".join([
+            f"{r['name']} 월간 보고 패키지 (Data Date {r['data_date']}, 예상 준공 {r['finish']})",
+            "- 월간공정보고.docx: Word 보고서" + (" (화면에서 편집한 내용 포함)" if storage.get_extra(uid, "report") else " (템플릿 초안)"),
+            f"- {tpl_name}.xlsx: 엑셀 양식 리포트",
+            "- A3공정표.html: 브라우저로 열어 인쇄(A3 가로) → 'PDF로 저장'을 고르면 PDF가 됩니다",
+            "- 액티비티.csv: 전체 액티비티 표",
+            *([""] + notes if notes else [])]).encode("utf-8"))
+    return buf.getvalue(), notes

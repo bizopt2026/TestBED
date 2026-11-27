@@ -30,7 +30,7 @@ const COURSES = [
       { type: "text", html: `<p>홈 화면에는 <b>오늘 확인할 것</b>, <b>포트폴리오 카드</b>, <b>업로드 목록</b>이 있습니다. 실제 화면에서 하나씩 짚어 보겠습니다.</p>` },
       { type: "tour", tab: "home", steps: [
         { sel: "#inbox", title: "오늘 확인할 것", body: "기한 지난 제약, 음수 여유, 준공 지연처럼 먼저 봐야 할 항목을 모아 줍니다. 누르면 해당 화면으로 바로 이동합니다." },
-        { sel: "#myTasks .panel, #inbox", title: "내게 배정된 일", body: "내가 담당자로 지정된 리스크·제약과 나를 @언급한 코멘트가 모입니다. 기한이 지난 일은 빨갛게 표시됩니다." },
+        { sel: "#myTasks .panel, #myTasks", title: "할 일 함", body: "'내 일'(담당 리스크·제약, 나를 @언급한 코멘트), '프로젝트 경고', '알림'을 한곳에서 봅니다. 처리하면 목록에서 빠집니다." },
         { sel: ".cards", title: "포트폴리오 카드", body: "프로젝트별 예상 준공, 목표 대비 여유, 건전성 점수, SPI/CPI, 리스크 수, 월간 점검 완료 여부를 한눈에 봅니다. 카드 위 색 띠는 위험(빨강)·주의(주황)·정상(초록)입니다." },
         { sel: "#pfSort", title: "정렬·상태 필터", body: "위험 높은 순·지연 큰 순·최근 업데이트 순으로 정렬하고, 위험/주의/정상만 골라 볼 수 있습니다. 선택은 기억됩니다." },
         { sel: ".proj-groups", title: "프로젝트별 업데이트 이력", body: "업로드 목록은 프로젝트 단위로 묶여 있습니다. 펼치면 월별 업데이트와 '직전 비교' 버튼이 나옵니다." },
@@ -45,6 +45,8 @@ const COURSES = [
         { sel: "#upSel", title: "업데이트 전환", body: "같은 프로젝트의 다른 업데이트(Data Date)로 바로 이동합니다. 최신이 아니면 '! 최신 아님'이 표시됩니다." },
         { sel: ".groups", title: "4개 업무 그룹", body: "현황 · 품질·진단 · 리스크·대응 · 현장·보고. 그룹을 누르면 아래에 세부 화면이 나옵니다." },
         { sel: "#btnAi", title: "AI 어시스턴트", body: "어느 화면에서든 열 수 있습니다(Alt+A). 지금 보고 있는 화면을 함께 전달해 맥락에 맞게 답합니다." },
+        { sel: "#btnProj", title: "프로젝트 빠른 전환", body: "프로젝트 이름을 누르면 최근 본·관심 프로젝트와 검색이 나와 홈을 거치지 않고 옮겨 갑니다." },
+        { sel: "#tnav", title: "자주 쓰는 화면 + 더보기", body: "그룹마다 자주 쓰는 화면만 탭으로 보이고, 나머지는 '더보기'에 있습니다. 많이 쓰는 화면은 자동으로 탭에 올라옵니다. 단축키 g o(상황판), g g(공정표), g r(리스크)…" },
         { sel: "#btnView", title: "보기 설정", body: "비교 기준(어느 업데이트와 비교할지), 계산 방식, 내 권한을 확인·변경합니다. 비교 기준은 상황판·업데이트 분석·리포트에 함께 적용됩니다." },
         { sel: "#btnWork", title: "작업 메뉴", body: "월간 점검, 보고서 센터, 현장 모드, 이 화면 사용법, 재계산이 모여 있습니다." },
         { sel: "#tab", title: "ID를 누르면 상세", body: "모든 표에서 파란 Activity ID를 누르면 오른쪽에 상세(선후행·리스크·제약·변경 이력)가 열립니다. 표 오른쪽 위 '⭳ 엑셀'로 내보낼 수 있습니다." },
@@ -72,6 +74,7 @@ const COURSES = [
         { sel: "#fLines", title: "최장경로 관계선", body: "최장경로 작업 사이의 관계선을 그립니다.", wait: "change" },
         { sel: ".gantt", title: "차트 조작", body: "드래그로 이동, Ctrl+휠로 확대합니다. 행을 클릭하면 관계선, 더블클릭하면 상세가 열립니다. ↑↓와 Enter로도 됩니다." },
         { sel: "#gFit", title: "전체 맞춤·날짜 이동", body: "전체 공기를 한 화면에 맞추고, 날짜 입력·'오늘'·'Data Date' 버튼으로 원하는 시점으로 바로 갑니다. 주황 세로선이 오늘입니다." },
+        { sel: "#fCmp", title: "비교 겹쳐보기", body: "비교 기준 업데이트의 막대를 보라색 점선으로 겹쳐 그립니다. '바뀐 작업만'을 켜면 날짜가 달라진 작업만 남습니다." },
         { sel: "#fTrace", title: "경로 추적", body: "'구동 경로'를 고른 뒤 작업을 클릭하면 그 작업을 실제로 밀고 있는 선행·후행 체인이 노랗게 강조됩니다. '전체 선·후행'은 연결된 모든 작업을 보여 줍니다.", wait: "change" },
         { sel: "#gBl", title: "베이스라인 비교", body: "P6 계획(Target) 또는 저장한 베이스라인(예: 최초 승인)을 주황 막대로 겹쳐 봅니다." },
         { sel: "#gSaveView", title: "보기 저장", body: "검색·필터·배율을 이름 붙여 저장하면 팀원도 같은 보기를 씁니다." },
@@ -222,14 +225,26 @@ const COURSES = [
     { id: "t-4", title: "Ctrl+K 빠른 이동과 되돌리기", steps: [
       { type: "text", html: `<ul><li><b>Ctrl+K</b>(맥 ⌘K): 프로젝트·화면·작업 ID를 검색해 바로 이동합니다. 화살표와 Enter로 고르고 Esc로 닫습니다.</li>
         <li><b>되돌리기</b>: 리스크·제약·약속·업로드를 지우면 화면 아래에 10초 동안 <b>되돌리기</b> 버튼이 나옵니다. 놓쳤다면 관리자가 휴지통(7일 보관)에서 복원할 수 있습니다.</li>
+        <li><b>화면 이동 단축키</b>: <kbd>g</kbd>를 누른 뒤 <kbd>o</kbd> 상황판, <kbd>t</kbd> 타임라인, <kbd>g</kbd> 공정표, <kbd>r</kbd> 리스크, <kbd>l</kbd> 룩어헤드, <kbd>w</kbd> 월간 점검, <kbd>p</kbd> 보고서 센터, <kbd>h</kbd> 홈. <kbd>?</kbd>로 전체 목록을 봅니다.</li>
+        <li><b>표에서 바로 고치기</b>: 리스크의 상태·확률·담당자·기한, 제약의 기한·담당자·상태는 표 칸에서 바로 바꿉니다. 다른 사람이 먼저 고쳤으면 '덮어쓰기/다시 불러오기'를 묻습니다.</li>
         <li><b>스크롤 고정 머리글</b>: 긴 화면을 내리면 위에 얇은 머리글(프로젝트명·Data Date·그룹 탭)이 고정되어 바로 다른 그룹으로 갈 수 있습니다.</li></ul>` },
       { type: "quiz", q: "실수로 리스크를 지웠습니다. 바로 할 일은?", options: ["화면 아래 '되돌리기'를 누른다", "새로 다시 입력한다", "XER을 다시 올린다"], answer: 0,
         explain: "삭제 직후 10초 동안 되돌리기가 표시되고, 지난 뒤에도 7일간 휴지통에 보관됩니다." },
     ] },
+    { id: "t-6", title: "타임라인과 확정본 (따라하기)", steps: [
+      { type: "text", html: `<p><b>타임라인</b>(현황 → 타임라인)은 업데이트마다 준공 변화, 월간 점검(확인자·메모), 코멘트, 만든 출력물, 확정본을 한 줄기로 보여 줍니다.</p>
+        <p>월간 점검을 마친 업데이트는 <b>보고서 확정하기</b>로 Word·엑셀·A3·CSV 묶음을 고정합니다. 확정본은 바뀌지 않으므로, 보고한 숫자와 나중에 앱에서 보는 숫자가 달라져도 그때 보고한 파일을 그대로 다시 받을 수 있습니다.</p>` },
+      { type: "tour", tab: "timeline", steps: [
+        { sel: ".timeline", title: "월별 이력", body: "최신이 위입니다. 점 색은 직전 대비 준공 변화(빨강 지연, 초록 단축)입니다." },
+        { sel: ".tl-grid", title: "점검·코멘트·출력물·확정본", body: "그 달에 누가 점검했고 어떤 의견이 있었는지, 어떤 보고서를 만들었는지 확인합니다." },
+      ] },
+      { type: "quiz", q: "확정본을 쓰는 가장 큰 이유는?", options: ["파일 용량을 줄이려고", "보고한 그대로의 파일을 나중에도 똑같이 받으려고", "AI 요약을 넣으려고"], answer: 1,
+        explain: "확정본은 고정된 묶음이라 이후 재계산·기준 변경과 무관하게 같은 파일을 받습니다." },
+    ] },
     { id: "t-5", title: "보고서 센터 (따라하기)", steps: [
       { type: "text", html: `<p><b>보고서 센터</b>(작업 ▾ 또는 내 메뉴)에서 Word 월간 보고서, 엑셀 양식 리포트, A3 공정표 인쇄, CSV를 한 곳에서 만들고, 출력물별 최근 이력을 봅니다.</p>` },
       { type: "tour", tab: "reports", steps: [
-        { sel: ".out-cards", title: "출력물 4종", body: "필요한 출력물 카드를 고릅니다. 모두 아래 ②에서 고른 프로젝트·업데이트 기준입니다." },
+        { sel: ".out-cards", title: "출력물", body: "월간 보고 패키지(zip)는 Word·엑셀·A3·CSV를 한 번에 받습니다. 개별 출력물도 고를 수 있고, 모두 아래 ②에서 고른 업데이트 기준입니다." },
         { sel: "#rpUp", title: "업데이트 선택", body: "어느 달(Data Date) 기준으로 만들지 고릅니다." },
         { sel: "#rpGo", title: "엑셀 리포트 만들기", body: "고른 양식에 공정 현황을 채워 내려받습니다." },
         { sel: "#hType, .panel:last-child", title: "출력물 이력", body: "누가 언제 어떤 출력물을 만들었는지 종류별로 걸러 봅니다." },
@@ -249,7 +264,7 @@ const HELP = {
   lookahead: ["f-1", "3주 룩어헤드, 약속·PPC, 제약 로그."], daily: ["f-2", "작업일보 문장에서 진도 입력안 추출."],
   report: ["ai-2", "월간 공정보고서 초안 작성·수정·Word 출력."], xlsx: ["ai-3", "회사 엑셀 양식에 공정 현황을 채워 내려받기."], trades: ["q-2", "공종 분류와 명칭 표준화."], bench: ["a-2", "팀 전체 실적 기반 공종별 공기 벤치마크."],
   settings: ["t-3", "멤버·권한, 계산 옵션(Retained/Override), 품질 기준값을 하위 탭으로 나눠 관리합니다."],
-  wizard: ["t-2", "6단계 월간 점검과 팀 확인 기록."], reports: ["t-5", "Word·엑셀·A3·CSV 출력물과 이력."],
+  timeline: ["t-6", "업데이트별 준공 변화·점검·코멘트·출력물·확정본."], wizard: ["t-2", "6단계 월간 점검과 팀 확인 기록."], reports: ["t-5", "Word·엑셀·A3·CSV 출력물과 이력."],
 };
 
 // ---------------------------------------------------------------- 학습 센터 화면
@@ -473,18 +488,30 @@ function openHelpFor(tab) {
   };
 }
 
+// 6차 ⑭: 첫 안내는 한 번만 크게, 그 뒤에는 작은 '도움말' 버튼
+function helpFab() {
+  if ($("#helpFab")) return;
+  const b = document.createElement("button");
+  b.id = "helpFab"; b.className = "help-fab"; b.innerHTML = "? <span>도움말</span>"; b.title = "이 화면 사용법 (단축키 ?는 단축키 목록)";
+  b.onclick = () => (ctx.uid && ctx.tab && location.hash.startsWith("#/p/") ? openHelpFor(ctx.tab) : (location.hash = "#/learn"));
+  document.body.appendChild(b);
+}
 function maybeOnboard() {
-  if (store.get("onboarded") || !ctx.uid) return;
+  if (store.get("onboarded")) { helpFab(); return; }
+  if (!ctx.uid) return;
   store.set("onboarded", "1");
   const t = document.createElement("div"); t.className = "tour-pop"; t.style.right = "16px"; t.style.bottom = "16px"; t.style.left = "auto"; t.style.top = "auto";
   t.innerHTML = `<h4>처음이신가요? 👋</h4><div>2분 둘러보기로 화면 구조를 익히거나, 학습 센터에서 단계별로 배울 수 있습니다.</div>
     <div class="row"><button class="btn sm" id="obNo">나중에</button><span><a class="btn sm" href="#/learn">학습 센터</a> <button class="btn sm primary" id="obGo">둘러보기</button></span></div>`;
   document.body.appendChild(t);
-  t.querySelector("#obNo").onclick = () => t.remove();
-  t.querySelector("[href]").onclick = () => t.remove();
+  const shrink = () => { t.remove(); helpFab(); };
+  window.addEventListener("hashchange", shrink, { once: true });
+  t.querySelector("#obNo").onclick = shrink;
+  t.querySelector("[href]").onclick = shrink;
   t.querySelector("#obGo").onclick = () => {
-    t.remove();
+    shrink();
     const tour = ALL_LESSONS.find((l) => l.id === "start-3").steps.find((s) => s.type === "tour");
     sessionStorage.setItem("tour", JSON.stringify({ tour, back: null, i: 0 })); runTour();
   };
 }
+document.addEventListener("DOMContentLoaded", () => { if (store.get("onboarded")) helpFab(); });

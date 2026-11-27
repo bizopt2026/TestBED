@@ -34,12 +34,12 @@ SECURE_COOKIE = os.environ.get("SECURE_COOKIE", "0") == "1"
 
 PUBLIC = {"/api/config", "/api/login", "/api/logout", "/api/me"}
 # 조회 권한(viewer)으로도 허용되는 계산 전용 POST
-VIEWER_POST = ("/whatif", "/recovery", "/api/reports/render", "/api/reports/preview", "/outputs/log")
+VIEWER_POST = ("/whatif", "/recovery", "/api/reports/render", "/api/reports/preview", "/outputs/log", "/api/usage")
 ADMIN_ONLY = ("/api/admin/",)
 
 
 # 프로젝트 데이터를 바꾸지 않는 POST (계산·추출·다운로드만): 프로젝트 쓰기 권한 검사에서 제외
-READONLY_POST = VIEWER_POST + ("/chat", "/daily", "/risks/extract", "/xer_patch")
+READONLY_POST = VIEWER_POST + ("/chat", "/daily", "/risks/extract", "/xer_patch", "/why/ai")
 # 읽기 사용자도 남길 수 있는 협업 기록(코멘트)
 SOCIAL = re.compile(r"^/api/uploads/[^/]+/comments(/[^/]+(/resolve)?)?$")
 
@@ -353,20 +353,9 @@ def export_csv(uid: str, request: Request):
     if not d:
         raise HTTPException(404)
     _log_output(uid, "CSV 액티비티", _user(request))
-    cols = [("code", "Activity ID"), ("name", "Activity Name"), ("wbs", "WBS"), ("status", "상태"),
-            ("orig_dur", "원공기(일)"), ("rem_dur", "잔여공기(일)"), ("pct", "공정률(%)"),
-            ("start", "시작"), ("finish", "종료"), ("late_start", "Late Start"), ("late_finish", "Late Finish"),
-            ("tf", "Total Float"), ("ff", "Free Float"), ("critical", "주공정"),
-            ("bl_start", "계획시작"), ("bl_finish", "계획종료"), ("constraint", "제약조건")]
-    buf = io.StringIO()
-    buf.write("﻿")
-    w = csv.writer(buf)
-    w.writerow([c[1] for c in cols])
-    for a in d["result"]["activities"]:
-        w.writerow([("Y" if a[k] else "") if k == "critical" else (a[k] if a[k] is not None else "")
-                    for k, _ in cols])
+    buf = services.activities_csv(uid)
     name = f"{d['name']}_{d['data_date']}.csv"
-    return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv; charset=utf-8",
+    return Response(buf, media_type="text/csv; charset=utf-8",
                              headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_q(name)}"})
 
 
@@ -661,6 +650,9 @@ def add_risk(uid: str, body: dict = Body(...), user: str = Depends(_user)):
     old = storage.rec_get("risk", body["id"]) if body.get("id") else None
     if old and old["scope"] != _name(uid):
         raise HTTPException(404)
+    if (c := _conflict(old, body)) is not None:
+        return c
+    x["updated_by"] = user
     rid = storage.rec_put("risk", _name(uid), x, user, rid=body.get("id") or None)
     _notify_assignee(uid, x, old, user, "리스크", "risk")
     return {"id": rid}
@@ -788,9 +780,21 @@ def put_record(uid: str, kind: str, body: dict = Body(...), user: str = Depends(
         old = storage.rec_get(kind, rid)
         if not old or old["scope"] != _name(uid):
             raise HTTPException(404)
+    if (c := _conflict(old, body)) is not None:
+        return c
+    x["updated_by"] = user
     new_id = storage.rec_put(kind, _name(uid), x, user, rid=rid)
     _notify_assignee(uid, x, old, user, "제약" if kind == "constraint" else "약속", "lookahead")
     return {"id": new_id}
+
+
+def _conflict(old: dict | None, body: dict):
+    """동시 편집 충돌: 화면을 연 뒤 다른 사람이 먼저 고쳤으면 409로 알린다 (base_updated_at 이 있을 때만)."""
+    base = body.get("base_updated_at")
+    if old and base and old.get("updated_at") and old["updated_at"] != base:
+        return JSONResponse({"detail": {"message": f"{old.get('updated_by') or '다른 사용자'} 님이 {old['updated_at'].replace('T', ' ')[5:16]}에 먼저 수정했습니다",
+                                        "updated_by": old.get("updated_by"), "updated_at": old["updated_at"], "conflict": True}}, status_code=409)
+    return None
 
 
 def _notify_assignee(uid: str, x: dict, old: dict | None, user: str, label: str, tab: str) -> None:
@@ -1442,3 +1446,120 @@ def index():
 
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+
+
+# ============================================================ 6차: 타임라인, 상태 기준, '왜?' AI, 보고 패키지·확정본, 사용 현황
+@app.get("/api/projects/{name}/timeline")
+def project_timeline(name: str):
+    if not access.project_exists(name):
+        raise HTTPException(404)
+    return workflow.timeline(name)
+
+
+@app.get("/api/uploads/{uid}/thresholds")
+def get_thresholds(uid: str):
+    return {"values": storage.setting(_name(uid), "status_thresholds", {}) or {}, "defaults": workflow.TH_DEFAULT}
+
+
+@app.put("/api/uploads/{uid}/thresholds")
+def put_thresholds(uid: str, body: dict = Body(...), user: str = Depends(_user)):
+    try:
+        v = workflow.clean_thresholds(body)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "숫자로 입력하세요")
+    storage.set_setting(_name(uid), "status_thresholds", v, user)
+    return {"values": v}
+
+
+@app.post("/api/uploads/{uid}/why/ai")
+def why_ai(uid: str, body: dict = Body(...), user: str = Depends(_user)):
+    if not ai.available():
+        raise HTTPException(400, "AI가 설정되어 있지 않습니다 (서버의 Claude CLI)")
+    return services.why_ai(uid, str(body.get("key") or ""), user)
+
+
+def _package(uid: str, tpl: str, user: str, base: str | None):
+    raw, tname = _tpl_bytes(tpl or "builtin:monthly")
+    return services.package(uid, raw, tname, user, base)
+
+
+@app.get("/api/uploads/{uid}/package")
+def report_package(uid: str, request: Request, tpl: str = "builtin:monthly", base: str | None = None):
+    user = _user(request)
+    data, _ = _package(uid, tpl, user, base)
+    _log_output(uid, "월간 보고 패키지", user)
+    r = services.result(uid)
+    return Response(data, media_type="application/zip",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_q(r['name'] + '_월간보고_' + r['data_date'] + '.zip')}"})
+
+
+@app.get("/api/uploads/{uid}/a3.html")
+def a3_page(uid: str):
+    return Response(services.a3_html(uid), media_type="text/html; charset=utf-8")
+
+
+@app.get("/api/uploads/{uid}/final")
+def get_final(uid: str):
+    return storage.rec_get("final", uid)
+
+
+@app.post("/api/uploads/{uid}/final")
+def make_final(uid: str, body: dict = Body(default={}), user: str = Depends(_user)):
+    """월간 점검을 마친 업데이트의 보고 패키지를 확정본으로 고정 (한 번만)."""
+    so = workflow.signoffs(uid)
+    if not so.get("completed_by"):
+        raise HTTPException(400, "월간 점검 6단계를 모두 확인한 뒤 확정할 수 있습니다")
+    if storage.rec_get("final", uid):
+        raise HTTPException(409, "이미 확정된 업데이트입니다")
+    name = _name(uid)
+    data, notes = _package(uid, str(body.get("tpl") or "builtin:monthly"), user, body.get("base"))
+    fid = storage.file_put(name, f"final:{uid}", "application/zip", data, user)
+    r = services.result(uid)
+    storage.rec_put("final", name, {"upload_id": uid, "file_id": fid, "data_date": r["data_date"], "finish": r["finish"],
+                                    "by": user, "review_by": so["completed_by"], "size": len(data), "notes": notes[:10]}, user, rid=uid)
+    _log_output(uid, "확정본", user)
+    notify.push(notify.project_people(name), "review", f"'{name}' DD {r['data_date']} 보고서를 {user} 님이 확정했습니다", f"#/p/{uid}/timeline", exclude=user)
+    return storage.rec_get("final", uid)
+
+
+@app.get("/api/uploads/{uid}/final/download")
+def final_download(uid: str):
+    f = storage.rec_get("final", uid)
+    if not f:
+        raise HTTPException(404, "확정본이 없습니다")
+    data = storage.file_get(f["file_id"])
+    r = services.result(uid)
+    return Response(data["data"], media_type="application/zip",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_q(r['name'] + '_확정본_' + r['data_date'] + '.zip')}"})
+
+
+@app.post("/api/usage")
+def usage_hit(body: dict = Body(...), user: str = Depends(_user)):
+    screen = str(body.get("screen") or "")
+    if not re.fullmatch(r"[a-z0-9_\-]{1,40}", screen):
+        raise HTTPException(400)
+    storage.usage_hit(user, screen)
+    return {"ok": True}
+
+
+@app.get("/api/usage/mine")
+def usage_mine(user: str = Depends(_user)):
+    return storage.usage_mine(user)
+
+
+@app.get("/api/admin/usage")
+def admin_usage():
+    """화면별 사용(집계), 월간 점검 단계별 완료, 강의별 완료 수. 개인별 행은 제공하지 않는다."""
+    steps: dict[str, int] = {}
+    reviews = storage.rec_list("review")
+    for r in reviews:
+        for k in (r.get("steps") or {}):
+            steps[k] = steps.get(k, 0) + 1
+    lessons: dict[str, int] = {}
+    learners = storage.rec_list("learn")
+    for r in learners:
+        for lid in (r.get("data") or {}).get("done", []):
+            lessons[lid] = lessons.get(lid, 0) + 1
+    return {"screens": storage.usage_stats(), "review_steps": steps, "reviews_started": len(reviews),
+            "reviews_completed": sum(1 for r in reviews if r.get("completed_by")), "lessons": lessons, "learners": len(learners)}

@@ -46,6 +46,8 @@ def init() -> None:
             at TEXT, username TEXT, method TEXT, path TEXT, status INTEGER, detail TEXT)""")
         c.execute("""CREATE TABLE IF NOT EXISTS files (
             id TEXT PRIMARY KEY, scope TEXT, ref TEXT, mime TEXT, data BLOB, author TEXT, created_at TEXT)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS usage (
+            username TEXT, screen TEXT, day TEXT, n INTEGER, PRIMARY KEY (username, screen, day))""")
         c.execute("""CREATE TABLE IF NOT EXISTS ai_log (
             at TEXT, upload_id TEXT, feature TEXT, user TEXT, tokens_in INTEGER, tokens_out INTEGER,
             seconds REAL, ok INTEGER)""")
@@ -102,7 +104,7 @@ def history(name: str) -> list[dict]:
     with conn() as c:
         rows = c.execute("SELECT id, data_date, created_at, result FROM uploads WHERE name=? "
                          "ORDER BY data_date, created_at", (name,)).fetchall()
-    return [{"id": r["id"], "data_date": r["data_date"], "result": json.loads(r["result"])} for r in rows]
+    return [{"id": r["id"], "data_date": r["data_date"], "created_at": r["created_at"], "result": json.loads(r["result"])} for r in rows]
 
 
 def all_results() -> list[dict]:
@@ -200,7 +202,7 @@ def rec_list(kind: str, scope: str | None = None) -> list[dict]:
 def rec_get(kind: str, rid: str):
     with conn() as c:
         r = c.execute("SELECT * FROM records WHERE kind=? AND id=?", (kind, rid)).fetchone()
-    return {**json.loads(r["data"]), "id": r["id"], "scope": r["scope"]} if r else None
+    return {**json.loads(r["data"]), "id": r["id"], "scope": r["scope"], "updated_at": r["updated_at"]} if r else None
 
 
 def rec_put(kind: str, scope: str, data: dict, author: str = "", rid: str | None = None) -> str:
@@ -285,3 +287,26 @@ def file_list(scope: str, ref: str | None = None) -> list[dict]:
 def file_del(fid: str) -> bool:
     with conn() as c:
         return c.execute("DELETE FROM files WHERE id=?", (fid,)).rowcount > 0
+
+
+# ---------------------------------------------------------------- 화면 사용 집계 (개선 근거용, 일 단위 횟수만)
+def usage_hit(username: str, screen: str) -> None:
+    day = datetime.now().date().isoformat()
+    with conn() as c:
+        c.execute("INSERT INTO usage VALUES (?,?,?,1) ON CONFLICT(username, screen, day) DO UPDATE SET n = n + 1",
+                  (username or "익명", screen[:40], day))
+
+
+def usage_mine(username: str) -> dict[str, int]:
+    with conn() as c:
+        rows = c.execute("SELECT screen, SUM(n) n FROM usage WHERE username=? GROUP BY screen", (username,)).fetchall()
+    return {r["screen"]: r["n"] for r in rows}
+
+
+def usage_stats(days: int = 90) -> list[dict]:
+    from datetime import timedelta
+    since = (datetime.now().date() - timedelta(days=days)).isoformat()
+    with conn() as c:
+        rows = c.execute("SELECT screen, SUM(n) views, COUNT(DISTINCT username) users FROM usage WHERE day >= ? "
+                         "GROUP BY screen ORDER BY views DESC", (since,)).fetchall()
+    return [dict(r) for r in rows]

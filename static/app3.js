@@ -38,36 +38,110 @@ function loadFull(uid) {
 
 // ---------------------------------------------------------------- ① 압축 헤더 + 고정 미니 헤더
 let navToken = 0;
-showProject = async function (uid, tab) {
+// 6차 ② 화면 정리: 그룹마다 핵심 화면만 탭으로, 나머지는 '더보기'
+GROUPS[0][1].splice(1, 0, ["timeline", "타임라인"]); TAB_GROUP.timeline = "현황"; TAB_LABEL.timeline = "타임라인";
+const CORE_TABS = { viewer: ["overview", "timeline", "gantt", "critical", "health", "analysis", "risk", "lookahead", "xlsx"],
+  editor: ["overview", "timeline", "gantt", "critical", "scurve", "health", "analysis", "risk", "recovery", "lookahead", "xlsx"] };
+let myUsage = null;
+function coreTab(k, cur) {
+  if (k === cur || store.get("showAllTabs") === "1") return true;
+  const role = me?.role === "viewer" ? "viewer" : "editor";
+  return CORE_TABS[role].includes(k) || (myUsage?.[k] || 0) >= 3;
+}
+function hit(screen) { if (me?.username) api("/api/usage", { method: "POST", json: { screen } }).catch(() => {}); }
+function groupNavHtml(uid, tab, cls = "groups") {
+  return GROUPS.map(([g, ts]) => `<a href="#/p/${uid}/${ts[0][0]}" class="${TAB_GROUP[tab] === g ? "on" : ""}" ${TAB_GROUP[tab] === g ? 'aria-current="page"' : ""} ${cls === "groups" ? `title="${esc(g)}"` : ""}>${g}</a>`).join("");
+}
+const SHORT = { overview: "g o", timeline: "g t", gantt: "g g", critical: "g c", health: "g q", analysis: "g a", risk: "g r", recovery: "g m", lookahead: "g l", xlsx: "g p", settings: "g s" };
+function tabNavHtml(uid, tab) {
+  if (!TAB_GROUP[tab]) return "";
+  const ts = GROUPS.find(([g]) => g === TAB_GROUP[tab])[1];
+  const core = ts.filter(([k]) => coreTab(k, tab)), more = ts.filter(([k]) => !coreTab(k, tab));
+  const a = ([k, l]) => `<a href="#/p/${uid}/${k}" class="${k === tab ? "on" : ""}" ${k === tab ? 'aria-current="page"' : ""} ${SHORT[k] ? `title="단축키 ${SHORT[k]}"` : ""}>${l}</a>`;
+  return core.map(a).join("") + (more.length ? `<div class="menu-wrap"><button class="tab-more" id="btnMoreTabs" aria-haspopup="menu" aria-expanded="false">더보기 ${more.length} ▾</button>
+    <div class="menu" id="moreTabs" role="menu" hidden>${more.map(([k, l]) => `<a role="menuitem" href="#/p/${uid}/${k}">${l}</a>`).join("")}
+    <hr><button role="menuitem" id="btnAllTabs">모든 화면을 탭으로 보기</button></div></div>`
+    : store.get("showAllTabs") === "1" ? `<button class="tab-more" id="btnFewTabs" title="자주 쓰는 화면만 탭으로">간단히 보기</button>` : "");
+}
+function bindTabNav() {
+  if ($("#btnMoreTabs")) popMenu($("#btnMoreTabs"), $("#moreTabs"));
+  $("#btnAllTabs")?.addEventListener("click", () => { store.set("showAllTabs", "1"); showProject(ctx.uid, ctx.tab, true); });
+  $("#btnFewTabs")?.addEventListener("click", () => { store.set("showAllTabs", "0"); showProject(ctx.uid, ctx.tab, true); });
+}
+// 6차 ③ 프로젝트 빠른 전환: 최근·관심·검색
+function rememberProject(name, uid) {
+  const xs = JSON.parse(store.get("recentProj", "[]")).filter((x) => x.name !== name);
+  xs.unshift({ name, uid }); store.set("recentProj", JSON.stringify(xs.slice(0, 8)));
+}
+function projSwitcherHtml(cur) {
+  return `<div class="menu pop psw" id="projPop" role="dialog" aria-label="프로젝트 전환" hidden>
+    <input class="s" id="pswQ" type="search" placeholder="프로젝트 검색" aria-label="프로젝트 검색"><div id="pswList" class="psw-list"></div></div>`;
+}
+function bindProjSwitcher(cur) {
+  const list = () => {
+    const q = ($("#pswQ").value || "").trim().toLowerCase();
+    const latest = {}; (uploadsCache || []).forEach((u) => { if (!latest[u.name] || u.data_date > latest[u.name].data_date) latest[u.name] = u; });
+    const favs = JSON.parse(store.get("favs", "[]"));
+    const recent = JSON.parse(store.get("recentProj", "[]")).map((x) => x.name).filter((n) => latest[n] && n !== cur);
+    const row = (n) => `<a href="#/p/${latest[n].id}/${ctx.tab && ctx.tab !== "settings" ? ctx.tab : "overview"}" class="psw-item"><b>${esc(n)}</b><span class="muted">DD ${latest[n].data_date}</span></a>`;
+    if (q) { $("#pswList").innerHTML = Object.keys(latest).filter((n) => n.toLowerCase().includes(q)).map(row).join("") || '<p class="muted">없음</p>'; return; }
+    $("#pswList").innerHTML = (recent.length ? `<div class="psw-h">최근 본 프로젝트</div>${recent.map(row).join("")}` : "") +
+      (favs.filter((n) => latest[n] && n !== cur).length ? `<div class="psw-h">관심 프로젝트</div>${favs.filter((n) => latest[n] && n !== cur).map(row).join("")}` : "") +
+      `<div class="psw-h">전체 (${Object.keys(latest).length})</div>${Object.keys(latest).filter((n) => n !== cur).slice(0, 15).map(row).join("")}`;
+  };
+  popMenu($("#btnProj"), $("#projPop"));
+  $("#btnProj").addEventListener("click", () => { list(); setTimeout(() => $("#pswQ").focus(), 0); });
+  $("#pswQ").oninput = list;
+  $("#pswQ").onkeydown = (e) => { if (e.key === "Enter") $("#pswList a")?.click(); if (e.key === "ArrowDown") { e.preventDefault(); $("#pswList a")?.focus(); } };
+}
+
+// ---------------------------------------------------------------- ① 압축 헤더 + 고정 미니 헤더 (6차: 같은 프로젝트 안 탭 전환은 본문만 교체)
+showProject = async function (uid, tab, force = false) {
   if (tab === "chat") setTimeout(() => openAiPanel(), 50);
+  tab = String(tab).split("?")[0];
   tab = TAB_ALIAS[tab] || tab;
   const my = ++navToken;
-  if (ctx.uid !== uid) view.innerHTML = skeleton("project");
+  const light = !force && $("#phead")?.dataset.uid === uid && ctx.uid === uid;
+  if (!light && ctx.uid !== uid) view.innerHTML = skeleton("project");
   const u = await loadHead(uid);
   const r = u.result;
-  const perm = await api(`/api/uploads/${uid}/perm`).catch(() => ({}));
-  Object.assign(u, perm);
+  if (!myUsage && me?.username) myUsage = await api("/api/usage/mine").catch(() => ({}));
+  if (!light) {
+    const perm = await api(`/api/uploads/${uid}/perm`).catch(() => ({}));
+    Object.assign(u, perm);
+    if (!uploadsCache?.some((x) => x.id === uid)) uploadsCache = await api("/api/uploads");
+  }
   if (my !== navToken) return;
-  ctx.uid = uid; ctx.tab = tab; ctx.result = cache[uid]?.result || null; ctx.canWrite = u.can_write !== false; ctx.canManage = !!u.can_manage;
-  const roleLabel = { admin: "관리자", owner: "소유자", member: "멤버" }[u.my_role];
-  uploadsCache = uploadsCache || await api("/api/uploads");
-  const same = uploadsCache.filter((x) => x.name === r.name).sort((a, b) => (b.data_date + b.created_at).localeCompare(a.data_date + a.created_at));
-  const latest = same[0]?.id === uid;
-  const favs = JSON.parse(store.get("favs", "[]"));
-  const baseOpts = same.filter((x) => x.id !== uid && x.data_date <= r.data_date);
-  const baseLabel = baseOpts.find((x) => x.id === getBase(r.name)) ? `DD ${baseOpts.find((x) => x.id === getBase(r.name)).data_date}` : "직전 자동";
+  ctx.uid = uid; ctx.tab = tab;
+  if (!light) { ctx.result = cache[uid]?.result || null; ctx.canWrite = u.can_write !== false; ctx.canManage = !!u.can_manage; }
+  hit(tab); rememberProject(r.name, uid);
   $("#crumb").innerHTML = `/ <a href="#/p/${uid}/overview">${esc(r.name)}</a> / ${esc(TAB_LABEL[tab] || (tab === "settings" ? "설정" : ""))}`;
-  const groupNav = (cls = "groups") => `<nav class="${cls}" aria-label="화면 그룹">${GROUPS.map(([g, ts]) => `<a href="#/p/${uid}/${ts[0][0]}" class="${TAB_GROUP[tab] === g ? "on" : ""}" ${TAB_GROUP[tab] === g ? 'aria-current="page"' : ""}>${g}</a>`).join("")}`;
-  view.innerHTML = `
-    <div class="phead compact" id="phead">
-      <h2><span class="pname">${esc(r.name)}</span> <button class="btn icon fav ${favs.includes(r.name) ? "on" : ""}" id="btnFav" aria-label="관심 프로젝트" title="관심 프로젝트">★</button></h2>
+  if (light) {
+    $("#gnav").innerHTML = groupNavHtml(uid, tab);
+    $("#gset").classList.toggle("on", tab === "settings");
+    $("#tnav").innerHTML = tabNavHtml(uid, tab); $("#tnav").hidden = !TAB_GROUP[tab];
+    $("#mnav").innerHTML = groupNavHtml(uid, tab, "mini-groups");
+    bindTabNav();
+    $("#tab").innerHTML = skeleton("tab");
+  } else {
+    const roleLabel = { admin: "관리자", owner: "소유자", member: "멤버" }[u.my_role];
+    const same = uploadsCache.filter((x) => x.name === r.name).sort((a, b) => (b.data_date + b.created_at).localeCompare(a.data_date + a.created_at));
+    const latest = same[0]?.id === uid;
+    const favs = JSON.parse(store.get("favs", "[]"));
+    const baseOpts = same.filter((x) => x.id !== uid && x.data_date <= r.data_date);
+    const bsel = baseOpts.find((x) => x.id === getBase(r.name));
+    const baseLabel = bsel ? `DD ${bsel.data_date}` : "직전 자동";
+    view.innerHTML = `
+    <div class="phead compact" id="phead" data-uid="${uid}">
+      <h2><div class="menu-wrap"><button class="pname-btn" id="btnProj" aria-haspopup="dialog" aria-expanded="false" title="다른 프로젝트로 전환"><span class="pname">${esc(r.name)}</span> <span class="caret" aria-hidden="true">▾</span></button>${projSwitcherHtml(r.name)}</div>
+        <button class="btn icon fav ${favs.includes(r.name) ? "on" : ""}" id="btnFav" aria-label="관심 프로젝트" title="관심 프로젝트">★</button></h2>
       <select class="s sm" id="upSel" aria-label="업데이트 선택">${same.map((x) => `<option value="${x.id}" ${x.id === uid ? "selected" : ""}>DD ${x.data_date} · ${esc(x.note || x.filename)}</option>`).join("")}</select>
-      ${latest ? '<span class="chip ok" title="가장 최근 업데이트">✓ 최신</span>' : '<span class="chip warn">! 최신 아님</span>'}
-      ${ctx.canWrite ? "" : `<button class="chip warn as-btn" id="btnReqAccess" title="편집하려면 소유자에게 권한을 요청하세요">👁 읽기 전용 · 권한 요청</button>`}
+      ${latest ? '<span class="chip ok" title="가장 최근 업데이트">✓ 최신</span>' : '<span class="chip warn" title="최신 업데이트가 아닙니다">! <span class="hide-sm">최신 아님</span><span class="show-sm">이전</span></span>'}
+      ${ctx.canWrite ? "" : `<button class="chip warn as-btn hide-sm" id="btnReqAccess" title="편집하려면 소유자에게 권한을 요청하세요">👁 읽기 전용 · 권한 요청</button>`}
       <span class="spacer"></span>
-      <div class="menu-wrap"><button class="btn sm" id="btnView" aria-haspopup="dialog" aria-expanded="false">${icon("eye", 14)} 보기 설정 <span class="muted">· 비교 ${esc(baseLabel)}</span> ▾</button>
+      <div class="menu-wrap"><button class="btn sm" id="btnView" aria-haspopup="dialog" aria-expanded="false" aria-label="보기 설정">${icon("eye", 14)}<span class="hide-sm"> 보기 설정 <span class="muted">· 비교 ${esc(baseLabel)}</span></span> ▾</button>
         <div class="menu pop" id="viewPop" role="dialog" aria-label="보기 설정" hidden>
-          <label class="muted" for="baseSel">비교 기준 <span style="font-size:11px">(업데이트 분석·상황판·리포트 공통)</span></label>
+          <label class="muted" for="baseSel">비교 기준 <span style="font-size:11px">(업데이트 분석·상황판·리포트·공정표 겹쳐보기 공통)</span></label>
           <select class="s" id="baseSel"><option value="">직전 업데이트(자동)</option>${baseOpts.map((x) => `<option value="${x.id}" ${getBase(r.name) === x.id ? "selected" : ""}>DD ${x.data_date} · ${esc(x.note || x.filename)}</option>`).join("")}</select>
           <div class="kvline"><span class="muted">계산 방식</span><span class="chip">${r.options?.progress_override ? "Progress Override" : "Retained Logic"}</span><a href="#/p/${uid}/settings" data-sub="calc">변경</a></div>
           <div class="kvline"><span class="muted">내 권한</span>${ctx.canWrite ? `<span class="chip ok">✎ ${roleLabel || "편집 가능"}</span>` : '<span class="chip warn">👁 읽기 전용</span>'}<a href="#/p/${uid}/settings" data-sub="members">멤버</a></div>
@@ -77,35 +151,43 @@ showProject = async function (uid, tab) {
         <div class="menu" id="workMenu" role="menu" hidden>
           <a role="menuitem" href="#/wizard/${uid}">${icon("wand")}월간 점검</a>
           <a role="menuitem" href="#/reports/${uid}">${icon("sheet")}보고서 센터</a>
+          <a role="menuitem" href="#/p/${uid}/timeline">🕘 타임라인</a>
           <a role="menuitem" href="#/field/${uid}">📱 현장 모드</a>
+          ${ctx.canWrite ? "" : `<button role="menuitem" data-w="req">👁 편집 권한 요청</button>`}
           <button role="menuitem" data-w="help">? 이 화면 사용법</button>
           <button role="menuitem" data-w="recalc" data-need="editor">↻ 재계산</button>
         </div></div>
     </div>
     ${r.warnings.map((w) => `<div class="panel err">⚠ ${esc(w)}</div>`).join("")}
-    ${groupNav()}
+    <nav class="groups" aria-label="화면 그룹"><span id="gnav" class="gnav">${groupNavHtml(uid, tab)}</span>
       <button class="ai-link" id="btnAi" title="Alt+A">✦ AI 어시스턴트</button>
-      <a href="#/p/${uid}/settings" class="${tab === "settings" ? "on" : ""}">⚙ 설정</a></nav>
-    ${TAB_GROUP[tab] ? `<nav class="tabs" role="tablist">${GROUPS.find(([g]) => g === TAB_GROUP[tab])[1].map(([k, l]) => `<a role="tab" aria-selected="${k === tab}" href="#/p/${uid}/${k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</nav>` : ""}
-    <div class="mini-head" id="miniHead" inert><b>${esc(r.name)}</b><span class="muted">DD ${r.data_date}</span>${groupNav("mini-groups")}</nav></div>
+      <a href="#/p/${uid}/settings" id="gset" class="${tab === "settings" ? "on" : ""}" title="단축키 g s">⚙ 설정</a></nav>
+    <nav class="tabs" id="tnav" aria-label="세부 화면" ${TAB_GROUP[tab] ? "" : "hidden"}>${tabNavHtml(uid, tab)}</nav>
+    <div class="mini-head" id="miniHead" inert><b>${esc(r.name)}</b><span class="muted">DD ${r.data_date}</span><nav class="mini-groups" id="mnav" aria-label="화면 그룹(고정)">${groupNavHtml(uid, tab, "mini-groups")}</nav></div>
+    <div id="mobileHint"></div>
     <div id="tab">${skeleton("tab")}</div>`;
-  $("#upSel").onchange = (e) => (location.hash = `#/p/${e.target.value}/${tab}`);
-  $("#baseSel").onchange = (e) => { setBase(r.name, e.target.value); toast("비교 기준을 바꿨습니다. 업데이트 분석·상황판·리포트에 적용됩니다."); showProject(uid, tab); };
-  $("#btnReqAccess")?.addEventListener("click", () => requestAccess(r.name));
-  $("#btnAi").onclick = () => openAiPanel();
-  $("#btnFav").onclick = () => {
-    const f = new Set(JSON.parse(store.get("favs", "[]"))); f.has(r.name) ? f.delete(r.name) : f.add(r.name);
-    store.set("favs", JSON.stringify([...f])); $("#btnFav").classList.toggle("on", f.has(r.name));
-  };
-  popMenu($("#btnView"), $("#viewPop")); popMenu($("#btnWork"), $("#workMenu"));
-  view.querySelectorAll("[data-sub]").forEach((a) => a.addEventListener("click", () => sessionStorage.setItem("sub:settings", a.dataset.sub)));
-  $("#workMenu").querySelector('[data-w="help"]').onclick = () => openHelpFor(tab);
-  $("#workMenu").querySelector('[data-w="recalc"]').onclick = async () => {
-    await api(`/api/uploads/${uid}/recalc`, { method: "POST" });
-    delete cache[uid]; delete liteCache[uid]; toast("재계산 완료"); showProject(uid, tab);
-  };
-  applyRole(view);
-  stickyHead();
+    $("#upSel").onchange = (e) => (location.hash = `#/p/${e.target.value}/${ctx.tab}`);
+    $("#baseSel").onchange = (e) => { setBase(r.name, e.target.value); toast("비교 기준을 바꿨습니다. 업데이트 분석·상황판·리포트에 적용됩니다."); showProject(uid, ctx.tab, true); };
+    $("#btnReqAccess")?.addEventListener("click", () => requestAccess(r.name));
+    $("#btnAi").onclick = () => openAiPanel();
+    $("#btnFav").onclick = () => {
+      const f = new Set(JSON.parse(store.get("favs", "[]"))); f.has(r.name) ? f.delete(r.name) : f.add(r.name);
+      store.set("favs", JSON.stringify([...f])); $("#btnFav").classList.toggle("on", f.has(r.name));
+    };
+    popMenu($("#btnView"), $("#viewPop")); popMenu($("#btnWork"), $("#workMenu"));
+    bindProjSwitcher(r.name);
+    view.querySelectorAll("[data-sub]").forEach((a) => a.addEventListener("click", () => sessionStorage.setItem("sub:settings", a.dataset.sub)));
+    $("#workMenu").querySelector('[data-w="help"]').onclick = () => openHelpFor(ctx.tab);
+    $("#workMenu").querySelector('[data-w="req"]')?.addEventListener("click", () => requestAccess(r.name));
+    $("#workMenu").querySelector('[data-w="recalc"]').onclick = async () => {
+      await api(`/api/uploads/${uid}/recalc`, { method: "POST" });
+      delete cache[uid]; delete liteCache[uid]; toast("재계산 완료"); showProject(uid, ctx.tab, true);
+    };
+    bindTabNav();
+    applyRole(view);
+    stickyHead();
+    mobileFieldHint(uid);
+  }
   // 탭 본문: 액티비티가 필요한 화면만 전체 데이터를 기다린다
   let full = cache[uid];
   if (!full && (FULL_TABS.has(tab) || !TAB_GROUP[tab] && tab !== "settings")) {
@@ -119,11 +201,14 @@ showProject = async function (uid, tab) {
   const el = $("#tab");
   el.innerHTML = "";
   el.dataset.uid = uid;
-  ({ overview: tabOverview, gantt: tabGantt, critical: tabCritical, dcma: tabDcma, scurve: tabScurve, p6: tabP6,
-     chat: tabChat, report: tabReport, delay: tabDelay, whatif: tabWhatif, rels: tabRels, trades: tabTrades,
-     risk: tabRisk, bench: tabBench, daily: tabDaily, health: tabHealth, forensic: tabForensic, predict: tabPredict,
-     recovery: tabRecovery, evm: tabEvm, resources: tabResources, korea: tabKorea, lookahead: tabLookahead,
-     settings: tabSettings, analysis: tabAnalysis, xlsx: () => { location.hash = `#/reports/${uid}`; } }[tab] || tabOverview)(el, rr, uid);
+  try {
+    await ({ overview: tabOverview, gantt: tabGantt, critical: tabCritical, dcma: tabDcma, scurve: tabScurve, p6: tabP6,
+       chat: tabChat, report: tabReport, delay: tabDelay, whatif: tabWhatif, rels: tabRels, trades: tabTrades,
+       risk: tabRisk, bench: tabBench, daily: tabDaily, health: tabHealth, forensic: tabForensic, predict: tabPredict,
+       recovery: tabRecovery, evm: tabEvm, resources: tabResources, korea: tabKorea, lookahead: tabLookahead,
+       settings: tabSettings, analysis: tabAnalysis, timeline: (e, x, id) => tabTimeline(e, x, id),
+       xlsx: () => { location.hash = `#/reports/${uid}`; } }[tab] || tabOverview)(el, rr, uid);
+  } catch (err) { if (my === navToken) el.innerHTML = errorPanel(err, true); }
   enhance(el);
   maybeStartTour(tab);
 };
@@ -151,7 +236,9 @@ function stickyHead() {
 // ---------------------------------------------------------------- ⑭ 상황판: '왜?' 안내 · 추세 기간 · 점검 기록 · 팀 코멘트
 tabOverview = async function (el, r, uid) {
   el.innerHTML = skeleton("tab");
-  const s = await api(`/api/uploads/${uid}/situation${baseQuery(r.name)}`);
+  const [s, st] = await Promise.all([api(`/api/uploads/${uid}/situation${baseQuery(r.name)}`), getAiStatus().catch(() => ({}))]);
+  const order = (prefs.kpis && prefs.kpis.length ? prefs.kpis : s.kpis.map((k) => k.key));
+  s.kpis = order.map((k) => s.kpis.find((x) => x.key === k)).filter(Boolean);
   const lvl = { ok: ["ok", "✓ 정상 범위"], warn: ["warn", "! 주의"], bad: ["bad", "✕ 위험"] }[s.level];
   const rv = s.review || {};
   el.innerHTML = `
@@ -163,7 +250,10 @@ tabOverview = async function (el, r, uid) {
       <div class="v ${k.key === "neg" && k.value ? "crit" : ""}">${k.value === null || k.value === undefined ? "-" : esc(String(k.value))}${k.unit && k.value !== null && typeof k.value === "number" ? `<small>${k.unit}</small>` : ""}</div>
       <div class="row" style="justify-content:space-between;gap:4px">${fmtDelta(k)}<span class="spk" title="${esc(k.series_label || "")}">${spark(k.series)}</span></div>
       ${k.series_label && k.series.filter((x) => x !== null).length > 1 ? `<div class="muted spk-l">추세: ${esc(k.series_label)}</div>` : ""}
-      ${s.why?.[k.key] ? `<div class="why-box" id="why-${k.key}" hidden>${esc(s.why[k.key].text)} <a href="#/p/${uid}/${s.why[k.key].tab}">자세히 →</a></div>` : ""}</div>`).join("")}</div>
+      ${s.why?.[k.key] ? `<div class="why-box" id="why-${k.key}" hidden>${esc(s.why[k.key].text)} <a href="#/p/${uid}/${s.why[k.key].tab}">자세히 →</a>
+        ${st.enabled && me?.role !== "viewer" ? `<div><button class="btn sm ghost" data-whyai="${k.key}">✦ AI로 자세히</button></div><div class="why-ai" id="whyai-${k.key}"></div>` : ""}</div>` : ""}</div>`).join("")}</div>
+    <div class="row end" style="margin:-6px 0 8px"><button class="btn sm ghost" id="kpiCfg" title="보일 지표와 순서를 고릅니다">⚙ 지표 고르기</button>
+      <a class="btn sm ghost" href="#/p/${uid}/settings" data-sub="status" title="정상·주의·위험 판정 기준">상태 기준</a></div>
     <div class="grid2">
       <div class="panel"><h3 style="margin-top:0">이번 주 할 일 <span class="muted" style="font-size:13px">${s.todo_total > s.todo.length ? `(${s.todo_total}건 중 5건)` : ""}</span></h3>
         ${s.todo.map((t) => `<a class="inbox-item ${t.level}" href="#/p/${uid}/${t.tab}"><span class="sev">${t.level === "high" ? "✕" : t.level === "mid" ? "!" : "·"}</span><span style="grid-column:2/4">${esc(t.text)}</span><span class="go">→</span></a>`).join("")
@@ -178,7 +268,37 @@ tabOverview = async function (el, r, uid) {
     const box = $("#why-" + b.dataset.why); box.hidden = !box.hidden; b.setAttribute("aria-expanded", String(!box.hidden));
   }));
   commentThread($("#projComments"), uid, "project:" + r.name);
+  el.querySelector('[data-sub="status"]').onclick = () => sessionStorage.setItem("sub:settings", "status");
+  el.querySelectorAll("[data-whyai]").forEach((b) => (b.onclick = () => withBusy(b, async () => {
+    try { const d = await api(`/api/uploads/${uid}/why/ai`, { method: "POST", json: { key: b.dataset.whyai } }); $("#whyai-" + b.dataset.whyai).innerHTML = md(d.text); }
+    catch (e) { $("#whyai-" + b.dataset.whyai).textContent = e.message; }
+  })));
+  $("#kpiCfg").onclick = () => kpiConfig(uid, r);
 };
+const KPI_LABEL = { finish: "예상 준공", margin: "목표 대비 여유", progress: "공정률", health: "건전성", spi: "SPI", neg: "음수 여유 작업" };
+async function kpiConfig(uid, r) {
+  let cur = [...(prefs.kpis?.length ? prefs.kpis : Object.keys(KPI_LABEL))];
+  const d = _modal(`<form method="dialog" id="fKpi"><h3>상황판 지표 고르기</h3><p class="muted" style="font-size:13px">체크한 지표만 보이고, ↑↓로 순서를 바꿉니다. 내 계정에만 적용됩니다.</p>
+    <ol id="kpiList" class="kpi-cfg"></ol><div class="row end"><button class="btn" value="cancel" formnovalidate>닫기</button><button class="btn" type="button" id="kpiReset">기본값</button><button class="btn primary" value="ok">저장</button></div></form>`);
+  const all = () => [...cur, ...Object.keys(KPI_LABEL).filter((k) => !cur.includes(k))];
+  const draw = () => {
+    const xs = all();
+    $("#kpiList").innerHTML = xs.map((k, i) => `<li><label class="chk"><input type="checkbox" data-k="${k}" ${cur.includes(k) ? "checked" : ""}> ${KPI_LABEL[k]}</label>
+      <span><button type="button" class="btn sm ghost" data-up="${i}" aria-label="${KPI_LABEL[k]} 위로" ${i ? "" : "disabled"}>↑</button><button type="button" class="btn sm ghost" data-dn="${i}" aria-label="${KPI_LABEL[k]} 아래로" ${i < xs.length - 1 ? "" : "disabled"}>↓</button></span></li>`).join("");
+    $("#kpiList").querySelectorAll("[data-k]").forEach((c) => (c.onchange = () => { cur = all().filter((k) => k === c.dataset.k ? c.checked : cur.includes(k)); draw(); }));
+    const mv = (i, dlt) => { const xs2 = all(); [xs2[i], xs2[i + dlt]] = [xs2[i + dlt], xs2[i]]; cur = xs2.filter((k) => cur.includes(k)); draw(); };
+    $("#kpiList").querySelectorAll("[data-up]").forEach((b) => (b.onclick = () => mv(+b.dataset.up, -1)));
+    $("#kpiList").querySelectorAll("[data-dn]").forEach((b) => (b.onclick = () => mv(+b.dataset.dn, 1)));
+  };
+  draw();
+  $("#kpiReset").onclick = () => { cur = Object.keys(KPI_LABEL); draw(); };
+  $("#fKpi").onsubmit = async (e) => {
+    if (e.submitter?.value !== "ok") return; e.preventDefault();
+    if (!cur.length) return toast("지표를 하나 이상 고르세요");
+    if (me?.username) prefs = await api("/api/me/prefs", { method: "PUT", json: { kpis: cur } }); else prefs.kpis = cur;
+    d.close(); showProject(uid, "overview", true);
+  };
+}
 
 // ---------------------------------------------------------------- ⑧ 코멘트·@멘션
 async function commentThread(box, uid, target, { compact = false } = {}) {
@@ -327,7 +447,7 @@ showList = async function () {
             <button class="btn sm danger" data-del="${u.id}" data-need="admin">삭제</button></td></tr>`).join("")}</tbody></table></details>`;
     }).join("")}</div></div>`;
   const draw = () => {
-    let xs = pf.map((p) => ({ ...p, lv: projectLevel(p) }));
+    let xs = pf.map((p) => ({ ...p, lv: p.level || projectLevel(p) }));
     if (st.lv !== "all") xs = xs.filter((p) => p.lv === st.lv);
     const rank = { bad: 0, warn: 1, ok: 2 };
     const cmp = { risk: (a, b) => rank[a.lv] - rank[b.lv] || (a.margin ?? 1e9) - (b.margin ?? 1e9), slip: (a, b) => (b.slip ?? -1e9) - (a.slip ?? -1e9),
@@ -381,7 +501,7 @@ async function renderMyTasks(box) {
 // ---------------------------------------------------------------- ④ 설정 하위 탭
 tabSettings = async function (el, r, uid) {
   subTabs(el, [["members", "멤버·권한", (s) => renderMembers(s, r.name)], ["calc", "계산 옵션", (s) => settingsCalc(s, r, uid)],
-    ["quality", "품질 기준", (s) => settingsQuality(s, r, uid)]], "sub:settings");
+    ["quality", "품질 기준", (s) => settingsQuality(s, r, uid)], ["status", "상태 기준", (s) => settingsStatus(s, r, uid)]], "sub:settings");
 };
 async function settingsCalc(el, r, uid) {
   const st = await api(`/api/uploads/${uid}/settings`);
@@ -490,8 +610,17 @@ tabLookahead = async function (el, r, uid) {
     });
     tbl.querySelectorAll("[data-asg]").forEach((s) => (s.onchange = async () => {
       const x = la.constraints.find((y) => y.id === s.dataset.asg);
-      await api(`/api/uploads/${uid}/records/constraint`, { method: "POST", json: { ...x, assignee: s.value } }); toast(s.value ? `${s.value} 님을 담당자로 지정했습니다` : "담당자를 비웠습니다");
+      if (await saveRec(`/api/uploads/${uid}/records/constraint`, { ...x, assignee: s.value, base_updated_at: x.updated_at }, () => tabLookahead(el, r, uid))) {
+        toast(s.value ? `${s.value} 님을 담당자로 지정했습니다` : "담당자를 비웠습니다"); tabLookahead(el, r, uid);
+      }
     }));
+    // 6차: 해소 기한 표에서 바로 고치기
+    if (ctx.canWrite) tbl.querySelectorAll("[data-cst]").forEach((sel) => {
+      const x = la.constraints.find((y) => y.id === sel.dataset.cst);
+      const td = sel.closest("td").previousElementSibling;
+      td.innerHTML = `<input class="s sm" type="date" value="${x.due || ""}" aria-label="해소 기한" style="${x.status !== "해결" && x.due && x.due < la.data_date ? "border-color:var(--crit)" : ""}">`;
+      td.firstChild.onchange = async (e) => { if (await saveRec(`/api/uploads/${uid}/records/constraint`, { ...x, due: e.target.value, base_updated_at: x.updated_at }, () => tabLookahead(el, r, uid))) { toast("기한을 바꿨습니다"); tabLookahead(el, r, uid); } };
+    });
     applyRole(cl.parentElement);
   }
 };
@@ -616,3 +745,21 @@ renderInbox = async function (container) {
     det.append(...p.childNodes); p.replaceWith(det);
   }
 };
+
+// ---------------------------------------------------------------- 6차 ⑥ 프로젝트별 상태(정상·주의·위험) 기준
+async function settingsStatus(el, r, uid) {
+  const t = await api(`/api/uploads/${uid}/thresholds`);
+  const v = t.values;
+  const F = [["margin_bad", "목표 대비 여유가 이 값(일) 미만이면 위험", "기본 0"], ["margin_warn", "목표 대비 여유가 이 값(일) 미만이면 주의", "예: 10"],
+    ["slip_warn", "직전 대비 준공 지연이 이 값(일) 이상이면 주의", "기본 1"], ["health_bad", "건전성 점수가 이 값 미만이면 위험", "예: 60"],
+    ["health_warn", "건전성 점수가 이 값 미만이면 주의", "예: 75"], ["spi_warn", "SPI가 이 값 미만이면 주의", "예: 0.9"]];
+  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">상태 판정 기준 <span class="muted" style="font-size:13px">${esc(r.name)}</span></h3>
+    <p class="muted">상황판 머리 문장과 홈 포트폴리오 카드의 정상·주의·위험 색을 정하는 기준입니다. 비워 두면 그 기준은 쓰지 않습니다. 음수 여유 작업이 있으면 항상 위험입니다.</p>
+    <div class="th-grid">${F.map(([k, l, ph]) => `<label>${l}<input class="s" type="number" step="${k === "spi_warn" ? "0.01" : "1"}" data-th="${k}" value="${v[k] ?? ""}" placeholder="${ph}"></label>`).join("")}</div>
+    <div class="row end"><button class="btn primary" id="thSave" data-need="editor">저장</button></div></div>`;
+  applyRole(el);
+  $("#thSave").onclick = () => withBusy($("#thSave"), async () => {
+    const body = Object.fromEntries([...el.querySelectorAll("[data-th]")].map((x) => [x.dataset.th, x.value]));
+    await api(`/api/uploads/${uid}/thresholds`, { method: "PUT", json: body }); toast("기준을 저장했습니다. 상황판과 포트폴리오에 바로 적용됩니다.");
+  });
+}
