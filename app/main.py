@@ -34,12 +34,14 @@ SECURE_COOKIE = os.environ.get("SECURE_COOKIE", "0") == "1"
 
 PUBLIC = {"/api/config", "/api/login", "/api/logout", "/api/me"}
 # 조회 권한(viewer)으로도 허용되는 계산 전용 POST
-VIEWER_POST = ("/whatif", "/recovery", "/api/reports/render", "/api/reports/preview")
+VIEWER_POST = ("/whatif", "/recovery", "/api/reports/render", "/api/reports/preview", "/outputs/log")
 ADMIN_ONLY = ("/api/admin/",)
 
 
 # 프로젝트 데이터를 바꾸지 않는 POST (계산·추출·다운로드만): 프로젝트 쓰기 권한 검사에서 제외
 READONLY_POST = VIEWER_POST + ("/chat", "/daily", "/risks/extract", "/xer_patch")
+# 읽기 사용자도 남길 수 있는 협업 기록(코멘트)
+SOCIAL = re.compile(r"^/api/uploads/[^/]+/comments(/[^/]+(/resolve)?)?$")
 
 
 def _project_of(method: str, path: str) -> str | None:
@@ -69,7 +71,8 @@ def _required_role(method: str, path: str) -> str:
         return "admin"
     if path.startswith("/api/settings/team"):
         return "admin" if method != "GET" else "viewer"
-    if method == "GET" or (method == "POST" and path.endswith(VIEWER_POST)) or path in ("/api/learn/progress", "/api/learn/sample", "/api/me/password"):
+    if method == "GET" or (method == "POST" and path.endswith(VIEWER_POST)) or SOCIAL.match(path) \
+            or path in ("/api/learn/progress", "/api/learn/sample", "/api/me/password", "/api/me/prefs"):
         return "viewer"
     return "editor"
 
@@ -97,7 +100,8 @@ async def security(request: Request, call_next):
     if auth_mod.ROLES[user["role"]] < auth_mod.ROLES[need]:
         return JSONResponse({"detail": f"권한이 없습니다 ({need} 이상 필요)"}, status_code=403)
     # 프로젝트 단위 쓰기 권한: 읽기는 모두, 쓰기는 자기 프로젝트만
-    if auth_mod.users_exist() and request.method in ("POST", "PUT", "DELETE") and not path.endswith(READONLY_POST):
+    if auth_mod.users_exist() and request.method in ("POST", "PUT", "DELETE") and not path.endswith(READONLY_POST) \
+            and not SOCIAL.match(path):
         proj = _project_of(request.method, path)
         if proj is not None:
             members_path = "/members" in path
@@ -263,8 +267,18 @@ def get_upload(uid: str, request: Request):
     etag = '"' + _h.md5(f"{uid}:{row['n']}:{row['finish']}:{user.get('username')}:{user.get('role')}".encode()).hexdigest() + '"'
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers={"ETag": etag})
+    lite = request.query_params.get("lite") == "1"
+    if lite:
+        etag = etag[:-1] + '-lite"'
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers={"ETag": etag})
     d = storage.get(uid)
     d.pop("raw", None)
+    if lite:  # 대형 공정표: 머리글·상황판용 요약만 먼저 (액티비티·관계는 /activities 로 나중에)
+        res = d["result"]
+        d["lite"] = True
+        d["result"] = {k: v for k, v in res.items() if k not in ("activities", "relationships", "wbs")}
+        d["result"]["activity_count"] = len(res.get("activities") or [])
     d["_etag"] = etag
     if auth_mod.users_exist():
         u = request.state.user
@@ -315,11 +329,30 @@ def _q(s: str) -> str:
     return quote(s or "export")
 
 
+def _log_output(uid: str, kind: str, user: str) -> None:
+    """보고서 센터의 출력물 이력 (Word·CSV·A3 인쇄; 엑셀은 render 에서 기록)."""
+    try:
+        r = services.result(uid)
+        storage.rec_put("report_log", r["name"], {"template": kind, "type": kind, "upload_id": uid, "data_date": r["data_date"], "warnings": []}, user)
+    except Exception:
+        pass
+
+
+@app.post("/api/uploads/{uid}/outputs/log")
+def output_log(uid: str, body: dict = Body(default={}), user: str = Depends(_user)):
+    kind = {"print": "A3 공정표 인쇄"}.get(body.get("kind"))
+    if not kind:
+        raise HTTPException(400)
+    _log_output(uid, kind, user)
+    return {"ok": True}
+
+
 @app.get("/api/uploads/{uid}/activities.csv", dependencies=[Depends(auth)])
-def export_csv(uid: str):
+def export_csv(uid: str, request: Request):
     d = storage.get(uid)
     if not d:
         raise HTTPException(404)
+    _log_output(uid, "CSV 액티비티", _user(request))
     cols = [("code", "Activity ID"), ("name", "Activity Name"), ("wbs", "WBS"), ("status", "상태"),
             ("orig_dur", "원공기(일)"), ("rem_dur", "잔여공기(일)"), ("pct", "공정률(%)"),
             ("start", "시작"), ("finish", "종료"), ("late_start", "Late Start"), ("late_finish", "Late Finish"),
@@ -518,8 +551,9 @@ def edit_report(uid: str, body: dict = Body(...)):
 
 
 @app.get("/api/uploads/{uid}/report.docx", dependencies=[Depends(auth)])
-def report_docx(uid: str):
+def report_docx(uid: str, request: Request):
     rep = storage.get_extra(uid, "report") or services.report(uid, None, False)
+    _log_output(uid, "Word 월간 보고서", _user(request))
     data = services.report_docx(rep)
     name = f"{rep['data']['project']}_월간공정보고_{rep['data']['data_date']}.docx"
     return Response(data, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -624,7 +658,11 @@ def add_risk(uid: str, body: dict = Body(...), user: str = Depends(_user)):
         x = services.clean_risk(body, valid)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    old = storage.rec_get("risk", body["id"]) if body.get("id") else None
+    if old and old["scope"] != _name(uid):
+        raise HTTPException(404)
     rid = storage.rec_put("risk", _name(uid), x, user, rid=body.get("id") or None)
+    _notify_assignee(uid, x, old, user, "리스크", "risk")
     return {"id": rid}
 
 
@@ -728,7 +766,7 @@ def _rec_body(kind: str, body: dict) -> dict:
         date.fromisoformat(x["week"])
         x["done"] = bool(x["done"])
     else:
-        keys = ("code", "type", "desc", "owner", "due", "status")
+        keys = ("code", "type", "desc", "owner", "due", "status", "assignee")
         x = {k: body.get(k) for k in keys}
         if x.get("due"):
             date.fromisoformat(x["due"])
@@ -745,11 +783,58 @@ def put_record(uid: str, kind: str, body: dict = Body(...), user: str = Depends(
     except (ValueError, TypeError):
         raise HTTPException(400, "날짜 형식을 확인하세요")
     rid = body.get("id")
+    old = None
     if rid:
         old = storage.rec_get(kind, rid)
         if not old or old["scope"] != _name(uid):
             raise HTTPException(404)
-    return {"id": storage.rec_put(kind, _name(uid), x, user, rid=rid)}
+    new_id = storage.rec_put(kind, _name(uid), x, user, rid=rid)
+    _notify_assignee(uid, x, old, user, "제약" if kind == "constraint" else "약속", "lookahead")
+    return {"id": new_id}
+
+
+def _notify_assignee(uid: str, x: dict, old: dict | None, user: str, label: str, tab: str) -> None:
+    a = x.get("assignee")
+    if a and a != (old or {}).get("assignee"):
+        what = x.get("title") or x.get("desc") or x.get("code") or ""
+        notify.push([a], "assigned", f"{user} 님이 '{_name(uid)}' {label} 담당자로 지정했습니다: {str(what)[:60]}" + (f" (기한 {x['due']})" if x.get("due") else ""),
+                    f"#/p/{uid}/{tab}", exclude=user)
+
+
+def _bulk_rows(uid: str, kind: str, rows: list) -> tuple[list, list]:
+    valid = {a["code"] for a in services.result(uid)["activities"]}
+    ok, errors = [], []
+    for i, row in enumerate(rows[:500]):
+        try:
+            if not isinstance(row, dict):
+                raise ValueError("행 형식이 올바르지 않습니다")
+            if kind == "risk":
+                x = services.clean_risk(row, valid)
+            else:
+                if kind == "commit" and not row.get("week"):
+                    raise ValueError("주(week) 날짜가 필요합니다")
+                x = _rec_body(kind, row)
+                if x.get("code") and x["code"] not in valid:
+                    raise ValueError(f"없는 작업 코드: {x['code']}")
+            ok.append(x)
+        except (ValueError, TypeError, KeyError) as e:
+            errors.append({"row": i + 1, "error": str(e) or "날짜 형식을 확인하세요"})
+    return ok, errors
+
+
+@app.post("/api/uploads/{uid}/bulk/{kind}")
+def bulk_records(uid: str, kind: str, body: dict = Body(...), user: str = Depends(_user)):
+    """엑셀에서 붙여넣은 여러 행을 한 번에 입력. dry_run=true 이면 검사 결과만 돌려준다."""
+    if kind not in ("commit", "constraint", "risk"):
+        raise HTTPException(404)
+    ok, errors = _bulk_rows(uid, kind, body.get("rows") or [])
+    if body.get("dry_run"):
+        return {"valid": len(ok), "errors": errors, "preview": ok[:50]}
+    ids = []
+    for x in ok:
+        ids.append(storage.rec_put(kind, _name(uid), x, user))
+        _notify_assignee(uid, x, None, user, {"risk": "리스크", "constraint": "제약", "commit": "약속"}[kind], "risk" if kind == "risk" else "lookahead")
+    return {"saved": len(ids), "errors": errors, "ids": ids}
 
 
 @app.delete("/api/uploads/{uid}/records/{kind}/{rid}")
@@ -921,7 +1006,7 @@ def render_report(request: Request, body: dict = Body(...)):
     except xlsx_report.TemplateError as e:
         raise HTTPException(400, str(e))
     r = services.result(uid)
-    storage.rec_put("report_log", r["name"], {"template": tname, "upload_id": uid, "data_date": r["data_date"],
+    storage.rec_put("report_log", r["name"], {"template": tname, "type": "엑셀 양식", "upload_id": uid, "data_date": r["data_date"],
                                              "warnings": warnings[:20], "stats": stats}, user["username"])
     storage.audit(user["username"], "POST", "/api/reports/render", 200, f"{tname} / {r['name']} {r['data_date']}")
     fname = f"{r['name']}_{tname}_{r['data_date']}.xlsx"
@@ -1164,7 +1249,100 @@ def readiness(uid: str):
 
 @app.get("/api/uploads/{uid}/review")
 def review(uid: str, base: str | None = None):
-    return workflow.review(uid, base)
+    d = workflow.review(uid, base)
+    d["signoff"] = workflow.signoffs(uid)
+    return d
+
+
+@app.post("/api/uploads/{uid}/review/sign")
+def review_sign(uid: str, body: dict = Body(...), user: str = Depends(_user)):
+    keys = [s["key"] for s in workflow.review(uid, None)["steps"]]
+    if body.get("key") not in keys:
+        raise HTTPException(400, "없는 점검 단계입니다")
+    return workflow.sign(uid, body["key"], str(body.get("note") or ""), user, keys)
+
+
+@app.get("/api/uploads/{uid}/activities")
+def activities(uid: str):
+    r = services.result(uid)
+    return {k: r.get(k) for k in ("activities", "relationships", "wbs")}
+
+
+# ---- 코멘트·@멘션 (읽기 사용자도 가능)
+def _mentions(text: str) -> list[str]:
+    names = {u["username"] for u in auth_mod.list_users() if u["active"]} if auth_mod.users_exist() else set()
+    found = re.findall(r"@([\w.\-가-힣]+)", text)
+    return [n for n in dict.fromkeys(found) if n in names]
+
+
+@app.get("/api/uploads/{uid}/comments")
+def list_comments(uid: str, target: str | None = None):
+    items = storage.rec_list("comment", _name(uid))
+    if target:
+        items = [c for c in items if c.get("target") == target]
+    return items
+
+
+@app.post("/api/uploads/{uid}/comments")
+def add_comment(uid: str, body: dict = Body(...), user: str = Depends(_user)):
+    text = str(body.get("text") or "").strip()[:2000]
+    target = str(body.get("target") or "")[:80]
+    if not text or not re.fullmatch(r"(activity|risk|project):.+", target):
+        raise HTTPException(400, "내용과 대상을 확인하세요")
+    ments = _mentions(text)
+    cid = storage.rec_put("comment", _name(uid), {"target": target, "text": text, "mentions": ments, "resolved": False}, user)
+    kind, ref = target.split(":", 1)
+    where = {"activity": f"작업 {ref}", "risk": "리스크", "project": "프로젝트"}[kind]
+    notify.push(ments, "mention", f"{user} 님이 '{_name(uid)}' {where} 코멘트에서 회원님을 언급했습니다: {text[:80]}",
+                f"#/p/{uid}/{'risk' if kind == 'risk' else 'overview'}?c={cid}", exclude=user)
+    return {"id": cid, "mentions": ments}
+
+
+@app.post("/api/uploads/{uid}/comments/{cid}/resolve")
+def resolve_comment(uid: str, cid: str, request: Request, body: dict = Body(default={}), user: str = Depends(_user)):
+    c = storage.rec_get("comment", cid)
+    if not c or c["scope"] != _name(uid):
+        raise HTTPException(404)
+    u = request.state.user
+    if not (user in (c.get("mentions") or []) or _comment_author(cid) == user or access.can_write(u, c["scope"])):
+        raise HTTPException(403, "작성자·언급된 사람·프로젝트 멤버만 해결 표시할 수 있습니다")
+    c["resolved"] = bool(body.get("resolved", True))
+    c["resolved_by"] = user if c["resolved"] else None
+    storage.rec_put("comment", c["scope"], c, user, rid=cid)
+    return {"ok": True}
+
+
+def _comment_author(cid: str) -> str:
+    with storage.conn() as c:
+        r = c.execute("SELECT author FROM records WHERE kind='comment' AND id=?", (cid,)).fetchone()
+    return r["author"] if r else ""
+
+
+@app.delete("/api/uploads/{uid}/comments/{cid}")
+def delete_comment(uid: str, cid: str, request: Request, user: str = Depends(_user)):
+    c = storage.rec_get("comment", cid)
+    if not c or c["scope"] != _name(uid):
+        raise HTTPException(404)
+    if _comment_author(cid) != user and request.state.user.get("role") != "admin":
+        raise HTTPException(403, "작성자만 지울 수 있습니다")
+    storage.rec_del("comment", cid)
+    return {"ok": True}
+
+
+# ---- 내게 배정된 일·사용자 설정
+@app.get("/api/my/tasks")
+def my_tasks(user: str = Depends(_user)):
+    return workflow.my_tasks(user)
+
+
+@app.get("/api/me/prefs")
+def get_prefs(user: str = Depends(_user)):
+    return {**notify.prefs(user), "types": notify.NOTIFY_TYPES}
+
+
+@app.put("/api/me/prefs")
+def put_prefs(body: dict = Body(...), user: str = Depends(_user)):
+    return notify.set_prefs(user, body)
 
 
 # ---- 알림

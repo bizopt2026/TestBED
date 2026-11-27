@@ -72,7 +72,7 @@ async function showReports(preUid) {
     if (!res) return;
     const blob = await res.blob();
     const m = (res.headers.get("content-disposition") || "").match(/filename\*=UTF-8''([^;]+)/);
-    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = m ? decodeURIComponent(m[1]) : "report.xlsx"; document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = m ? decodeURIComponent(m[1]) : "report.xlsx"; a.hidden = true; document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
     let warns = [], stats = {};
     try { warns = JSON.parse(decodeURIComponent(res.headers.get("x-report-warnings") || "%5B%5D")); stats = JSON.parse(decodeURIComponent(res.headers.get("x-report-stats") || "%7B%7D")); } catch {}
     $("#rpOut").innerHTML = `<div class="chip ok">✓ 내려받았습니다</div><p class="muted">값 ${stats.values ?? "-"}개, 표 행 ${stats.rows ?? "-"}개를 채웠습니다.</p>

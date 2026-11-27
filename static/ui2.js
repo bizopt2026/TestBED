@@ -3,6 +3,7 @@
 
 // ---------------------------------------------------------------- ① SVG 아이콘 (글꼴에 따라 깨지는 이모지·특수문자 대체)
 const ICONS = {
+  eye: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
   user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-7 9a7 7 0 0 1 14 0",
   bell: "M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21a2 2 0 0 0 4 0",
   search: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zm10 2-4.3-4.3",
@@ -103,7 +104,7 @@ async function openPalette() {
   const items = [];
   const projects = await api("/api/projects").catch(() => []);
   projects.forEach((p) => items.push({ kind: "프로젝트", label: p.name, sub: `DD ${p.data_date}${p.can_write ? " · 편집 가능" : ""}`, go: `#/p/${p.latest_id}/overview` }));
-  [["#/", "홈"], ["#/reports", "엑셀 리포트"], ["#/projects", "프로젝트 권한"], ["#/learn", "학습 센터"]].forEach(([h, l]) => items.push({ kind: "페이지", label: l, go: h }));
+  [["#/", "홈"], ["#/reports", "보고서 센터"], ["#/projects", "프로젝트 권한"], ["#/learn", "학습 센터"]].forEach(([h, l]) => items.push({ kind: "페이지", label: l, go: h }));
   if (ctx.uid && ctx.result) {
     items.push({ kind: "화면", label: "월간 업데이트 점검", sub: ctx.result.name, go: `#/wizard/${ctx.uid}` });
     Object.entries(TAB_LABEL).forEach(([k, l]) => items.push({ kind: "화면", label: l, sub: ctx.result.name, go: `#/p/${ctx.uid}/${k}` }));

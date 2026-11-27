@@ -782,7 +782,7 @@ def forensic(uid: str, base_uid: str | None = None) -> dict:
 
 # ---------------------------------------------------------------- ③ 리스크 레지스터 + 시뮬레이션
 RISK_FIELDS = ("title", "desc", "codes", "prob", "impact_min", "impact_ml", "impact_max", "cost", "owner",
-               "mitigation", "status", "category", "due")
+               "mitigation", "status", "category", "due", "assignee")
 
 
 def clean_risk(d: dict, valid_codes: set[str]) -> dict:
@@ -1018,8 +1018,16 @@ def portfolio() -> list[dict]:
                     "progress": r["summary"]["progress_pct"], "health": health_score(p["id"]),
                     "negative_float": sum(1 for a in inc if a["tf"] is not None and a["tf"] < 0),
                     "open_risks": sum(1 for x in rs if x.get("status") != "closed"),
-                    "spi": e.get("spi"), "cpi": e.get("cpi")})
+                    "spi": e.get("spi"), "cpi": e.get("cpi"),
+                    "review": _review_status(p["id"]), "created_at": p.get("created_at"),
+                    "history": [{"id": h["id"], "data_date": h["data_date"], "finish": h["result"]["finish"], "created_at": h.get("created_at"),
+                                 "note": h.get("note") or h.get("filename")} for h in reversed(hist)][:12]})
     return out
+
+
+def _review_status(uid: str) -> dict:
+    r = storage.rec_get("review", uid) or {}
+    return {"steps": len(r.get("steps") or {}), "completed_by": r.get("completed_by"), "completed_at": r.get("completed_at")}
 
 
 # ---------------------------------------------------------------- ⑪ 문서 → 초기 공정표

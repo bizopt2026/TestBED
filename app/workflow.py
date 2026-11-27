@@ -122,7 +122,10 @@ def situation(uid: str, base_uid: str | None = None) -> dict:
     order = {"high": 0, "mid": 1, "low": 2}
     todo.sort(key=lambda x: order[x["level"]])
     ready = readiness(uid)
-    return {"headline": ", ".join(parts), "level": level, "base_id": bid, "base_data_date": base["data_date"] if base else None,
+    for kk in kpis:
+        kk["series_label"] = f"최근 {len([v for v in kk['series'] if v is not None])}회 업데이트" if kk["series"] else ""
+    so = signoffs(uid)
+    return {"why": explain(uid, kpis), "review": so, "headline": ", ".join(parts), "level": level, "base_id": bid, "base_data_date": base["data_date"] if base else None,
             "kpis": kpis, "todo": todo[:5], "todo_total": len(todo), "readiness": ready,
             "readiness_missing": [x for x in ready if not x["ok"]],
             "milestones": [{"code": a["code"], "name": a["name"], "finish": a["act_end"] or a["finish"], "bl": a["bl_finish"],
@@ -178,3 +181,72 @@ def review(uid: str, base_uid: str | None = None) -> dict:
     steps.append({"key": "report", "title": "리포트 생성", "ok": None, "tab": "xlsx", "summary": "양식을 골라 엑셀 리포트를 만듭니다", "issues": []})
     return {"uid": uid, "name": r["name"], "data_date": r["data_date"], "base_id": bid,
             "base_data_date": base["data_date"] if base else None, "steps": steps}
+
+
+
+# ---------------------------------------------------------------- ⑦ 월간 점검 팀 기록
+def signoffs(uid: str) -> dict:
+    r = storage.rec_get("review", uid)
+    return {k: r.get(k) for k in ("steps", "completed_by", "completed_at")} if r else {"steps": {}, "completed_by": None, "completed_at": None}
+
+
+def sign(uid: str, key: str, note: str, by: str, total_keys: list[str]) -> dict:
+    from datetime import datetime
+    name = services.result(uid)["name"]
+    cur = signoffs(uid)
+    steps = dict(cur.get("steps") or {})
+    steps[key] = {"by": by, "at": datetime.now().isoformat(timespec="seconds"), "note": (note or "")[:500]}
+    done = all(k in steps for k in total_keys)
+    completed_by = cur.get("completed_by") or (by if done else None)
+    completed_at = cur.get("completed_at") or (datetime.now().isoformat(timespec="seconds") if done else None)
+    storage.rec_put("review", name, {"steps": steps, "completed_by": completed_by, "completed_at": completed_at}, by, rid=uid)
+    if done and not cur.get("completed_by"):
+        from . import notify
+        r = services.result(uid)
+        notify.push(notify.project_people(name), "review", f"'{name}' DD {r['data_date']} 월간 점검을 {by} 님이 완료했습니다", f"#/wizard/{uid}", exclude=by)
+    return signoffs(uid)
+
+
+# ---------------------------------------------------------------- ⑭ 지표 해석('왜?')
+def explain(uid: str, kpis: list[dict]) -> dict:
+    r = services.result(uid)
+    out = {}
+    e = services.evm(uid, None)
+    if e.get("available") and e.get("spi") is not None and e["spi"] < 0.9 and e["bac"]:
+        pv, ev = e["pv"] / e["bac"] * 100, e["ev"] / e["bac"] * 100
+        acts = r["activities"]
+        early_bl = sum(1 for a in acts if a["bl_finish"] and a["bl_finish"] <= r["data_date"])
+        msg = f"계획상 예산의 {pv:.0f}%만큼 끝냈어야 하지만 실제는 {ev:.0f}%입니다."
+        if early_bl > len(acts) * 0.5:
+            msg += f" 계획 완료일이 Data Date 이전인 작업이 {early_bl}개({early_bl * 100 // max(len(acts), 1)}%)로 많아, 베이스라인이 실제 일정과 크게 다르면 SPI가 낮게 나옵니다. 베이스라인을 확인하세요."
+        out["spi"] = {"text": msg, "tab": "evm"}
+    hs = services.health(uid)
+    fails = sorted([m for m in hs["metrics"] if m["pass"] is False], key=lambda m: -m["weight"])[:3]
+    if fails:
+        out["health"] = {"text": "감점이 큰 항목: " + ", ".join(f"{m['name']}({m['value']}{'%' if m['unit'] == '%' else ''})" for m in fails), "tab": "health"}
+    k = {x["key"]: x for x in kpis}
+    if (k.get("margin", {}).get("value") or 0) < 0 or (k.get("finish", {}).get("delta") or 0) > 0:
+        lp = [a for a in r["activities"] if a["longest"] and a["status_code"] != "TK_Complete"][:3]
+        out["finish"] = {"text": "준공을 결정하는 최장경로 앞쪽 작업: " + ", ".join(f"{a['code']} {a['name']}" for a in lp), "tab": "critical"}
+    neg = [a for a in r["activities"] if a["tf"] is not None and a["tf"] < 0]
+    if neg:
+        out["neg"] = {"text": f"가장 급한 작업: {min(neg, key=lambda a: a['tf'])['code']} (여유 {min(a['tf'] for a in neg)}일). 자동 만회안으로 대책을 찾을 수 있습니다.", "tab": "recovery"}
+    return out
+
+
+def my_tasks(username: str) -> list[dict]:
+    """내게 배정된 일: 리스크·제약 담당, 해결되지 않은 멘션."""
+    out = []
+    for p in storage.latest_by_project():
+        name, uid = p["name"], p["id"]
+        for x in storage.rec_list("risk", name):
+            if x.get("assignee") == username and x.get("status") != "closed":
+                out.append({"kind": "리스크", "project": name, "uid": uid, "tab": "risk", "text": x["title"], "due": x.get("due"), "id": x["id"]})
+        for c in storage.rec_list("constraint", name):
+            if c.get("assignee") == username and c.get("status") != "해결":
+                out.append({"kind": "제약", "project": name, "uid": uid, "tab": "lookahead", "text": f"{c.get('code')} {c.get('type')} - {c.get('desc', '')}", "due": c.get("due"), "id": c["id"]})
+        for m in storage.rec_list("comment", name):
+            if username in (m.get("mentions") or []) and not m.get("resolved"):
+                out.append({"kind": "멘션", "project": name, "uid": uid, "tab": "overview", "text": f"{m['author']}: {m['text'][:60]}", "due": None,
+                            "id": m["id"], "target": m.get("target")})
+    return sorted(out, key=lambda x: (x["due"] or "9999", x["project"]))

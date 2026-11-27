@@ -44,7 +44,7 @@ async function download(path, fallbackName) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = m ? decodeURIComponent(m[1]) : fallbackName;
-  document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
+  a.hidden = true; document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
   URL.revokeObjectURL(a.href);
 }
 
@@ -426,17 +426,23 @@ function tabGantt(el, r) {
       ${highlight.size ? `<label><input type="checkbox" id="fHl" checked> AI 답변 작업만 (${highlight.size})</label>` : ""}
       <label><input type="checkbox" id="fInc" checked> 완료 제외</label>
       <label><input type="checkbox" id="fBl" checked> 계획(Target) 표시</label>
-      <label class="muted">배율 <select class="s" id="zoom"><option value="3">일</option><option value="1.2" selected>주</option><option value="0.35">월</option><option value="0.12">분기</option></select></label>
+      <label class="muted">배율 <select class="s" id="zoom"><option value="3">일</option><option value="1.2" selected>주</option><option value="0.35">월</option><option value="0.12">분기</option><option value="fit">전체</option></select></label>
+      <button class="btn sm" id="gFit" title="전체 공기를 한 화면에 맞춤">전체 맞춤</button>
+      <label class="muted">날짜 이동 <input class="s sm" type="date" id="gDate" aria-label="날짜로 이동"></label>
+      <button class="btn sm" id="gToday" title="오늘 날짜로 이동">오늘</button>
+      <button class="btn sm" id="gDD" title="Data Date로 이동">Data Date</button>
+      <label class="muted" title="작업을 클릭하면 연결된 선행·후행 체인을 강조">경로 추적 <select class="s sm" id="fTrace"><option value="">끄기</option><option value="drive">구동 경로(Driving)</option><option value="all">전체 선·후행</option></select></label>
       <span class="spacer"></span><a class="btn sm" href="#/print/${el.dataset.uid}">A3 인쇄</a>
-      <div class="legend"><span><i style="background:var(--bar)"></i>일반</span><span><i style="background:var(--crit)"></i>주공정</span>
-      <span><i style="background:var(--done)"></i>완료</span><span><i style="background:var(--bl);height:4px"></i>계획</span>
-      <span><i style="background:#16a34a;width:2px"></i>Data Date</span></div>
     </div>
+    <div class="legend legend-sticky" aria-label="범례"><span><i style="background:var(--bar)"></i>일반</span><span><i style="background:var(--crit)"></i>주공정</span>
+      <span><i style="background:var(--done)"></i>완료</span><span><i style="background:var(--bl);height:4px"></i>계획</span>
+      <span><i style="background:#16a34a;width:2px"></i>Data Date</span><span><i style="background:#ea580c;width:2px"></i>오늘</span>
+      <span><i style="background:#fde68a"></i>추적 경로</span></div>
     <div class="gantt ${[...hidden].map((k) => "hide-" + k).join(" ")}" style="grid-template-columns:${+store.get("gsplit", "640")}px 6px 1fr">
       <div class="g-left"><div class="g-row hdr"><div>ID</div><div>액티비티명</div><div class="c-od">원공기</div><div class="c-rd">잔여</div><div class="c-st">시작</div><div class="c-fn">종료</div><div class="c-tf">TF</div></div>
         <div class="g-body" id="gl"><div class="g-rows" id="glr"></div></div></div>
-      <div class="g-split" id="gSplit" role="separator" aria-label="표 너비 조절" tabindex="0"></div>
-      <div class="g-right"><canvas class="g-head" id="gh"></canvas><div class="g-body" id="gr" tabindex="0" aria-label="간트 차트. 위아래 화살표로 작업 선택, Enter로 상세"><div id="grs"></div><canvas id="gc" style="position:sticky;top:0;left:0"></canvas></div></div>
+      <div class="g-split" id="gSplit" role="separator" aria-label="표 너비 조절" aria-orientation="vertical" aria-valuemin="240" aria-valuemax="1000" aria-valuenow="${+store.get("gsplit", "640")}" tabindex="0"></div>
+      <div class="g-right"><canvas class="g-head" id="gh"></canvas><div class="g-body" id="gr" tabindex="0" role="region" aria-label="간트 차트. 위아래 화살표로 작업 선택, Enter로 상세"><div id="grs"></div><canvas id="gc" style="position:sticky;top:0;left:0"></canvas></div></div>
     </div>
     <div class="panel detail" id="det"><span class="muted">행을 클릭하면 선·후행 관계를 볼 수 있습니다. 더블클릭하면 상세 패널이 열립니다.</span></div>`;
   let blMap = null; // 저장된 베이스라인 사용 시 code -> {start, finish}
@@ -521,6 +527,7 @@ function tabGantt(el, r) {
     const h = gh.getContext("2d"); h.setTransform(dpr, 0, 0, dpr, 0, 0); h.fillStyle = cssv("--head"); h.fillRect(0, 0, W, 44);
     const sx = gr.scrollLeft, sy = gr.scrollTop;
     const X = (t) => ((t - t0) / dayMs) * ppd - sx;
+    const trace = traceSet();
     // 눈금
     h.font = "11px sans-serif"; h.fillStyle = cssv("--text"); g.strokeStyle = cssv("--line");
     const months = monthTicks(t0, t1);
@@ -543,6 +550,7 @@ function tabGantt(el, r) {
     for (let i = first; i < last; i++) {
       const a = rows[i]; const y = i * RH - sy;
       if (!a.id) { g.fillStyle = cssv("--soft"); g.fillRect(0, y, W, RH); continue; }
+      if (trace.has(a.id) && sel !== a.id) { g.fillStyle = "rgba(253,230,138,.55)"; g.fillRect(0, y, W, RH); }
       if (sel === a.id) { g.fillStyle = cssv("--sel"); g.fillRect(0, y, W, RH); }
       const blS = blMap ? blMap[a.code]?.s : a.bl_start, blF = blMap ? blMap[a.code]?.f : a.bl_finish;
       const bl = $("#fBl").checked && blS && blF;
@@ -580,7 +588,10 @@ function tabGantt(el, r) {
         g.lineTo(x1 + 5, y1); g.lineTo(x1 + 5, y2); g.lineTo(x2, y2); g.stroke();
         g.beginPath(); g.moveTo(x2, y2); g.lineTo(x2 - 4, y2 - 3); g.lineTo(x2 - 4, y2 + 3); g.fillStyle = color; g.fill();
     }
-    if (sel) {
+    if (trace.size) {
+      for (const id of trace) { const a = byId[id]; for (const p of a.preds) if (trace.has(p.id)) drawRel(byId[p.id], a, p.type, "#ea580c"); }
+    }
+    if (sel && !trace.size) {
       const a = byId[sel];
       const draw = (p, s, type) => {
         if (idx[p.id] === undefined || idx[s.id] === undefined) return;
@@ -597,7 +608,37 @@ function tabGantt(el, r) {
     // Data date
     const xd = X(toT(r.data_date)); g.strokeStyle = "#16a34a"; g.lineWidth = 1.5; g.setLineDash([5, 4]);
     g.beginPath(); g.moveTo(xd, 0); g.lineTo(xd, H); g.stroke(); g.setLineDash([]); g.lineWidth = 1;
+    const xt = X(toT(new Date().toISOString().slice(0, 10)));
+    if (xt > 0 && xt < W) { g.strokeStyle = "#ea580c"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(xt, 0); g.lineTo(xt, H); g.stroke(); g.lineWidth = 1;
+      h.fillStyle = "#ea580c"; h.fillText("오늘", xt + 3, 28); }
   }
+  // 경로 추적: 선택 작업에서 선행·후행 방향으로 끝까지
+  let traceCache = { sel: null, set: new Set() };
+  function traceSet() {
+    const mode = $("#fTrace")?.value;
+    if (!sel || !mode) return new Set();
+    if (traceCache.sel === sel && traceCache.mode === mode) return traceCache.set;
+    const out = new Set([sel]);
+    // 구동 경로: 여유(FF)가 0 이하인 선행만 따라 올라가고, 자신의 FF가 0 이하일 때만 후행으로 내려간다
+    const drives = (p) => mode === "all" || (p.ff !== null && p.ff !== undefined && p.ff <= 0 && p.status_code !== "TK_Complete");
+    for (const dir of ["preds", "succs"]) {
+      const q = [sel];
+      while (q.length) {
+        const a = byId[q.pop()];
+        if (dir === "succs" && a.id !== sel && !drives(a) && mode === "drive") continue;
+        for (const x of a?.[dir] || []) {
+          const o = byId[x.id]; if (!o || out.has(x.id)) continue;
+          if (dir === "preds" && !drives(o)) continue;
+          if (dir === "succs" && !drives(a)) continue;
+          out.add(x.id); q.push(x.id);
+        }
+      }
+    }
+    traceCache = { sel, mode, set: out };
+    return out;
+  }
+  const scrollToDate = (iso) => { if (!iso) return; gr.scrollLeft = Math.max(0, ((toT(iso) - t0) / dayMs) * ppd - gr.clientWidth / 3); render(); };
+  const fit = () => { ppd = Math.max(0.03, (gr.clientWidth - 20) / ((t1 - t0) / dayMs)); build(); gr.scrollLeft = 0; };
 
   $("#glr").addEventListener("click", (e) => {
     const row = e.target.closest("[data-id]"); if (!row) return;
@@ -631,6 +672,11 @@ function tabGantt(el, r) {
 
   ["q", "fCrit", "fInc", "fHl"].forEach((id) => $("#" + id)?.addEventListener("input", build));
   $("#fLines").addEventListener("input", render);
+  $("#fTrace").addEventListener("input", () => { traceCache.sel = null; render(); if (!sel && $("#fTrace").value) toast("작업을 클릭하면 연결된 전체 경로를 강조합니다"); });
+  $("#gFit").onclick = fit;
+  $("#gDate").onchange = (e) => scrollToDate(e.target.value);
+  $("#gToday").onclick = () => scrollToDate(new Date().toISOString().slice(0, 10));
+  $("#gDD").onclick = () => scrollToDate(r.data_date);
   // 더블클릭 → 상세 서랍
   $("#glr").addEventListener("dblclick", (e) => { const row = e.target.closest("[data-id]"); if (row) openActivity(byId[row.dataset.id].code); });
   gc.addEventListener("dblclick", (e) => { const i = Math.floor((e.offsetY + gr.scrollTop) / RH); if (rows[i]?.id) openActivity(rows[i].code); });
@@ -676,6 +722,7 @@ function tabGantt(el, r) {
   });
   $("#fBl").addEventListener("input", render);
   $("#zoom").addEventListener("input", (e) => {
+    if (e.target.value === "fit") return fit();
     const center = (gr.scrollLeft + gr.clientWidth / 2) / ppd;
     ppd = +e.target.value; build(); gr.scrollLeft = center * ppd - gr.clientWidth / 2;
   });
@@ -945,7 +992,7 @@ async function downloadPost(path, json, fallback) {
   const r = await api(path, { method: "POST", json });
   const blob = await r.blob();
   const m = (r.headers.get("content-disposition") || "").match(/filename\*=UTF-8''([^;]+)/);
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = m ? decodeURIComponent(m[1]) : fallback; document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = m ? decodeURIComponent(m[1]) : fallback; a.hidden = true; document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
 }
 
 // ---------------------------------------------------------------- ⑥ 관계 추천
@@ -1172,6 +1219,7 @@ async function tabRisk(el, r, uid) {
       <div class="row"><label>발생확률 %<input name="prob" type="number" min="0" max="100"></label><label>영향 최소(일)<input name="impact_min" type="number"></label>
       <label>최빈<input name="impact_ml" type="number"></label><label>최대<input name="impact_max" type="number"></label></div>
       <div class="row"><label>비용 영향(원)<input name="cost" type="number"></label><label>담당<input name="owner"></label><label>상태<select name="status"><option value="open">열림</option><option value="mitigating">대응중</option><option value="closed">종결</option></select></label></div>
+      <div class="row"><label>담당자(사용자)<select name="assignee"><option value="">없음</option></select></label><label>기한<input name="due" type="date"></label></div>
       <label>대응 방안<input name="mitigation"></label>
       <div class="row end"><button class="btn" value="cancel" formnovalidate>취소</button><button class="btn primary" value="ok">저장</button></div></form></dialog>
     <dialog id="dlgExtract"><form method="dialog"><h3>문서에서 리스크 찾기</h3><p class="muted">회의록, 공문, 일보 등을 붙여 넣으세요. AI가 리스크 후보를 제안하면 검토 후 등록합니다.</p>
@@ -1188,7 +1236,17 @@ async function tabRisk(el, r, uid) {
       : `<p class="muted">등록된 리스크가 없습니다.</p>`;
     $("#rkList").querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => openForm(list.find((x) => x.id === b.dataset.edit))));
     $("#rkList").querySelectorAll("[data-rm]").forEach((b) => (b.onclick = async () => { await deleteWithUndo(`/api/uploads/${uid}/risks/${b.dataset.rm}`, "리스크", load); }));
+    // 5차: 담당자·기한 표시 + 코멘트
+    const cm = await api(`/api/uploads/${uid}/comments`).catch(() => []);
+    $("#rkList").querySelectorAll("[data-edit]").forEach((b) => {
+      const x = list.find((y) => y.id === b.dataset.edit); const n = cm.filter((c) => c.target === "risk:" + x.id && !c.resolved).length;
+      b.insertAdjacentHTML("beforebegin", `<button class="btn sm" data-rcmt="${x.id}" aria-label="코멘트 ${n}건">💬${n ? " " + n : ""}</button> `);
+      if (x.assignee || x.due) b.closest("tr").querySelector("td").insertAdjacentHTML("beforeend", `<div class="muted" style="font-size:12px">👤 ${esc(x.assignee || "-")}${x.due ? ` · 기한 ${x.due}` : ""}</div>`);
+      b.parentElement.querySelector("[data-rcmt]").onclick = () => openComments(uid, "risk:" + x.id, x.title);
+    });
+    applyRole($("#rkList"));
   };
+  userList().then((us) => { const sel = $("#fRisk [name=assignee]"); if (sel) sel.insertAdjacentHTML("beforeend", us.map((u) => `<option>${esc(u.username)}</option>`).join("")); });
   let editing = null;
   const openForm = (x = {}) => {
     editing = x.id || null; const f = $("#fRisk"); f.reset();
@@ -1201,6 +1259,9 @@ async function tabRisk(el, r, uid) {
     try { await api(`/api/uploads/${uid}/risks`, { method: "POST", json: d }); $("#dlgRisk").close(); load(); } catch (err) { toast(err.message); }
   };
   $("#rkAdd").onclick = () => openForm();
+  $("#rkAdd").insertAdjacentHTML("beforebegin", `<button class="btn" id="rkBulk" data-need="editor">엑셀 붙여넣기</button>`);
+  $("#rkBulk").onclick = () => bulkPaste(uid, "risk", load);
+  applyRole($("#rkBulk").parentElement);
   $("#rkExtract").onclick = () => { $("#exOut").innerHTML = ""; $("#dlgExtract").showModal(); };
   $("#exRun").onclick = () => withBusy($("#exRun"), async () => {
     const xs = await api(`/api/uploads/${uid}/risks/extract`, { method: "POST", json: { text: $("#exText").value } });
@@ -1399,7 +1460,8 @@ async function tabLookahead(el, r, uid) {
     const v = await ui.form(`${b.dataset.con} 제약 등록`, [
       { name: "type", label: "유형", type: "select", options: ["도면", "자재", "인력", "장비", "허가", "선행작업", "기타"], value: "자재" },
       { name: "desc", label: "내용", required: true, placeholder: "예: 철근 D25 입고 대기" },
-      { name: "owner", label: "담당" }, { name: "due", label: "해소 기한", type: "date", value: thisWeek }], { submit: "등록" });
+      { name: "owner", label: "담당(업체·부서)" }, { name: "assignee", label: "담당자(사용자, 알림)", type: "select", options: [["", "없음"], ...(await userList()).map((u) => u.username)] },
+      { name: "due", label: "해소 기한", type: "date", value: thisWeek }], { submit: "등록" });
     if (!v) return;
     try { await save("constraint", { code: b.dataset.con, ...v, status: "미해결" }); reload(); } catch (e) { toast(e.message); }
   }));
@@ -1614,10 +1676,10 @@ async function renderMembers(box, name) {
   box.innerHTML = `<div class="panel"><h3 style="margin-top:0">프로젝트 멤버 <span class="muted" style="font-size:13px">${esc(name)}</span></h3>
     <p class="muted">이 프로젝트는 모든 사용자가 볼 수 있고, 아래 멤버(와 관리자)만 편집할 수 있습니다. 소유자는 멤버를 관리하고 업로드를 삭제할 수 있습니다.</p>
     <table class="t" data-noexport><thead><tr><th>사용자</th><th>프로젝트 역할</th><th>지정</th><th></th></tr></thead><tbody>
-    ${ms.map((m) => `<tr><td><b>${esc(m.username)}</b></td><td>${ctx.canManage ? `<select class="s sm" data-mrole="${esc(m.username)}">${["owner", "member"].map((x) => `<option value="${x}" ${m.role === x ? "selected" : ""}>${roleKo[x]}</option>`).join("")}</select>` : roleKo[m.role]}</td>
+    ${ms.map((m) => `<tr><td><b>${esc(m.username)}</b></td><td>${ctx.canManage ? `<select class="s sm" data-mrole="${esc(m.username)}" aria-label="${esc(m.username)} 역할">${["owner", "member"].map((x) => `<option value="${x}" ${m.role === x ? "selected" : ""}>${roleKo[x]}</option>`).join("")}</select>` : roleKo[m.role]}</td>
       <td class="muted">${esc(m.added_by || "")} ${(m.added_at || "").slice(0, 10)}</td><td>${ctx.canManage ? `<button class="btn sm danger" data-mdel="${esc(m.username)}">제외</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="4" class="muted">멤버가 없습니다. 관리자만 편집할 수 있습니다.</td></tr>'}</tbody></table>
-    ${ctx.canManage ? `<div class="row" style="margin-top:8px"><select class="s" id="mAddU"><option value="">사용자 선택</option>${users.filter((u) => u.role !== "viewer" && !ms.some((m) => m.username === u.username)).map((u) => `<option>${esc(u.username)}</option>`).join("")}</select>
-      <select class="s" id="mAddR"><option value="member">멤버</option><option value="owner">소유자</option></select><button class="btn primary" id="mAdd">추가</button>
+    ${ctx.canManage ? `<div class="row" style="margin-top:8px"><select class="s" id="mAddU" aria-label="추가할 사용자"><option value="">사용자 선택</option>${users.filter((u) => u.role !== "viewer" && !ms.some((m) => m.username === u.username)).map((u) => `<option>${esc(u.username)}</option>`).join("")}</select>
+      <select class="s" id="mAddR" aria-label="추가할 역할"><option value="member">멤버</option><option value="owner">소유자</option></select><button class="btn primary" id="mAdd">추가</button>
       <span class="muted" style="font-size:12px">조회 전용(viewer) 계정은 멤버로 추가할 수 없습니다.</span></div>`
       : `<p class="muted">편집이 필요하면 소유자(${esc(ms.filter((m) => m.role === "owner").map((m) => m.username).join(", ") || "관리자")})에게 멤버 추가를 요청하세요.</p>`}</div>`;
   const reload = () => renderMembers(box, name);

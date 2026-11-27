@@ -110,6 +110,8 @@ async function openActivity(code) {
   box.innerHTML = `<h4>연결된 리스크 (${rk.length})</h4>${rk.map((x) => `<div class="mini">${esc(x.title)} · ${x.prob}% · ${x.impact_ml}일</div>`).join("") || '<div class="muted">없음</div>'}
     <h4>제약 (${cs.length})</h4>${cs.map((x) => `<div class="mini">${esc(x.type)} · ${esc(x.desc)} · ${esc(x.status)} ${x.due || ""}</div>`).join("") || '<div class="muted">없음</div>'}
     <h4>직전 업데이트 대비 변경 (${ch.length})</h4>${ch.map((x) => `<div class="mini">${esc(x.category)}: ${esc(x.before)} → ${esc(x.after)}</div>`).join("") || '<div class="muted">없음</div>'}`;
+  box.insertAdjacentHTML("beforeend", `<h4>코멘트</h4><div id="actComments"></div>`);
+  if (typeof commentThread === "function") commentThread(box.querySelector("#actComments"), ctx.uid, "activity:" + code, { compact: true });
 }
 document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-act]");
@@ -204,7 +206,7 @@ function addExportButtons(root) {
       const h = p.querySelector("h3")?.childNodes[0]?.textContent?.trim() || "표";
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([tableToCsv(t)], { type: "text/csv" }));
-      a.download = `${ctx.result?.name || "export"}_${h}_${ctx.result?.data_date || ""}.csv`; document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
+      a.download = `${ctx.result?.name || "export"}_${h}_${ctx.result?.data_date || ""}.csv`; a.hidden = true; document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
     };
     const bar = document.createElement("div"); bar.className = "export-bar"; bar.appendChild(b);
     const anchor = t.closest(".scroll") || t;

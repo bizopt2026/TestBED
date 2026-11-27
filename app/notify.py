@@ -21,12 +21,40 @@ def init() -> None:
 
 
 # ---------------------------------------------------------------- 알림
+NOTIFY_TYPES = {"access": "편집 권한 요청·결과", "member": "멤버 지정·해제", "new_update": "새 업데이트 업로드",
+                "mention": "코멘트 @멘션", "assigned": "담당자 지정", "review": "월간 점검 완료"}
+
+
+def _type_of(kind: str) -> str:
+    return "access" if kind.startswith("access") else kind
+
+
+def prefs(username: str) -> dict:
+    r = storage.rec_get("user_pref", username)
+    d = {"start_page": "home", "term_mode": "mixed", "notify": list(NOTIFY_TYPES)}
+    if r:
+        d.update({k: r[k] for k in ("start_page", "term_mode", "notify") if k in r})
+    return d
+
+
+def set_prefs(username: str, data: dict) -> dict:
+    cur = prefs(username)
+    if data.get("start_page") in ("home", "portfolio", "wizard", "field", "reports"):
+        cur["start_page"] = data["start_page"]
+    if data.get("term_mode") in ("mixed", "ko"):
+        cur["term_mode"] = data["term_mode"]
+    if isinstance(data.get("notify"), list):
+        cur["notify"] = [t for t in data["notify"] if t in NOTIFY_TYPES]
+    storage.rec_put("user_pref", username, cur, username, rid=username)
+    return cur
+
+
 def push(usernames, kind: str, text: str, link: str = "", exclude: str | None = None) -> None:
     init()
     now = datetime.now().isoformat(timespec="seconds")
     with storage.conn() as c:
         for u in dict.fromkeys(usernames):
-            if u and u != exclude:
+            if u and u != exclude and _type_of(kind) in prefs(u)["notify"]:
                 c.execute("INSERT INTO notifications VALUES (?,?,?,?,?,?,0)", (uuid.uuid4().hex[:12], u, kind, text[:300], link[:200], now))
 
 
