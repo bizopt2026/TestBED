@@ -130,7 +130,7 @@ def dcma_guide(uid: str, use_ai: bool = False, user: str = "") -> dict:
     guides = insights.dcma_guides(s, r["dcma"])
     out = {"guides": {str(k): v for k, v in guides.items()}, "narrative": None}
     if use_ai and ai.available():
-        cached = storage.get_extra(uid, "dcma_narrative")
+        cached = storage.get_extra(uid, "dcma_narrative:" + ai.pv("dcma_guide"))
         if cached:
             out["narrative"] = cached
             return out
@@ -143,7 +143,7 @@ def dcma_guide(uid: str, use_ai: bool = False, user: str = "") -> dict:
                   f"규칙 기반 가이드: {guides}")
         text, usage = ai.complete(SYSTEM_BASE, prompt, effort="medium")
         storage.log_ai(uid, "dcma_guide", user, usage, 0, True)
-        storage.set_extra(uid, "dcma_narrative", text)
+        storage.set_extra(uid, "dcma_narrative:" + ai.pv("dcma_guide"), text)
         out["narrative"] = text
     return out
 
@@ -1185,7 +1185,7 @@ def why_ai(uid: str, key: str, user: str = "") -> dict:
     if not k:
         raise KeyError(key)
     rule = (s["why"].get(key) or {}).get("text", "")
-    cache_key = f"why_ai:{key}"
+    cache_key = f"why_ai:{key}:{ai.pv('why')}"
     cached = storage.get_extra(uid, cache_key)
     if cached:
         return {"text": cached, "cached": True}

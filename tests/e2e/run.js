@@ -103,6 +103,9 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
       await visual(p, "login");
       await ctx2.close();
     });
+    await step("PMS 현장 이름 표시", async () => {
+      await alice.waitForFunction(() => document.querySelector(".top .pms-name")?.textContent === "PMS 현장" && document.title === "PMS 현장");
+    });
     await step("빈 홈 화면", async () => { await alice.goto(`${BASE}/#/`); await alice.waitForSelector(".panel.empty"); await a11y(alice, "빈 홈"); });
     await step("업로드 → 상황판", async () => {
       await alice.click("#btnUpload");
@@ -236,7 +239,10 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
       await alice.click("#kpiCfg"); await alice.uncheck('#kpiList [data-k="neg"]'); await alice.click("#fKpi button[value=ok]");
       await alice.waitForFunction(() => document.querySelectorAll(".kpis .kpi").length === 5);
       await alice.goto(`${BASE}/#/p/${uid}/settings`); await alice.click('.seg-tabs button:has-text("상태 기준")');
-      await alice.fill('[data-th="spi_warn"]', "0.95"); await alice.click("#thSave");
+      await alice.waitForSelector('[data-th="spi_warn"]:disabled', { timeout: 8000 });   // 관리자가 아니면 조회 전용
+      const admTmp = await login(browser, "admin");
+      await admTmp.evaluate(() => api("/api/admin/thresholds", { method: "PUT", json: { spi_warn: 0.95 } }));
+      await admTmp.context().close();
       await alice.goto(`${BASE}/#/p/${uid}/overview`); await alice.waitForSelector(".sit.warn");
     });
     await step("리스크 표에서 바로 고치기 + 작업 ID 자동완성", async () => {
@@ -270,7 +276,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
     });
     await step("관리자 사용 현황", async () => {
       const adm = await login(browser, "admin");
-      await adm.goto(`${BASE}/#/admin`); await adm.waitForSelector("#adminUsage .hbar");
+      await adm.goto(`${BASE}/#/admin`); await adm.waitForSelector("#adminUsage .hbar"); await adm.waitForSelector("#pmsPolicy [data-aip]");
       await a11y(adm, "관리");
     });
     await step("Ctrl+K 명령: 리스크 추가", async () => {
@@ -396,7 +402,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
   // ---- 데이터 화면 기준 이미지 비교: 날짜를 고정한 별도 서버(계정 없음) + 교육용 샘플
   {
     const VPORT = PORT + 1, VB = `http://127.0.0.1:${VPORT}`;
-    const vsrv = await startServer(VPORT, { APP_TODAY: "2026-04-15" }, false);
+    const vsrv = await startServer(VPORT, { APP_TODAY: "2026-04-15", PMS_EDITION: "server" }, false);   // PMS 대시보드 판
     const vb = await chromium.launch();
     try {
       const page = async (viewport = { width: 1440, height: 900 }, dark = false, fixClock = true) => {

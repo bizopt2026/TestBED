@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from urllib.parse import unquote
 
-from . import access, ai, auth as auth_mod, notify, services, storage, workflow
+from . import access, ai, auth as auth_mod, edition, notify, services, storage, workflow
 from .analysis import analyze
 from .changes import ChangeError
 from .schedule import Schedule, list_projects
@@ -70,6 +70,8 @@ def _project_of(method: str, path: str) -> str | None:
 def _required_role(method: str, path: str) -> str:
     if any(path.startswith(p) for p in ADMIN_ONLY):
         return "admin"
+    if re.search(r"/thresholds$", path) and method != "GET":   # 이슈 판정 기준은 관리자만 (PMS 결정)
+        return "admin"
     if path.startswith("/api/settings/team"):
         return "admin" if method != "GET" else "viewer"
     if method == "GET" or (method == "POST" and path.endswith(VIEWER_POST)) or SOCIAL.match(path) \
@@ -113,6 +115,8 @@ async def security(request: Request, call_next):
                 return JSONResponse({"detail": f"'{proj}' 프로젝트에 대한 쓰기 권한이 없습니다. 프로젝트 소유자나 관리자에게 멤버 추가를 요청하세요."},
                                     status_code=403)
     request.state.user = user
+    m = re.match(r"^/api/uploads/([^/]+)", path)
+    ai.set_scope(storage.name_of(m.group(1)) if m else None)   # 프로젝트별 AI 사용 정책
     resp = await call_next(request)
     if request.method in ("POST", "PUT", "DELETE") and not path.endswith(VIEWER_POST):
         storage.audit(user["username"], request.method, path, resp.status_code)
@@ -134,7 +138,7 @@ def _user(request: Request) -> str:
 def config():
     from . import mpp_convert
     return {"mpp": mpp_convert.available(), "token_required": bool(APP_TOKEN) and not auth_mod.users_exist(), "login_required": auth_mod.users_exist(),
-            "ai": ai.status()["enabled"], "version": _version_label()}
+            "ai": ai.status()["enabled"], "version": _version_label(), **edition.config()}
 
 
 _VER = None
@@ -436,7 +440,9 @@ async def _ai_failed(_: Request, e: Exception):
 
 
 @app.get("/api/ai/status", dependencies=[Depends(auth)])
-def ai_status():
+def ai_status(uid: str | None = None):
+    if uid:
+        ai.set_scope(storage.name_of(uid))
     return {**ai.status(), "usage": storage.ai_usage()}
 
 
@@ -1671,3 +1677,35 @@ def update_rollback(user: str = Depends(_user)):
         raise HTTPException(400, str(e))
     r["restarting"] = updater.restart_later()
     return r
+
+
+
+# ============================================================ PMS P0: 전사 이슈 기준·프로젝트별 AI 정책 (관리자)
+@app.get("/api/admin/thresholds")
+def team_thresholds():
+    return {"values": storage.setting("*", "status_thresholds", {}) or {}, "defaults": workflow.TH_DEFAULT}
+
+
+@app.put("/api/admin/thresholds")
+def put_team_thresholds(body: dict = Body(...), user: str = Depends(_user)):
+    try:
+        v = workflow.clean_thresholds(body)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "숫자로 입력하세요")
+    storage.set_setting("*", "status_thresholds", v, user)
+    return {"values": v}
+
+
+@app.get("/api/admin/ai-policy")
+def ai_policies():
+    return [{"project": p["name"], "policy": storage.setting(p["name"], "ai_policy", "allow") or "allow"} for p in storage.latest_by_project()]
+
+
+@app.put("/api/admin/ai-policy")
+def put_ai_policy(body: dict = Body(...), user: str = Depends(_user)):
+    name, pol = str(body.get("project") or ""), body.get("policy")
+    if pol not in ("allow", "forbid") or not access.project_exists(name):
+        raise HTTPException(400, "프로젝트와 정책(allow/forbid)을 확인하세요")
+    storage.set_setting(name, "ai_policy", pol, user)
+    storage.audit(user, "PUT", "/api/admin/ai-policy", 200, f"{name}: {pol}")
+    return {"project": name, "policy": pol}

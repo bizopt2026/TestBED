@@ -158,7 +158,7 @@ showLogin = function () {
   document.body.classList.add("login-screen");
   const w = document.createElement("div"); w.className = "login-wrap"; w.id = "loginWrap"; w.setAttribute("role", "main");
   w.innerHTML = `<div class="login-art"><div><div class="brand" style="display:flex;align-items:center;gap:10px;font-weight:750;font-size:17px">
-      <span class="logo" style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.16);display:grid;place-items:center">${icon("gantt", 18)}</span>공정관리 분석기</div></div>
+      <span class="logo" style="width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.16);display:grid;place-items:center">${icon("gantt", 18)}</span><span class="pms-name">${esc(window.PMS?.edition_name || "PMS")}</span></div></div>
     <div><h1>공정표를 올리면<br>상황이 한눈에 보입니다</h1><p>P6·MS Project 공정표의 CPM 재계산, 품질 점검, 지연 원인, 리스크와 만회안, 월간 보고까지 팀이 함께 씁니다.</p>
       <div class="feat"><div>${icon("gauge")} 상황판과 '왜?' 해석</div><div>${icon("wand")} 월간 점검 팀 기록</div><div>${icon("folder")} 보고서 센터·확정본</div></div></div>
     <div style="font-size:12px;opacity:.7">사내 전용 · 데이터는 이 서버에만 저장됩니다</div>

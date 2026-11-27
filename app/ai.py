@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import shutil
@@ -57,17 +58,55 @@ def set_runner(fn) -> None:
     _runner = fn
 
 
-def available() -> bool:
-    if _runner is not None:
+# ---- PMS: 요청이 속한 프로젝트(AI 사용 정책 확인용)와 기능별 프롬프트 버전
+_scope: contextvars.ContextVar = contextvars.ContextVar("ai_scope", default=None)
+PROMPT_VERSION = {"chat": 1, "classify": 1, "dcma_guide": 1, "rel_suggest": 1, "daily_extract": 1, "report": 1,
+                  "risk_extract": 1, "generate_schedule": 1, "why": 1}
+
+
+def pv(feature: str) -> str:
+    """결과 저장 키에 붙이는 프롬프트 버전 꼬리표 (프롬프트를 바꾸면 버전을 올려 이전 저장분을 무효화)."""
+    return f"v{PROMPT_VERSION.get(feature, 1)}"
+
+
+def set_scope(project: str | None):
+    return _scope.set(project)
+
+
+def project_allowed(project: str | None) -> bool:
+    if not project:
         return True
-    if PROVIDER == "off":
-        return False
-    return bool(shutil.which(CLAUDE_BIN) or os.path.exists(CLAUDE_BIN))
+    from . import storage
+    return (storage.setting(project, "ai_policy", "allow") or "allow") != "forbid"
+
+
+def blocked_reason() -> str | None:
+    """AI를 쓸 수 없는 이유 (쓸 수 있으면 None)."""
+    from . import edition
+    if not project_allowed(_scope.get()):
+        return "이 프로젝트는 관리자가 AI 사용을 금지했습니다 (계약상 외부 전송 제한)"
+    if _runner is not None:
+        return None
+    where, note = edition.ai_route()
+    if where == "off" or PROVIDER == "off":
+        return "AI가 꺼져 있습니다"
+    if where == "gateway":
+        return "AI는 PMS 대시보드에서 실행하도록 설정되어 있습니다. 서버 AI 게이트웨이(P2)가 준비되면 켜집니다"
+    if not (shutil.which(CLAUDE_BIN) or os.path.exists(CLAUDE_BIN)):
+        return "이 컴퓨터에 Claude CLI가 설치·로그인되어 있지 않습니다"
+    return None
+
+
+def available() -> bool:
+    return blocked_reason() is None
 
 
 def status() -> dict:
-    return {"enabled": available(), "provider": "Claude CLI" if PROVIDER != "off" else "off",
-            "model": MODEL or "CLI 기본값", "model_bulk": MODEL_BULK or "CLI 기본값", "bin": CLAUDE_BIN}
+    from . import edition
+    reason = blocked_reason()
+    return {"enabled": reason is None, "reason": reason, "provider": "Claude CLI" if PROVIDER != "off" else "off",
+            "model": MODEL or "CLI 기본값", "model_bulk": MODEL_BULK or "CLI 기본값", "bin": CLAUDE_BIN,
+            "route": edition.ai_route()[0], "route_note": edition.ai_route()[1]}
 
 
 def _exec(args: list[str], prompt: str) -> dict:

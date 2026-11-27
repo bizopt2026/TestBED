@@ -1,7 +1,16 @@
-# 공정관리 분석기 (XER 기반)
+# PMS — 공정관리 시스템 (PMS 현장 · PMS 대시보드)
 
-Primavera P6에서 내보낸 **XER 파일을 업로드하면 공정표를 다시 계산(CPM)하고 분석**하는 팀 공유 웹앱입니다.
-업로드한 결과는 서버에 저장되어 팀원 모두가 같은 화면을 봅니다.
+Primavera P6 XER·MS Project 공정표를 올리면 **공정표를 다시 계산(CPM)하고 분석**하는 공정관리 시스템입니다.
+같은 프로그램을 두 판으로 씁니다.
+
+| 판 | 설정 | 용도 |
+|---|---|---|
+| **PMS 현장** | `PMS_EDITION=client` (기본) | 내 프로젝트 공정관리 (현장·공무 PC). `start_windows.bat` |
+| **PMS 대시보드** | `PMS_EDITION=server` | 본사 현황·이슈 인지, 프로젝트 공유 저장소 (사내 서버). `docker compose up` 또는 `start_dashboard_windows.bat` |
+
+- AI 실행 위치 `PMS_AI_MODE`: `server`(기본, PMS 대시보드에서만 실행) · `local` · `auto` · `off`. PMS 대시보드에 연결하지 않은 단독 실행 PMS 현장은 이 PC의 Claude CLI를 씁니다.
+- 이슈 판정 기준(전사)과 프로젝트별 AI 사용 허용·금지는 **관리자만** 관리 화면에서 바꿉니다.
+- 2버전 설계: [`docs/PMS-설계.md`](docs/PMS-설계.md) — 현재 **P0(판 구분·명칭·AI 정책)** 완료, 다음은 P1(`.pms` 패키지 공유)
 
 ## 주요 기능
 

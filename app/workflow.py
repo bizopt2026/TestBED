@@ -260,6 +260,7 @@ TH_DEFAULT = {"margin_bad": 0, "margin_warn": None, "health_bad": None, "health_
 
 def thresholds(name: str) -> dict:
     t = dict(TH_DEFAULT)
+    t.update({k: v for k, v in (storage.setting("*", "status_thresholds", {}) or {}).items() if k in TH_DEFAULT})   # 전사 기본값(관리자)
     t.update({k: v for k, v in (storage.setting(name, "status_thresholds", {}) or {}).items() if k in TH_DEFAULT})
     return t
 

@@ -194,7 +194,12 @@ const TAB_GROUP = Object.fromEntries(GROUPS.flatMap(([g, ts]) => ts.map(([k]) =>
 const TAB_LABEL = Object.fromEntries(GROUPS.flatMap(([, ts]) => ts));
 const TAB_ALIAS = { dcma: "health", delay: "analysis", forensic: "analysis", predict: "risk", chat: "overview" };
 let aiStatus = null;
-async function getAiStatus() { if (!aiStatus) aiStatus = await api("/api/ai/status"); return aiStatus; }
+const aiStatusByUid = {};
+async function getAiStatus() {   // 프로젝트별 AI 사용 정책을 반영 (관리자가 금지한 프로젝트는 꺼짐)
+  const k = ctx.uid || "*";
+  if (!aiStatusByUid[k]) aiStatusByUid[k] = await api(`/api/ai/status${ctx.uid ? `?uid=${ctx.uid}` : ""}`);
+  return aiStatusByUid[k];
+}
 
 async function load(uid) {
   if (!cache[uid]) cache[uid] = await api(`/api/uploads/${uid}`);
@@ -1005,7 +1010,7 @@ function md(src) {
 }
 
 function aiOffNote(st) {
-  return st.enabled ? "" : `<div class="panel warn">AI가 설정되지 않아 규칙 기반 결과만 표시합니다. 서버에 <code>ANTHROPIC_API_KEY</code>(또는 <code>AI_PROVIDER=bedrock</code>)를 설정하면 AI 기능이 켜집니다.</div>`;
+  return st.enabled ? "" : `<div class="panel warn">AI를 쓸 수 없어 규칙 기반 결과만 표시합니다. ${esc(st.reason || "")}</div>`;
 }
 
 // ---------------------------------------------------------------- ① AI 어시스턴트

@@ -310,3 +310,10 @@ def usage_stats(days: int = 90) -> list[dict]:
         rows = c.execute("SELECT screen, SUM(n) views, COUNT(DISTINCT username) users FROM usage WHERE day >= ? "
                          "GROUP BY screen ORDER BY views DESC", (since,)).fetchall()
     return [dict(r) for r in rows]
+
+
+def name_of(uid: str) -> str | None:
+    """업로드 ID → 프로젝트 이름 (결과 JSON 을 읽지 않는 가벼운 조회)."""
+    with conn() as c:
+        r = c.execute("SELECT name FROM uploads WHERE id=?", (uid,)).fetchone()
+    return r["name"] if r else None

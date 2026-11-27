@@ -209,7 +209,7 @@ async function showMe() {
     if (e.target.checked) {
       const perm = await Notification.requestPermission().catch(() => "denied");
       if (perm !== "granted") { e.target.checked = false; toast("브라우저에서 알림이 허용되지 않았습니다"); return; }
-      new Notification("공정관리 분석기", { body: "바탕화면 알림을 켰습니다" });
+      new Notification(window.PMS?.edition_name || "PMS", { body: "바탕화면 알림을 켰습니다" });
     }
     store.set("deskNotify", e.target.checked ? "1" : "0"); saved();
   };
@@ -300,7 +300,7 @@ pollNotifications = async function () {
     const seen = new Set(JSON.parse(store.get("deskSeen", "[]")));
     const first = !store.get("deskSeen");
     n.items.filter((x) => !x.read && !seen.has(x.id)).slice(0, 3).forEach((x) => {
-      if (!first) { const no = new Notification("공정관리 분석기", { body: x.text, tag: x.id }); no.onclick = () => { window.focus(); if (x.link) location.hash = x.link.replace(/^#/, "#"); no.close(); }; }
+      if (!first) { const no = new Notification(window.PMS?.edition_name || "PMS", { body: x.text, tag: x.id }); no.onclick = () => { window.focus(); if (x.link) location.hash = x.link.replace(/^#/, "#"); no.close(); }; }
       seen.add(x.id);
     });
     n.items.forEach((x) => seen.add(x.id));

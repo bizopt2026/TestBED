@@ -6,6 +6,9 @@ services:
     volumes:
       - ./data:/data
     environment:
+      # PMS 판: server = PMS 대시보드(본사, 기본), client = PMS 현장
+      PMS_EDITION: ${PMS_EDITION:-server}
+      PMS_AI_MODE: ${PMS_AI_MODE:-server}
       # 팀 접근 토큰 (비우면 인증 없음). 예: APP_TOKEN=my-team-secret
       APP_TOKEN: ${APP_TOKEN:-}
       MAX_UPLOAD_MB: "100"

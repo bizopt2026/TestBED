@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 공정관리 분석기 - macOS / Linux 설치 (처음 한 번만 실행)
+# PMS - macOS / Linux 설치 (처음 한 번만 실행, PMS 현장·PMS 대시보드 공통)
 set -e
 cd "$(dirname "$0")"
 PY=$(command -v python3 || command -v python || true)

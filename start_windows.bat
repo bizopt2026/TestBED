@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 rem ============================================================
-rem  공정관리 분석기 - 실행 (창을 닫으면 종료됩니다)
+rem  PMS 현장 - 실행 (창을 닫으면 종료됩니다)
 rem  시작할 때 GitHub 에 새 버전이 있는지 확인하고, 있으면 업데이트합니다.
 rem  (확인을 끄려면: set UPDATE_CHECK=0)
 rem ============================================================
@@ -19,6 +19,7 @@ if not defined AI_PROVIDER (
 rem 같은 네트워크의 동료도 접속하게 하려면 다음 줄의 127.0.0.1 을 0.0.0.0 으로 바꾸세요.
 set "HOST=127.0.0.1"
 set "APP_LAUNCHER=1"
+if not defined PMS_EDITION set "PMS_EDITION=client"
 
 %PY% -m app.updater version
 if /i not "%UPDATE_CHECK%"=="0" (
@@ -30,7 +31,7 @@ if /i not "%UPDATE_CHECK%"=="0" (
 )
 
 echo.
-echo 공정관리 분석기를 시작합니다:  http://localhost:%PORT%
+echo PMS 현장을 시작합니다:  http://localhost:%PORT%
 echo (이 창을 닫으면 프로그램이 종료됩니다)
 start "" cmd /c "timeout /t 4 >nul & start http://localhost:%PORT%"
 :run
