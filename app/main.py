@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from urllib.parse import unquote
 
-from . import access, ai, auth as auth_mod, services, storage
+from . import access, ai, auth as auth_mod, notify, services, storage, workflow
 from .analysis import analyze
 from .changes import ChangeError
 from .schedule import Schedule, list_projects
@@ -27,11 +27,14 @@ app = FastAPI(title="공정관리 XER 분석기")
 storage.init()
 auth_mod.bootstrap_from_env()
 access.init()
+notify.init()
+from fastapi.middleware.gzip import GZipMiddleware  # noqa: E402
+app.add_middleware(GZipMiddleware, minimum_size=2000)   # 대형 분석 결과(수 MB) 전송량 축소
 SECURE_COOKIE = os.environ.get("SECURE_COOKIE", "0") == "1"
 
 PUBLIC = {"/api/config", "/api/login", "/api/logout", "/api/me"}
 # 조회 권한(viewer)으로도 허용되는 계산 전용 POST
-VIEWER_POST = ("/whatif", "/recovery", "/api/reports/render")
+VIEWER_POST = ("/whatif", "/recovery", "/api/reports/render", "/api/reports/preview")
 ADMIN_ONLY = ("/api/admin/",)
 
 
@@ -115,6 +118,11 @@ async def security(request: Request, call_next):
 
 def auth():  # 인증·권한은 미들웨어에서 처리 (하위 호환용)
     return None
+
+
+def _user(request: Request) -> str:
+    u = getattr(request.state, "user", None)
+    return (u or {}).get("username", "")
 
 
 @app.get("/api/config")
@@ -217,10 +225,25 @@ async def upload(request: Request, file: UploadFile = File(...), uploader: str =
                                     uploader.strip() or "익명", note.strip(), raw, result))
             if is_new and auth_mod.users_exist():
                 access.claim_new(result["name"], request.state.user["username"])
+            if import_report:
+                storage.set_extra(ids[-1], "import_report", import_report)
+            if not is_new and auth_mod.users_exist():
+                notify.push(notify.project_people(result["name"]), "new_update",
+                            f"'{result['name']}' 새 업데이트(DD {result['data_date']})를 {request.state.user['username']} 님이 올렸습니다",
+                            f"#/wizard/{ids[-1]}", exclude=request.state.user["username"])
         if not ids:
             raise ValueError("분석 가능한 프로젝트(액티비티 포함)가 없습니다")
     except ValueError as e:
         raise HTTPException(400, str(e))
+    import threading
+
+    def warm(xs):  # ⑰ 무거운 지표(건전성 점수)를 미리 계산해 첫 화면을 빠르게
+        for x in xs:
+            try:
+                services.health_score(x)
+            except Exception:
+                pass
+    threading.Thread(target=warm, args=(list(ids),), daemon=True).start()
     return {"ids": ids, "import_report": import_report}
 
 
@@ -231,10 +254,18 @@ def uploads():
 
 @app.get("/api/uploads/{uid}", dependencies=[Depends(auth)])
 def get_upload(uid: str, request: Request):
-    d = storage.get(uid)
-    if not d:
+    import hashlib as _h
+    with storage.conn() as c:
+        row = c.execute("SELECT length(result) n, finish FROM uploads WHERE id=?", (uid,)).fetchone()
+    if not row:
         raise HTTPException(404, "없는 데이터입니다")
+    user = getattr(request.state, "user", {}) or {}
+    etag = '"' + _h.md5(f"{uid}:{row['n']}:{row['finish']}:{user.get('username')}:{user.get('role')}".encode()).hexdigest() + '"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag})
+    d = storage.get(uid)
     d.pop("raw", None)
+    d["_etag"] = etag
     if auth_mod.users_exist():
         u = request.state.user
         d["my_role"] = access.project_role(u, d["name"])
@@ -242,14 +273,17 @@ def get_upload(uid: str, request: Request):
         d["can_manage"] = d["my_role"] in ("admin", "owner")
     else:
         d.update({"my_role": "admin", "can_write": True, "can_manage": True})
-    return d
+    etag = d.pop("_etag")
+    return JSONResponse(d, headers={"ETag": etag, "Cache-Control": "private, no-cache"})
 
 
 @app.delete("/api/uploads/{uid}", dependencies=[Depends(auth)])
-def delete_upload(uid: str):
-    if not storage.delete(uid):
+def delete_upload(uid: str, user: str = Depends(_user)):
+    if not storage.get_raw(uid):
         raise HTTPException(404, "없는 데이터입니다")
-    return {"ok": True}
+    tid = notify.delete_upload(uid, user)
+    services._tables.cache_clear()
+    return {"ok": True, "trash_id": tid}
 
 
 @app.get("/api/uploads/{uid}/xer", dependencies=[Depends(auth)])
@@ -364,9 +398,6 @@ async def _ai_failed(_: Request, e: Exception):
     return JSONResponse({"detail": str(e)}, status_code=502)
 
 
-def _user(request: Request) -> str:
-    u = getattr(request.state, "user", None)
-    return (u or {}).get("username", "")
 
 
 @app.get("/api/ai/status", dependencies=[Depends(auth)])
@@ -420,10 +451,10 @@ def save_scenario(uid: str, body: dict = Body(...), user: str = Depends(_user)):
 
 
 @app.delete("/api/scenarios/{sid}", dependencies=[Depends(auth)])
-def delete_scenario(sid: str):
-    if not storage.delete_scenario(sid):
+def delete_scenario(sid: str, user: str = Depends(_user)):
+    if not storage.get_scenario(sid):
         raise HTTPException(404)
-    return {"ok": True}
+    return {"ok": True, "trash_id": notify.delete_scenario(sid, user)}
 
 
 @app.get("/api/uploads/{uid}/rel_suggest", dependencies=[Depends(auth)])
@@ -598,12 +629,11 @@ def add_risk(uid: str, body: dict = Body(...), user: str = Depends(_user)):
 
 
 @app.delete("/api/uploads/{uid}/risks/{rid}")
-def del_risk(uid: str, rid: str):
+def del_risk(uid: str, rid: str, user: str = Depends(_user)):
     r = storage.rec_get("risk", rid)
     if not r or r["scope"] != _name(uid):
         raise HTTPException(404)
-    storage.rec_del("risk", rid)
-    return {"ok": True}
+    return {"ok": True, "trash_id": notify.delete_record("risk", rid, user)}
 
 
 @app.post("/api/uploads/{uid}/risks/extract")
@@ -646,12 +676,11 @@ def add_baseline(uid: str, body: dict = Body(...), user: str = Depends(_user)):
 
 
 @app.delete("/api/uploads/{uid}/baselines/{bid}")
-def del_baseline(uid: str, bid: str):
+def del_baseline(uid: str, bid: str, user: str = Depends(_user)):
     r = storage.rec_get("baseline", bid)
     if not r or r["scope"] != _name(uid):
         raise HTTPException(404)
-    storage.rec_del("baseline", bid)
-    return {"ok": True}
+    return {"ok": True, "trash_id": notify.delete_record("baseline", bid, user)}
 
 
 @app.get("/api/uploads/{uid}/variance")
@@ -724,12 +753,11 @@ def put_record(uid: str, kind: str, body: dict = Body(...), user: str = Depends(
 
 
 @app.delete("/api/uploads/{uid}/records/{kind}/{rid}")
-def del_record(uid: str, kind: str, rid: str):
+def del_record(uid: str, kind: str, rid: str, user: str = Depends(_user)):
     r = storage.rec_get(kind, rid)
     if kind not in ("commit", "constraint") or not r or r["scope"] != _name(uid):
         raise HTTPException(404)
-    storage.rec_del(kind, rid)
-    return {"ok": True}
+    return {"ok": True, "trash_id": notify.delete_record(kind, rid, user)}
 
 
 # ---- 엑셀 양식 리포트
@@ -788,8 +816,75 @@ async def upload_template(request: Request, file: UploadFile = File(...), name: 
     fid = storage.file_put(TPL_SCOPE, "template", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", raw, user)
     nm = (name or re.sub(r"\.xlsx$", "", file.filename or "양식", flags=re.I)).strip()[:60]
     summary = {"fields": len(sc["found"]), "lists": sc["lists"], "sheets": sc["sheets"], "unknown": sc["unknown"][:50]}
-    rid = storage.rec_put("report_tpl", "*", {"name": nm, "desc": desc.strip()[:200], "file_id": fid, "size": len(raw), "scan": summary}, user)
-    return {"id": rid, "scan": summary}
+    from datetime import datetime as _dt
+    old = next((r for r in storage.rec_list("report_tpl", "*") if r["name"] == nm), None)
+    if old:  # 같은 이름이면 새 버전으로 저장하고 이전 버전 보관(최대 10개)
+        versions = (old.get("versions") or []) + [{"file_id": old["file_id"], "author": old.get("updated_by") or old["author"],
+                                                   "at": old["updated_at"], "size": old.get("size"), "fields": (old.get("scan") or {}).get("fields")}]
+        for v in versions[:-10]:
+            storage.file_del(v["file_id"])
+        rid = storage.rec_put("report_tpl", "*", {"name": nm, "desc": desc.strip()[:200] or old.get("desc", ""), "file_id": fid, "size": len(raw),
+                                                  "scan": summary, "versions": versions[-10:], "updated_by": user}, user, rid=old["id"])
+        return {"id": rid, "scan": summary, "version": len(versions[-10:]) + 1}
+    rid = storage.rec_put("report_tpl", "*", {"name": nm, "desc": desc.strip()[:200], "file_id": fid, "size": len(raw), "scan": summary,
+                                              "versions": [], "updated_by": user}, user)
+    return {"id": rid, "scan": summary, "version": 1}
+
+
+@app.get("/api/reports/templates/{tid}/versions")
+def template_versions(tid: str):
+    r = storage.rec_get("report_tpl", tid)
+    if not r:
+        raise HTTPException(404)
+    cur = {"file_id": r["file_id"], "current": True, "author": r.get("updated_by"), "size": r.get("size"),
+           "fields": (r.get("scan") or {}).get("fields")}
+    return [cur] + list(reversed(r.get("versions") or []))
+
+
+@app.post("/api/reports/templates/{tid}/restore")
+def template_restore(tid: str, request: Request, body: dict = Body(...)):
+    from . import xlsx_report
+    r = storage.rec_get("report_tpl", tid)
+    if not r:
+        raise HTTPException(404)
+    vs = r.get("versions") or []
+    v = next((x for x in vs if x["file_id"] == body.get("file_id")), None)
+    if not v:
+        raise HTTPException(404, "버전을 찾을 수 없습니다")
+    sc = xlsx_report.scan(storage.file_get(v["file_id"])["data"])
+    rest = [x for x in vs if x["file_id"] != v["file_id"]] + [{"file_id": r["file_id"], "author": r.get("updated_by"), "at": "", "size": r.get("size"),
+                                                               "fields": (r.get("scan") or {}).get("fields")}]
+    data = {k: r[k] for k in ("name", "desc") if k in r}
+    storage.rec_put("report_tpl", "*", {**data, "file_id": v["file_id"], "size": v.get("size"),
+                                        "scan": {"fields": len(sc["found"]), "lists": sc["lists"], "sheets": sc["sheets"], "unknown": sc["unknown"][:50]},
+                                        "versions": rest[-10:], "updated_by": request.state.user["username"]}, request.state.user["username"], rid=tid)
+    return {"ok": True}
+
+
+@app.post("/api/reports/preview")
+def report_preview(request: Request, body: dict = Body(...)):
+    """내려받기 전 미리보기: 시트별 앞부분 값과 경고·알 수 없는 필드 위치."""
+    import io as _io
+
+    import openpyxl
+    from . import xlsx_report
+    from .report_context import Context
+    tid, uid = str(body.get("template_id") or ""), str(body.get("upload_id") or "")
+    if not storage.get_raw(uid):
+        raise HTTPException(404, "프로젝트를 선택하세요")
+    raw, tname = _tpl_bytes(tid)
+    sc = xlsx_report.scan(raw)
+    out, warnings, stats = xlsx_report.render(raw, Context(uid, request.state.user["username"], False, body.get("base") or None))
+    wb = openpyxl.load_workbook(_io.BytesIO(out), data_only=False)
+    sheets = []
+    for ws in wb.worksheets[:12]:
+        mr, mc = min(ws.max_row, 60), min(ws.max_column, 14)
+        rows = []
+        for r in ws.iter_rows(min_row=1, max_row=mr, max_col=mc):
+            rows.append([("" if c.value is None else c.value.strftime("%Y-%m-%d") if hasattr(c.value, "strftime") else str(c.value))[:60] for c in r])
+        sheets.append({"name": ws.title, "rows": rows, "more_rows": max(0, ws.max_row - mr), "more_cols": max(0, ws.max_column - mc)})
+    return {"template": tname, "sheets": sheets, "warnings": warnings, "stats": stats,
+            "unknown": [{"sheet": u["sheet"], "cell": u["cell"], "expr": u["expr"]} for u in sc["unknown"]]}
 
 
 @app.delete("/api/reports/templates/{tid}")
@@ -822,7 +917,7 @@ def render_report(request: Request, body: dict = Body(...)):
         raise HTTPException(404, "프로젝트를 선택하세요")
     raw, tname = _tpl_bytes(tid)
     try:
-        out, warnings, stats = xlsx_report.render(raw, Context(uid, user["username"], use_ai))
+        out, warnings, stats = xlsx_report.render(raw, Context(uid, user["username"], use_ai, body.get("base") or None))
     except xlsx_report.TemplateError as e:
         raise HTTPException(400, str(e))
     r = services.result(uid)
@@ -869,12 +964,11 @@ def save_view(uid: str, body: dict = Body(...), user: str = Depends(_user)):
 
 
 @app.delete("/api/uploads/{uid}/views/{vid}")
-def del_view(uid: str, vid: str):
+def del_view(uid: str, vid: str, user: str = Depends(_user)):
     r = storage.rec_get("view", vid)
     if not r or r["scope"] != _name(uid):
         raise HTTPException(404)
-    storage.rec_del("view", vid)
-    return {"ok": True}
+    return {"ok": True, "trash_id": notify.delete_record("view", vid, user)}
 
 
 IMAGE_MAGIC = {b"\xff\xd8\xff": "image/jpeg", b"\x89PNG\r\n\x1a\n": "image/png", b"RIFF": "image/webp"}
@@ -1036,15 +1130,18 @@ def add_member(name: str, request: Request, body: dict = Body(...)):
         access.set_member(name, str(body.get("username", "")), str(body.get("role", "member")), request.state.user["username"])
     except ValueError as e:
         raise HTTPException(400, str(e))
+    notify.push([str(body.get("username", ""))], "member", f"'{name}' 프로젝트 {'소유자' if body.get('role') == 'owner' else '멤버'}로 지정되었습니다 ({request.state.user['username']})",
+                "#/projects", exclude=request.state.user["username"])
     return access.members(name)
 
 
 @app.delete("/api/projects/{name}/members/{username}")
-def del_member(name: str, username: str):
+def del_member(name: str, username: str, user: str = Depends(_user)):
     try:
         access.remove_member(name, username)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    notify.push([username], "member", f"'{name}' 프로젝트 편집 권한이 해제되었습니다 ({user})", "#/projects", exclude=user)
     return access.members(name)
 
 
@@ -1052,6 +1149,82 @@ def del_member(name: str, username: str):
 def user_names():
     """멤버 지정용 활성 사용자 목록(아이디·역할만)."""
     return [{"username": u["username"], "role": u["role"]} for u in auth_mod.list_users() if u["active"]]
+
+
+# ---- 상황판·준비도·월간 점검
+@app.get("/api/uploads/{uid}/situation")
+def situation(uid: str, base: str | None = None):
+    return workflow.situation(uid, base)
+
+
+@app.get("/api/uploads/{uid}/readiness")
+def readiness(uid: str):
+    return workflow.readiness(uid)
+
+
+@app.get("/api/uploads/{uid}/review")
+def review(uid: str, base: str | None = None):
+    return workflow.review(uid, base)
+
+
+# ---- 알림
+@app.get("/api/notifications")
+def notifications(user: str = Depends(_user)):
+    return notify.listing(user)
+
+
+@app.post("/api/notifications/read")
+def notifications_read(body: dict = Body(default={}), user: str = Depends(_user)):
+    notify.mark_read(user, body.get("ids"))
+    return {"ok": True}
+
+
+# ---- 편집 권한 요청
+@app.post("/api/projects/{name}/access-request")
+def access_request(name: str, request: Request, body: dict = Body(default={})):
+    u = request.state.user
+    if not auth_mod.users_exist():
+        raise HTTPException(400, "사용자 계정 모드가 아닙니다")
+    if not access.project_exists(name):
+        raise HTTPException(404)
+    if access.can_write(u, name):
+        raise HTTPException(400, "이미 편집 권한이 있습니다")
+    return {"id": notify.request_access(name, u["username"], str(body.get("message") or ""))}
+
+
+@app.get("/api/projects/{name}/access-requests")
+def access_requests(name: str, request: Request):
+    if not access.can_manage(request.state.user, name):
+        raise HTTPException(403, "소유자나 관리자만 볼 수 있습니다")
+    return notify.requests_for(name)
+
+
+@app.post("/api/projects/{name}/access-requests/{rid}")
+def decide_access(name: str, rid: str, request: Request, body: dict = Body(...)):
+    if not access.can_manage(request.state.user, name):
+        raise HTTPException(403, "소유자나 관리자만 처리할 수 있습니다")
+    try:
+        return notify.decide(name, rid, bool(body.get("approve")), request.state.user["username"], str(body.get("role") or "member"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+# ---- 휴지통(되돌리기)
+@app.post("/api/trash/{tid}/restore")
+def trash_restore(tid: str, request: Request):
+    t = notify.get(tid)
+    if not t:
+        raise HTTPException(404, "되돌릴 항목이 없습니다(보관 기간 7일)")
+    if auth_mod.users_exist() and t["project"] and not access.can_write(request.state.user, t["project"]):
+        raise HTTPException(403, "이 프로젝트에 대한 쓰기 권한이 없습니다")
+    out = notify.restore(tid)
+    services._tables.cache_clear()
+    return out
+
+
+@app.get("/api/trash")
+def trash_list(project: str | None = None):
+    return notify.recent(project)
 
 
 # ---- 관리자

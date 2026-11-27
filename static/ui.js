@@ -213,7 +213,7 @@ function addExportButtons(root) {
 }
 function enhance(root) {
   if (!root) return;
-  const run = () => { linkify(root); applyGlossary(root); addExportButtons(root); applyRole(root); };
+  const run = () => { linkify(root); applyGlossary(root); enhanceTables(root); applyRole(root); };
   run();
   if (root._obs) root._obs.disconnect();
   let t; root._obs = new MutationObserver(() => { clearTimeout(t); t = setTimeout(run, 60); });

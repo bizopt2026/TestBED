@@ -18,16 +18,18 @@ async function showReports(preUid) {
           <div><b>${esc(t.name)}</b> ${t.builtin ? '<span class="tag">기본 제공</span>' : ""}<div class="muted" style="font-size:12px">${esc(t.desc || "")}
           ${t.scan ? ` · 필드 ${t.scan.fields}개 · 표 ${t.scan.lists.length}개${t.scan.unknown?.length ? ` · <span style="color:var(--crit)">알 수 없는 필드 ${t.scan.unknown.length}</span>` : ""}` : ""}
           ${t.author ? ` · ${esc(t.author)}` : ""}</div></div>
-          <span class="row" style="gap:4px"><button class="btn sm" data-dl="${esc(t.id)}" title="양식 내려받기">⭳</button>${t.builtin ? "" : `<button class="btn sm danger" data-rm="${esc(t.id)}" data-need="editor" data-scope="global" title="삭제">✕</button>`}</span></label>`).join("")}</div>
+          <span class="row" style="gap:4px"><button class="btn sm" data-dl="${esc(t.id)}" title="양식 내려받기" aria-label="양식 내려받기">⭳</button>${t.builtin ? "" : `<button class="btn sm" data-ver="${esc(t.id)}" title="버전 기록" aria-label="버전 기록">이력</button>`}${t.builtin ? "" : `<button class="btn sm danger" data-rm="${esc(t.id)}" data-need="editor" data-scope="global" title="삭제">✕</button>`}</span></label>`).join("")}</div>
         <div class="row" style="margin-top:10px"><button class="btn primary" id="tplUp" data-need="editor" data-scope="global">+ 내 양식 올리기 (.xlsx)</button>
           <button class="btn" id="tplGuide">작성 방법</button></div></div>
       <div class="panel"><h3 style="margin-top:0">② 프로젝트 선택</h3>
         <label>프로젝트<select class="s" id="rpProj" style="width:100%">${Object.keys(projects).map((n) => `<option ${pre?.name === n ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
         <label style="display:block;margin-top:8px">업데이트(Data Date)<select class="s" id="rpUp" style="width:100%"></select></label>
+        <label style="display:block;margin-top:8px">비교 기준<select class="s" id="rpBase" style="width:100%"></select></label>
         <label class="chk" style="display:block;margin-top:10px"><input type="checkbox" id="rpAi" data-need="editor"> ✦ 요약 문장을 AI로 작성 <span class="muted" style="font-size:12px">(summary.* 필드, 서버 Claude CLI)</span></label>
         <p class="muted" style="font-size:12px">직전 업데이트 비교 값(prev.*, 지연 원인, 변경 로그)은 같은 프로젝트의 바로 이전 업데이트와 자동 비교합니다.</p></div>
       <div class="panel"><h3 style="margin-top:0">③ 생성</h3>
-        <button class="btn primary big" id="rpGo">엑셀 리포트 만들기</button>
+        <button class="btn big" id="rpPrev">미리보기</button>
+        <button class="btn primary big" id="rpGo" style="margin-top:8px">엑셀 리포트 만들기</button>
         <div id="rpOut" aria-live="polite" style="margin-top:10px"></div></div>
     </div>
     <div class="grid2">
@@ -39,8 +41,13 @@ async function showReports(preUid) {
         ${hist.slice(0, 15).map((h) => `<tr><td>${h.created_at.replace("T", " ").slice(5, 16)}</td><td>${esc(h.project)} <span class="muted">${h.data_date}</span></td><td>${esc(h.template)}</td><td>${esc(h.author)}</td><td class="num">${h.warnings?.length || ""}</td></tr>`).join("") || '<tr><td colspan="5" class="muted">아직 없습니다.</td></tr>'}</tbody></table></div>
     </div>`;
   applyRole(view);
-  const fillUps = () => { const xs = projects[$("#rpProj").value] || []; $("#rpUp").innerHTML = xs.map((u, i) => `<option value="${u.id}" ${u.id === preUid ? "selected" : ""}>${u.data_date} · ${esc(u.note || u.filename)}${i === 0 ? " (최신)" : ""}</option>`).join(""); };
-  fillUps(); $("#rpProj").onchange = fillUps;
+  const fillBase = () => {
+    const name = $("#rpProj").value, xs = projects[name] || [], cur = xs.find((u) => u.id === $("#rpUp").value);
+    $("#rpBase").innerHTML = `<option value="">직전 업데이트(자동)</option>` + xs.filter((u) => cur && u.data_date < cur.data_date).map((u) => `<option value="${u.id}" ${getBase(name) === u.id ? "selected" : ""}>${u.data_date} · ${esc(u.note || u.filename)}</option>`).join("");
+  };
+  const fillUps = () => { const xs = projects[$("#rpProj").value] || []; $("#rpUp").innerHTML = xs.map((u, i) => `<option value="${u.id}" ${u.id === preUid ? "selected" : ""}>${u.data_date} · ${esc(u.note || u.filename)}${i === 0 ? " (최신)" : ""}</option>`).join(""); fillBase(); };
+  fillUps(); $("#rpProj").onchange = fillUps; $("#rpUp").onchange = fillBase;
+  $("#rpBase").onchange = () => setBase($("#rpProj").value, $("#rpBase").value);
   view.querySelectorAll("input[name=tpl]").forEach((r) => (r.onchange = () => { store.set("rptTpl", r.value); view.querySelectorAll(".tpl").forEach((l) => l.classList.toggle("on", l.contains(r) && r.checked)); }));
   view.querySelectorAll("[data-dl]").forEach((b) => (b.onclick = (e) => { e.preventDefault(); download(`/api/reports/templates/${encodeURIComponent(b.dataset.dl)}/file`, "template.xlsx"); }));
   view.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = async (e) => {
@@ -48,13 +55,20 @@ async function showReports(preUid) {
     await api(`/api/reports/templates/${encodeURIComponent(b.dataset.rm)}`, { method: "DELETE" }); showReports(preUid);
   }));
   $("#tplUp").onclick = () => uploadTemplate(preUid);
+  view.querySelectorAll("[data-ver]").forEach((b) => (b.onclick = (e) => { e.preventDefault(); templateVersions(b.dataset.ver, preUid); }));
+  $("#rpPrev").onclick = async () => {
+    const tid = view.querySelector("input[name=tpl]:checked")?.value, uid = $("#rpUp").value;
+    if (!tid || !uid) return toast("양식과 프로젝트를 선택하세요");
+    const pv = await runLong("미리보기를 만드는 중", "xlsxprev", (signal) => api("/api/reports/preview", { method: "POST", signal, json: { template_id: tid, upload_id: uid, base: $("#rpBase").value || null } }));
+    if (pv) showPreview(pv);
+  };
   $("#tplGuide").onclick = () => templateGuide();
   $("#rpGo").onclick = async () => {
     const tid = view.querySelector("input[name=tpl]:checked")?.value, uid = $("#rpUp").value;
     if (!tid || !uid) return toast("양식과 프로젝트를 선택하세요");
     const useAi = $("#rpAi").checked;
     const res = await runLong(useAi ? "AI 문장 작성 후 양식을 채우는 중" : "양식을 채우는 중", "xlsx" + useAi, (signal) =>
-      api("/api/reports/render", { method: "POST", signal, json: { template_id: tid, upload_id: uid, ai: useAi } }));
+      api("/api/reports/render", { method: "POST", signal, json: { template_id: tid, upload_id: uid, ai: useAi, base: $("#rpBase").value || null } }));
     if (!res) return;
     const blob = await res.blob();
     const m = (res.headers.get("content-disposition") || "").match(/filename\*=UTF-8''([^;]+)/);
@@ -116,4 +130,36 @@ function templateGuide() {
     <li><b>차트</b>: 표가 채워질 범위(예: A5:D200)를 차트 데이터로 지정해 두면 열 때 자동으로 그려집니다.</li>
     <li><b>글자 그대로</b>: <code>\\{{</code>로 쓰면 자리표시자로 처리하지 않습니다.</li>
   </ol><p>가장 쉬운 방법은 <b>기본 제공 양식을 내려받아</b> 회사 서식으로 고치는 것입니다.</p>`);
+}
+
+
+function showPreview(pv) {
+  const unk = new Set(pv.unknown.map((u) => u.sheet + "!" + u.cell));
+  const colName = (i) => { let s = "", n = i + 1; while (n) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s; };
+  const d = _modal(`<div><div class="row" style="justify-content:space-between"><h3 style="margin:0">미리보기 · ${esc(pv.template)}</h3><button class="btn" value="x" onclick="this.closest('dialog').close()">닫기</button></div>
+    <p class="muted">값 ${pv.stats.values}개, 표 행 ${pv.stats.rows}개. 시트마다 앞부분(최대 60행 × 14열)만 보여 줍니다. 노란 칸은 알 수 없는 필드입니다.</p>
+    ${pv.warnings.length ? `<div class="panel warn"><b>확인할 점 ${pv.warnings.length}건</b><ul>${pv.warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>` : ""}
+    <div class="seg-tabs" role="tablist">${pv.sheets.map((s, i) => `<button role="tab" class="${i ? "" : "on"}" data-sh="${i}">${esc(s.name)}</button>`).join("")}</div>
+    ${pv.sheets.map((s, i) => `<div class="xl-sheet" data-shv="${i}" ${i ? "hidden" : ""}><div class="scroll"><table class="xl" data-noexport><thead><tr><th></th>${(s.rows[0] || []).map((_, c) => `<th>${colName(c)}</th>`).join("")}</tr></thead><tbody>
+      ${s.rows.map((row, r) => `<tr><th>${r + 1}</th>${row.map((v, c) => `<td class="${unk.has(s.name + "!" + colName(c) + (r + 1)) ? "unk" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
+      ${s.more_rows || s.more_cols ? `<p class="muted">… 이후 ${s.more_rows}행 / ${s.more_cols}열 더 있음</p>` : ""}</div>`).join("")}</div>`, { wide: true });
+  d.classList.add("xwide");
+  d.querySelectorAll("[data-sh]").forEach((b) => (b.onclick = () => {
+    d.querySelectorAll("[data-sh]").forEach((x) => x.classList.toggle("on", x === b));
+    d.querySelectorAll("[data-shv]").forEach((x) => (x.hidden = x.dataset.shv !== b.dataset.sh));
+  }));
+}
+
+async function templateVersions(tid, preUid) {
+  const vs = await api(`/api/reports/templates/${encodeURIComponent(tid)}/versions`);
+  const d = _modal(`<div><h3 style="margin-top:0">양식 버전 기록</h3><p class="muted">같은 이름으로 다시 올리면 새 버전이 되고, 이전 버전은 최대 10개까지 보관됩니다.</p>
+    <table class="t" data-noexport><thead><tr><th>버전</th><th>올린 사람</th><th>시각</th><th class="num">필드</th><th></th></tr></thead><tbody>
+    ${vs.map((v, i) => `<tr><td>${v.current ? "<b>현재</b>" : `v${vs.length - i}`}</td><td>${esc(v.author || "")}</td><td>${(v.at || "").replace("T", " ").slice(0, 16)}</td><td class="num">${v.fields ?? "-"}</td>
+      <td>${v.current ? "" : `<button class="btn sm" data-restore="${esc(v.file_id)}" data-need="editor" data-scope="global">이 버전으로 되돌리기</button>`}</td></tr>`).join("")}</tbody></table>
+    <div class="row end"><button class="btn" onclick="this.closest('dialog').close()">닫기</button></div></div>`);
+  applyRole(d);
+  d.querySelectorAll("[data-restore]").forEach((b) => (b.onclick = async () => {
+    await api(`/api/reports/templates/${encodeURIComponent(tid)}/restore`, { method: "POST", json: { file_id: b.dataset.restore } });
+    d.close(); toast("이전 버전으로 되돌렸습니다"); showReports(preUid);
+  }));
 }

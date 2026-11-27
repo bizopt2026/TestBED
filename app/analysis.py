@@ -124,21 +124,19 @@ def s_curve(s: Schedule) -> dict:
     step = max(1, (hi - lo) // 120)
     pts = list(range(lo, hi + step, step))
 
+    import numpy as np
+    T = np.array(pts, dtype=float)[:, None]
+
     def curve(span):
-        out = []
-        for t in pts:
-            v = 0.0
-            for a in acts:
-                rng = span(a)
-                if not rng:
-                    continue
-                a0, a1 = rng
-                if t >= a1:
-                    v += a.orig_dur
-                elif t > a0:
-                    v += a.orig_dur * (t - a0) / (a1 - a0)
-            out.append(round(100 * v / total, 2))
-        return out
+        rows = [(span(a), a.orig_dur) for a in acts]
+        rows = [(r[0], r[1], w) for r, w in rows if r]
+        if not rows:
+            return [0.0] * len(pts)
+        a0 = np.array([r[0] for r in rows], dtype=float)
+        a1 = np.array([r[1] for r in rows], dtype=float)
+        w = np.array([r[2] for r in rows], dtype=float)
+        frac = np.clip((T - a0) / np.maximum(a1 - a0, 1e-9), 0, 1)   # 시점별 작업 진척률(선형)
+        return [round(float(x), 2) for x in 100 * (frac @ w) / total]
 
     def bl(a):
         if a.target_start and a.target_end:

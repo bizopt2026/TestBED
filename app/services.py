@@ -831,6 +831,19 @@ def risk_extract(uid: str, text: str, user: str = "") -> list[dict]:
 
 
 def simulate(uid: str, iterations: int = 500, include_risks: bool = True, uncertainty: bool = True) -> dict:
+    """결과를 (리스크·옵션·반복수) 기준으로 캐시해 같은 조건의 재실행·리포트 생성을 즉시 반환."""
+    rs_now = [x for x in risks(uid) if x["status"] != "closed"] if include_risks else []
+    key = _hashlib.sha1(_json.dumps([iterations, include_risks, uncertainty, rs_now, sched_options(result(uid)["name"])],
+                                    sort_keys=True, default=str).encode()).hexdigest()
+    cached = storage.get_extra(uid, "sim_cache")
+    if cached and cached.get("key") == key:
+        return cached["data"]
+    out = _simulate(uid, iterations, include_risks, uncertainty)
+    storage.set_extra(uid, "sim_cache", {"key": key, "data": out})
+    return out
+
+
+def _simulate(uid: str, iterations: int = 500, include_risks: bool = True, uncertainty: bool = True) -> dict:
     s = schedule(uid)
     ranges = {}
     for t, r in _ratios().items():

@@ -102,6 +102,7 @@ async function route() {
     if (parts[0] === "reports") return await showReports(parts[1]);
     if (parts[0] === "projects") return await showProjectsAccess();
     if (parts[0] === "learn") return await showLearn(parts[1], parts[2]);
+    if (parts[0] === "wizard" && parts[1]) return await showWizard(parts[1]);
     if (parts[0] === "field" && parts[1]) return await showField(parts[1]);
     if (parts[0] === "print" && parts[1]) return await showPrint(parts[1]);
     return await showList();
@@ -125,7 +126,7 @@ async function showList() {
   view.innerHTML = `
   <div id="inbox"></div>
   <div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">포트폴리오</h2>
-    <div class="row"><a class="btn" href="#/projects">👥 프로젝트 권한</a><a class="btn" href="#/reports">📊 엑셀 리포트</a><a class="btn" href="#/learn">🎓 학습 센터</a><button class="btn" onclick="showGenerate()" data-need="editor">+ 새 공정표 만들기</button></div></div>
+    <div class="row"><button class="btn" onclick="showGenerate()" data-need="editor">+ 새 공정표 만들기</button></div></div>
   <div class="cards">${pf.sort((a, b) => JSON.parse(store.get("favs", "[]")).includes(b.name) - JSON.parse(store.get("favs", "[]")).includes(a.name)).map((p) => `<a class="card" data-name="${esc(p.name)}" href="#/p/${p.id}/overview">
       <div class="row" style="justify-content:space-between"><b>${esc(p.name)}</b><span class="muted" style="font-size:12px">DD ${p.data_date}</span></div>
       <div class="big">${p.finish}<span class="muted" style="font-size:12px"> 예상 준공</span></div>
@@ -170,9 +171,8 @@ async function showList() {
   $("#btnCmp").onclick = () => (location.hash = `#/cmp/${$("#cmpA").value}/${$("#cmpB").value}`);
   view.querySelectorAll("[data-del]").forEach((b) => (b.onclick = async () => {
     if (!(await ui.confirm("이 업로드를 삭제할까요? 팀 전체에서 사라집니다.", { ok: "삭제", danger: true }))) return;
-    await api(`/api/uploads/${b.dataset.del}`, { method: "DELETE" });
     delete cache[b.dataset.del];
-    toast("삭제되었습니다"); showList();
+    await deleteWithUndo(`/api/uploads/${b.dataset.del}`, "업로드", () => { uploadsCache = null; showList(); });
   }));
   view.querySelectorAll("[data-xer]").forEach((b) => (b.onclick = () => download(`/api/uploads/${b.dataset.xer}/xer`, "project.xer")));
 }
@@ -217,10 +217,14 @@ async function showProject(uid, tab) {
           <select class="s sm" id="upSel" aria-label="업데이트 선택">${same.map((x) => `<option value="${x.id}" ${x.id === uid ? "selected" : ""}>DD ${x.data_date} · ${esc(x.note || x.filename)}</option>`).join("")}</select>
           ${latest ? '<span class="chip ok">✓ 최신</span>' : '<span class="chip warn">! 최신 아님</span>'}
           <span class="chip">${r.options?.progress_override ? "Progress Override" : "Retained Logic"}</span>
-          <span>업로더 ${esc(u.uploader)}</span>
+          <label for="baseSel" class="muted">비교 기준</label>
+          <select class="s sm" id="baseSel" aria-label="비교 기준" title="업데이트 분석·상황판·리포트에 함께 적용">
+            <option value="">직전 업데이트(자동)</option>${same.filter((x) => x.id !== uid && x.data_date <= r.data_date).map((x) => `<option value="${x.id}" ${getBase(r.name) === x.id ? "selected" : ""}>DD ${x.data_date} · ${esc(x.note || x.filename)}</option>`).join("")}</select>
           ${ctx.canWrite ? `<span class="chip ok" title="이 프로젝트에서 편집할 수 있습니다">✎ ${roleLabel || "편집 가능"}</span>`
             : `<a class="chip warn" href="#/p/${uid}/settings" title="편집하려면 소유자에게 멤버 추가를 요청하세요">👁 읽기 전용</a>`}</div></div>
-      <div class="row"><a class="btn" href="#/field/${uid}" title="현장 모바일 화면">📱 현장 모드</a>
+      <div class="row">${ctx.canWrite ? "" : `<button class="btn" id="btnReqAccess">${icon("users")} 편집 권한 요청</button>`}
+        <a class="btn" href="#/wizard/${uid}" title="이번 달 업데이트를 단계별로 점검">${icon("wand")} 월간 점검</a>
+        <a class="btn" href="#/field/${uid}" title="현장 모바일 화면">📱 현장 모드</a>
         <button class="btn" id="btnHelp" title="이 화면 사용법">? 사용법</button>
         <button class="btn" id="btnRecalc" title="최신 엔진으로 다시 계산" data-need="editor">재계산</button></div>
     </div>
@@ -231,6 +235,8 @@ async function showProject(uid, tab) {
     ${TAB_GROUP[tab] ? `<nav class="tabs" role="tablist">${GROUPS.find(([g]) => g === TAB_GROUP[tab])[1].map(([k, l]) => `<a role="tab" aria-selected="${k === tab}" href="#/p/${uid}/${k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</nav>` : ""}
     <div id="tab"></div>`;
   $("#upSel").onchange = (e) => (location.hash = `#/p/${e.target.value}/${tab}`);
+  $("#baseSel").onchange = (e) => { setBase(r.name, e.target.value); toast("비교 기준을 바꿨습니다. 업데이트 분석·상황판·리포트에 적용됩니다."); showProject(uid, tab); };
+  $("#btnReqAccess")?.addEventListener("click", () => requestAccess(r.name));
   $("#btnAi").onclick = () => openAiPanel();
   $("#btnHelp").onclick = () => openHelpFor(tab);
   $("#btnFav").onclick = () => {
@@ -853,7 +859,8 @@ async function tabDelay(el, r, uid) {
   };
   const pathTable = (rows) => `<div class="scroll"><table class="t"><thead><tr><th>ID</th><th>작업</th><th class="num">종료 순연</th><th class="num">새로 발생</th><th>비고</th></tr></thead><tbody>
     ${rows.map((x) => `<tr><td>${esc(x.code)}</td><td class="wrap">${esc(x.name)}</td><td class="num">${x.slip ?? "-"}</td><td class="num">${x.introduced ?? "-"}</td><td class="wrap">${esc(x.note)}</td></tr>`).join("")}</tbody></table></div>`;
-  $("#dBase").onchange = draw;
+  if (getBase(r.name) && list.some((u) => u.id === getBase(r.name))) $("#dBase").value = getBase(r.name);
+  $("#dBase").onchange = () => { setBase(r.name, $("#dBase").value); draw(); };
   $("#dAsk").onclick = () => askAi(uid, "직전 업데이트 대비 준공이 늦어진 원인을 지연 기여도 기준으로 설명하고, 만회 대책을 제안해줘.");
   draw();
 }
@@ -919,7 +926,7 @@ async function tabWhatif(el, r, uid, preset) {
         <td><button class="btn sm" data-load="${x.id}">불러오기</button> <button class="btn sm danger" data-del="${x.id}">삭제</button></td></tr>`).join("")}</tbody></table>` : "저장된 시나리오가 없습니다.";
     $("#wList").classList.toggle("muted", !sc.length);
     $("#wList").querySelectorAll("[data-load]").forEach((b) => (b.onclick = () => { chs = sc.find((x) => x.id === b.dataset.load).changes.map((c) => ({ ...c })); draw(); $("#wRun").click(); }));
-    $("#wList").querySelectorAll("[data-del]").forEach((b) => (b.onclick = async () => { if (await ui.confirm("이 시나리오를 삭제할까요?", { ok: "삭제", danger: true })) { await api(`/api/scenarios/${b.dataset.del}`, { method: "DELETE" }); loadList(); } }));
+    $("#wList").querySelectorAll("[data-del]").forEach((b) => (b.onclick = async () => { await deleteWithUndo(`/api/scenarios/${b.dataset.del}`, "시나리오", loadList); }));
   };
   $("#wAdd").onclick = () => { chs.push({ op: "set_duration" }); draw(); };
   $("#wRun").onclick = () => withBusy($("#wRun"), async () => {
@@ -1143,7 +1150,8 @@ async function tabForensic(el, r, uid) {
       el.querySelectorAll("#chgTable tbody tr").forEach((tr) => (tr.hidden = ch.dataset.cat && tr.dataset.cat !== ch.dataset.cat));
     }));
   };
-  $("#fBase").onchange = draw; draw();
+  if (getBase(r.name) && list.some((u) => u.id === getBase(r.name))) $("#fBase").value = getBase(r.name);
+  $("#fBase").onchange = () => { setBase(r.name, $("#fBase").value); draw(); }; draw();
 }
 
 // ---------------------------------------------------------------- 리스크 레지스터 + 시뮬레이션
@@ -1179,7 +1187,7 @@ async function tabRisk(el, r, uid) {
         <td><button class="btn sm" data-edit="${x.id}">수정</button> <button class="btn sm danger" data-rm="${x.id}">삭제</button></td></tr>`).join("")}</tbody></table>`
       : `<p class="muted">등록된 리스크가 없습니다.</p>`;
     $("#rkList").querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => openForm(list.find((x) => x.id === b.dataset.edit))));
-    $("#rkList").querySelectorAll("[data-rm]").forEach((b) => (b.onclick = async () => { if (await ui.confirm("이 리스크를 삭제할까요?", { ok: "삭제", danger: true })) { await api(`/api/uploads/${uid}/risks/${b.dataset.rm}`, { method: "DELETE" }); load(); } }));
+    $("#rkList").querySelectorAll("[data-rm]").forEach((b) => (b.onclick = async () => { await deleteWithUndo(`/api/uploads/${uid}/risks/${b.dataset.rm}`, "리스크", load); }));
   };
   let editing = null;
   const openForm = (x = {}) => {
@@ -1396,7 +1404,7 @@ async function tabLookahead(el, r, uid) {
     try { await save("constraint", { code: b.dataset.con, ...v, status: "미해결" }); reload(); } catch (e) { toast(e.message); }
   }));
   el.querySelectorAll("[data-cst]").forEach((sel) => (sel.onchange = async () => { const x = la.constraints.find((y) => y.id === sel.dataset.cst); await save("constraint", { ...x, status: sel.value }); }));
-  el.querySelectorAll("[data-cdel]").forEach((b) => (b.onclick = async () => { await api(`/api/uploads/${uid}/records/constraint/${b.dataset.cdel}`, { method: "DELETE" }); reload(); }));
+  el.querySelectorAll("[data-cdel]").forEach((b) => (b.onclick = () => deleteWithUndo(`/api/uploads/${uid}/records/constraint/${b.dataset.cdel}`, "제약", reload)));
   if (p.weeks.length) lineChart($("#ppcCv"), p.weeks.map((w) => w.week.slice(5)), [{ name: "PPC %", color: "#2563eb", values: p.weeks.map((w) => w.ppc), dots: true }, { name: "목표 80%", color: "#9ca3af", values: p.weeks.map(() => 80), dash: [4, 4] }], { min: 0, max: 100, left: 30 });
 }
 
@@ -1489,12 +1497,7 @@ let me = null;
 async function refreshMe() {
   try { me = await (await fetch("/api/me")).json(); } catch { me = null; }
   document.body.dataset.role = me?.role || "admin"; applyRole();
-  const box = $("#userBox"); if (!box) return;
-  const roleKo = { viewer: "조회", editor: "편집", admin: "관리자" };
-  box.innerHTML = (me?.username ? `<button class="linkbtn" onclick="showMyInfo()">👤 내 정보</button>` : "") + `<a href="#/learn">🎓 학습</a><button class="linkbtn" onclick="toggleTheme()" title="밝게/어둡게">◐ 테마</button><button class="linkbtn" onclick="showShortcuts()">⌨ 단축키</button>`
-    + (me?.username ? `<span>${esc(me.username)} <span class="tag">${roleKo[me.role]}</span></span>${me.role === "admin" ? ' <a href="#/admin">관리</a>' : ""} <a href="#" id="lnkLogout">로그아웃</a>`
-    : me?.mode === "open" ? '<a href="#/admin">관리</a>' : "");
-  $("#lnkLogout")?.addEventListener("click", async (e) => { e.preventDefault(); await fetch("/api/logout", { method: "POST", headers: { "X-Requested-With": "fetch" } }); location.reload(); });
+  renderTopbar();
 }
 
 // ---------------------------------------------------------------- 관리자
@@ -1618,6 +1621,7 @@ async function renderMembers(box, name) {
       <span class="muted" style="font-size:12px">조회 전용(viewer) 계정은 멤버로 추가할 수 없습니다.</span></div>`
       : `<p class="muted">편집이 필요하면 소유자(${esc(ms.filter((m) => m.role === "owner").map((m) => m.username).join(", ") || "관리자")})에게 멤버 추가를 요청하세요.</p>`}</div>`;
   const reload = () => renderMembers(box, name);
+  renderAccessRequests(box, name);
   box.querySelector("#mAdd")?.addEventListener("click", async () => {
     const u = $("#mAddU").value; if (!u) return toast("사용자를 선택하세요");
     try { await api(`/api/projects/${encodeURIComponent(name)}/members`, { method: "POST", json: { username: u, role: $("#mAddR").value } }); toast("추가했습니다"); reload(); } catch (e) { toast(e.message); }

@@ -102,8 +102,8 @@ def _dd(a: str | None, b: str | None):
 class Context:
     """양식이 요청한 값만 계산하는 지연 평가 컨텍스트."""
 
-    def __init__(self, uid: str, user: str = "", use_ai: bool = False):
-        self.uid, self.user, self.use_ai = uid, user, use_ai
+    def __init__(self, uid: str, user: str = "", use_ai: bool = False, base_uid: str | None = None):
+        self.uid, self.user, self.use_ai, self.base = uid, user, use_ai, base_uid
         self.r = services.result(uid)
         self._c: dict = {}
 
@@ -117,7 +117,14 @@ class Context:
         return self._memo("tmap", lambda: services.trade_map(self.uid))
 
     def prev(self):
-        return self._memo("prev", lambda: services.previous_upload(self.uid))
+        def get():
+            if self.base:
+                try:
+                    return {"id": self.base, "result": services.result(self.base)}
+                except KeyError:
+                    pass
+            return services.previous_upload(self.uid)
+        return self._memo("prev", get)
 
     def evm(self):
         return self._memo("evm", lambda: services.evm(self.uid, None))
@@ -247,10 +254,10 @@ class Context:
                             "finish_var": _dd(fin, blf), "critical": sum(1 for a in xs if a["longest"])})
             return sorted(out, key=lambda x: x["start"])
         if name == "delay_top":
-            d = services.delay(self.uid)
+            d = services.delay(self.uid, self.base)
             return [x for x in d.get("top", []) if (x["introduced"] or 0) > 0] if d.get("available") else []
         if name == "changes":
-            f = services.forensic(self.uid)
+            f = services.forensic(self.uid, self.base)
             return f["changes"]["items"] if f.get("available") else []
         if name == "risks":
             return [{**x, "codes": ", ".join(x["codes"]), "status": {"open": "열림", "mitigating": "대응중", "closed": "종결"}.get(x["status"], x["status"])}
