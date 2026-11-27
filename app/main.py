@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from urllib.parse import unquote
 
-from . import ai, auth as auth_mod, services, storage
+from . import access, ai, auth as auth_mod, services, storage
 from .analysis import analyze
 from .changes import ChangeError
 from .schedule import Schedule, list_projects
@@ -26,6 +26,7 @@ APP_TOKEN = os.environ.get("APP_TOKEN", "")
 app = FastAPI(title="공정관리 XER 분석기")
 storage.init()
 auth_mod.bootstrap_from_env()
+access.init()
 SECURE_COOKIE = os.environ.get("SECURE_COOKIE", "0") == "1"
 
 PUBLIC = {"/api/config", "/api/login", "/api/logout", "/api/me"}
@@ -34,14 +35,38 @@ VIEWER_POST = ("/whatif", "/recovery", "/api/reports/render")
 ADMIN_ONLY = ("/api/admin/",)
 
 
+# 프로젝트 데이터를 바꾸지 않는 POST (계산·추출·다운로드만): 프로젝트 쓰기 권한 검사에서 제외
+READONLY_POST = VIEWER_POST + ("/chat", "/daily", "/risks/extract", "/xer_patch")
+
+
+def _project_of(method: str, path: str) -> str | None:
+    """쓰기 요청이 속한 프로젝트 이름 (없으면 None = 프로젝트 무관)."""
+    m = re.match(r"^/api/uploads/([^/]+)", path)
+    if m:
+        d = storage.get(m.group(1))
+        return d["name"] if d else None
+    m = re.match(r"^/api/scenarios/([^/]+)$", path)
+    if m:
+        sc = storage.get_scenario(m.group(1))
+        d = storage.get(sc["upload_id"]) if sc else None
+        return d["name"] if d else None
+    m = re.match(r"^/api/photos/([^/]+)$", path)
+    if m and method == "DELETE":
+        f = storage.file_get(m.group(1))
+        return f["scope"] if f else None
+    m = re.match(r"^/api/projects/(.+)/members", path)
+    if m:
+        from urllib.parse import unquote as _uq
+        return _uq(m.group(1))
+    return None
+
+
 def _required_role(method: str, path: str) -> str:
     if any(path.startswith(p) for p in ADMIN_ONLY):
         return "admin"
-    if method == "DELETE" and path.startswith("/api/uploads/") and path.count("/") == 3:
-        return "admin"
     if path.startswith("/api/settings/team"):
         return "admin" if method != "GET" else "viewer"
-    if method == "GET" or (method == "POST" and path.endswith(VIEWER_POST)) or path in ("/api/learn/progress", "/api/learn/sample"):
+    if method == "GET" or (method == "POST" and path.endswith(VIEWER_POST)) or path in ("/api/learn/progress", "/api/learn/sample", "/api/me/password"):
         return "viewer"
     return "editor"
 
@@ -68,6 +93,17 @@ async def security(request: Request, call_next):
     need = _required_role(request.method, path)
     if auth_mod.ROLES[user["role"]] < auth_mod.ROLES[need]:
         return JSONResponse({"detail": f"권한이 없습니다 ({need} 이상 필요)"}, status_code=403)
+    # 프로젝트 단위 쓰기 권한: 읽기는 모두, 쓰기는 자기 프로젝트만
+    if auth_mod.users_exist() and request.method in ("POST", "PUT", "DELETE") and not path.endswith(READONLY_POST):
+        proj = _project_of(request.method, path)
+        if proj is not None:
+            members_path = "/members" in path
+            delete_upload = request.method == "DELETE" and re.fullmatch(r"/api/uploads/[^/]+", path)
+            ok = access.can_manage(user, proj) if (members_path or delete_upload) else access.can_write(user, proj)
+            if not ok:
+                storage.audit(user["username"], request.method, path, 403, f"프로젝트 권한 없음: {proj}")
+                return JSONResponse({"detail": f"'{proj}' 프로젝트에 대한 쓰기 권한이 없습니다. 프로젝트 소유자나 관리자에게 멤버 추가를 요청하세요."},
+                                    status_code=403)
     request.state.user = user
     resp = await call_next(request)
     if request.method in ("POST", "PUT", "DELETE") and not path.endswith(VIEWER_POST):
@@ -118,7 +154,22 @@ def me(request: Request):
     u = auth_mod.session_user(request.cookies.get(auth_mod.COOKIE))
     if not u:
         raise HTTPException(401, "로그인이 필요합니다")
-    return {**u, "mode": "users"}
+    return {**u, "mode": "users", "projects": access.projects_of(u["username"])}
+
+
+@app.post("/api/me/password")
+def change_password(request: Request, body: dict = Body(...)):
+    """본인 비밀번호 변경 (현재 비밀번호 확인)."""
+    if not auth_mod.users_exist():
+        raise HTTPException(400, "사용자 계정 모드가 아닙니다")
+    u = request.state.user
+    if not auth_mod.check_password(u["username"], str(body.get("current", ""))):
+        raise HTTPException(400, "현재 비밀번호가 올바르지 않습니다")
+    try:
+        auth_mod.update_user(u["username"], pw=str(body.get("new", "")))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "relogin": True}
 
 
 @app.post("/api/upload", dependencies=[Depends(auth)])
@@ -151,14 +202,21 @@ async def upload(request: Request, file: UploadFile = File(...), uploader: str =
         if not projects:
             raise ValueError("PROJECT 테이블이 없습니다")
         ids = []
+        if auth_mod.users_exist():
+            for p in projects:
+                if access.project_exists(p["name"]) and not access.can_write(request.state.user, p["name"]):
+                    raise HTTPException(403, f"'{p['name']}' 프로젝트에 대한 쓰기 권한이 없어 업데이트를 올릴 수 없습니다.")
         for p in projects:
             try:
                 s = Schedule(tables, p["proj_id"], services.sched_options(p["name"]))
             except ValueError:
                 continue
             result = analyze(s)
+            is_new = not access.project_exists(result["name"])
             ids.append(storage.save(fname, p["proj_id"], result["name"],
                                     uploader.strip() or "익명", note.strip(), raw, result))
+            if is_new and auth_mod.users_exist():
+                access.claim_new(result["name"], request.state.user["username"])
         if not ids:
             raise ValueError("분석 가능한 프로젝트(액티비티 포함)가 없습니다")
     except ValueError as e:
@@ -172,11 +230,18 @@ def uploads():
 
 
 @app.get("/api/uploads/{uid}", dependencies=[Depends(auth)])
-def get_upload(uid: str):
+def get_upload(uid: str, request: Request):
     d = storage.get(uid)
     if not d:
         raise HTTPException(404, "없는 데이터입니다")
     d.pop("raw", None)
+    if auth_mod.users_exist():
+        u = request.state.user
+        d["my_role"] = access.project_role(u, d["name"])
+        d["can_write"] = d["my_role"] is not None
+        d["can_manage"] = d["my_role"] in ("admin", "owner")
+    else:
+        d.update({"my_role": "admin", "can_write": True, "can_manage": True})
     return d
 
 
@@ -921,11 +986,72 @@ async def generate(request: Request, project: str = Form(...), start: str = Form
         if template not in TEMPLATES:
             raise HTTPException(400, "템플릿을 선택하세요")
         tables = from_template(template, project, d0, max(0.3, min(scale, 3.0)))
+    if auth_mod.users_exist() and access.project_exists(project) and not access.can_write(request.state.user, project):
+        raise HTTPException(403, f"'{project}' 프로젝트에 대한 쓰기 권한이 없습니다. 다른 이름을 쓰세요.")
     raw = tables_to_xer(tables)
     result = analyze(Schedule(parse_xer(raw), "1"))
+    if auth_mod.users_exist() and not access.project_exists(result["name"]):
+        access.claim_new(result["name"], user)
     uid = storage.save(f"{project}_초기공정표.xer", "1", result["name"], user or "익명",
                        "AI 생성 초안" if mode == "ai" else "템플릿 생성", raw, result)
     return {"id": uid, "assumptions": assumptions}
+
+
+# ---- 프로젝트 권한(멤버)
+@app.get("/api/uploads/{uid}/perm")
+def upload_perm(uid: str, request: Request):
+    """현재 사용자의 이 프로젝트 권한 (화면 캐시와 별도로 매번 확인)."""
+    d = storage.get(uid)
+    if not d:
+        raise HTTPException(404)
+    if not auth_mod.users_exist():
+        return {"my_role": "admin", "can_write": True, "can_manage": True}
+    role = access.project_role(request.state.user, d["name"])
+    return {"my_role": role, "can_write": role is not None, "can_manage": role in ("admin", "owner")}
+
+
+@app.get("/api/projects")
+def list_projects_access(request: Request):
+    """모든 프로젝트와 멤버, 내 권한."""
+    u = request.state.user
+    out = []
+    for p in storage.latest_by_project():
+        ms = access.members(p["name"]) if auth_mod.users_exist() else []
+        role = access.project_role(u, p["name"]) if auth_mod.users_exist() else "admin"
+        out.append({"name": p["name"], "latest_id": p["id"], "data_date": p["data_date"], "members": ms,
+                    "my_role": role, "can_write": role is not None, "can_manage": role in ("admin", "owner")})
+    return out
+
+
+@app.get("/api/projects/{name}/members")
+def get_members(name: str):
+    return access.members(name)
+
+
+@app.post("/api/projects/{name}/members")
+def add_member(name: str, request: Request, body: dict = Body(...)):
+    if not access.project_exists(name):
+        raise HTTPException(404, "없는 프로젝트입니다")
+    try:
+        access.set_member(name, str(body.get("username", "")), str(body.get("role", "member")), request.state.user["username"])
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return access.members(name)
+
+
+@app.delete("/api/projects/{name}/members/{username}")
+def del_member(name: str, username: str):
+    try:
+        access.remove_member(name, username)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return access.members(name)
+
+
+@app.get("/api/users")
+def user_names():
+    """멤버 지정용 활성 사용자 목록(아이디·역할만)."""
+    return [{"username": u["username"], "role": u["role"]} for u in auth_mod.list_users() if u["active"]]
 
 
 # ---- 관리자

@@ -18,8 +18,8 @@ async function showReports(preUid) {
           <div><b>${esc(t.name)}</b> ${t.builtin ? '<span class="tag">기본 제공</span>' : ""}<div class="muted" style="font-size:12px">${esc(t.desc || "")}
           ${t.scan ? ` · 필드 ${t.scan.fields}개 · 표 ${t.scan.lists.length}개${t.scan.unknown?.length ? ` · <span style="color:var(--crit)">알 수 없는 필드 ${t.scan.unknown.length}</span>` : ""}` : ""}
           ${t.author ? ` · ${esc(t.author)}` : ""}</div></div>
-          <span class="row" style="gap:4px"><button class="btn sm" data-dl="${esc(t.id)}" title="양식 내려받기">⭳</button>${t.builtin ? "" : `<button class="btn sm danger" data-rm="${esc(t.id)}" data-need="editor" title="삭제">✕</button>`}</span></label>`).join("")}</div>
-        <div class="row" style="margin-top:10px"><button class="btn primary" id="tplUp" data-need="editor">+ 내 양식 올리기 (.xlsx)</button>
+          <span class="row" style="gap:4px"><button class="btn sm" data-dl="${esc(t.id)}" title="양식 내려받기">⭳</button>${t.builtin ? "" : `<button class="btn sm danger" data-rm="${esc(t.id)}" data-need="editor" data-scope="global" title="삭제">✕</button>`}</span></label>`).join("")}</div>
+        <div class="row" style="margin-top:10px"><button class="btn primary" id="tplUp" data-need="editor" data-scope="global">+ 내 양식 올리기 (.xlsx)</button>
           <button class="btn" id="tplGuide">작성 방법</button></div></div>
       <div class="panel"><h3 style="margin-top:0">② 프로젝트 선택</h3>
         <label>프로젝트<select class="s" id="rpProj" style="width:100%">${Object.keys(projects).map((n) => `<option ${pre?.name === n ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>

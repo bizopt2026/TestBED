@@ -100,6 +100,7 @@ async function route() {
     if (parts[0] === "cmp" && parts[1] && parts[2]) return await showCompare(parts[1], parts[2]);
     if (parts[0] === "admin") return await showAdmin();
     if (parts[0] === "reports") return await showReports(parts[1]);
+    if (parts[0] === "projects") return await showProjectsAccess();
     if (parts[0] === "learn") return await showLearn(parts[1], parts[2]);
     if (parts[0] === "field" && parts[1]) return await showField(parts[1]);
     if (parts[0] === "print" && parts[1]) return await showPrint(parts[1]);
@@ -124,7 +125,7 @@ async function showList() {
   view.innerHTML = `
   <div id="inbox"></div>
   <div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">포트폴리오</h2>
-    <div class="row"><a class="btn" href="#/reports">📊 엑셀 리포트</a><a class="btn" href="#/learn">🎓 학습 센터</a><button class="btn" onclick="showGenerate()" data-need="editor">+ 새 공정표 만들기</button></div></div>
+    <div class="row"><a class="btn" href="#/projects">👥 프로젝트 권한</a><a class="btn" href="#/reports">📊 엑셀 리포트</a><a class="btn" href="#/learn">🎓 학습 센터</a><button class="btn" onclick="showGenerate()" data-need="editor">+ 새 공정표 만들기</button></div></div>
   <div class="cards">${pf.sort((a, b) => JSON.parse(store.get("favs", "[]")).includes(b.name) - JSON.parse(store.get("favs", "[]")).includes(a.name)).map((p) => `<a class="card" data-name="${esc(p.name)}" href="#/p/${p.id}/overview">
       <div class="row" style="justify-content:space-between"><b>${esc(p.name)}</b><span class="muted" style="font-size:12px">DD ${p.data_date}</span></div>
       <div class="big">${p.finish}<span class="muted" style="font-size:12px"> 예상 준공</span></div>
@@ -200,7 +201,9 @@ async function showProject(uid, tab) {
   tab = TAB_ALIAS[tab] || tab;
   const u = await load(uid);
   const r = u.result;
-  ctx.uid = uid; ctx.tab = tab; ctx.result = r;
+  Object.assign(u, await api(`/api/uploads/${uid}/perm`).catch(() => ({})));  // 권한은 캐시하지 않고 매번 확인
+  ctx.uid = uid; ctx.tab = tab; ctx.result = r; ctx.canWrite = u.can_write !== false; ctx.canManage = !!u.can_manage;
+  const roleLabel = { admin: "관리자", owner: "소유자", member: "멤버" }[u.my_role];
   uploadsCache = uploadsCache || await api("/api/uploads");
   const same = uploadsCache.filter((x) => x.name === r.name).sort((a, b) => (b.data_date + b.created_at).localeCompare(a.data_date + a.created_at));
   const latest = same[0]?.id === uid;
@@ -214,7 +217,9 @@ async function showProject(uid, tab) {
           <select class="s sm" id="upSel" aria-label="업데이트 선택">${same.map((x) => `<option value="${x.id}" ${x.id === uid ? "selected" : ""}>DD ${x.data_date} · ${esc(x.note || x.filename)}</option>`).join("")}</select>
           ${latest ? '<span class="chip ok">✓ 최신</span>' : '<span class="chip warn">! 최신 아님</span>'}
           <span class="chip">${r.options?.progress_override ? "Progress Override" : "Retained Logic"}</span>
-          <span>업로더 ${esc(u.uploader)}</span></div></div>
+          <span>업로더 ${esc(u.uploader)}</span>
+          ${ctx.canWrite ? `<span class="chip ok" title="이 프로젝트에서 편집할 수 있습니다">✎ ${roleLabel || "편집 가능"}</span>`
+            : `<a class="chip warn" href="#/p/${uid}/settings" title="편집하려면 소유자에게 멤버 추가를 요청하세요">👁 읽기 전용</a>`}</div></div>
       <div class="row"><a class="btn" href="#/field/${uid}" title="현장 모바일 화면">📱 현장 모드</a>
         <button class="btn" id="btnHelp" title="이 화면 사용법">? 사용법</button>
         <button class="btn" id="btnRecalc" title="최신 엔진으로 다시 계산" data-need="editor">재계산</button></div>
@@ -1398,6 +1403,8 @@ async function tabLookahead(el, r, uid) {
 // ---------------------------------------------------------------- 설정
 async function tabSettings(el, r, uid) {
   const [st, defs] = await Promise.all([api(`/api/uploads/${uid}/settings`), api("/api/metrics/defaults")]);
+  const memBox = document.createElement("div");
+  setTimeout(() => { el.prepend(memBox); renderMembers(memBox, r.name); }, 0);
   const ov = st.metric_overrides;
   el.innerHTML = `<div class="panel"><h3 style="margin-top:0">일정 계산 옵션</h3>
       <label><input type="checkbox" id="optPO" ${st.schedule_options.progress_override ? "checked" : ""}> Progress Override (착수된 작업은 선행 논리를 무시하고 Data Date부터 잔여 작업 진행)</label>
@@ -1484,7 +1491,7 @@ async function refreshMe() {
   document.body.dataset.role = me?.role || "admin"; applyRole();
   const box = $("#userBox"); if (!box) return;
   const roleKo = { viewer: "조회", editor: "편집", admin: "관리자" };
-  box.innerHTML = `<a href="#/learn">🎓 학습</a><button class="linkbtn" onclick="toggleTheme()" title="밝게/어둡게">◐ 테마</button><button class="linkbtn" onclick="showShortcuts()">⌨ 단축키</button>`
+  box.innerHTML = (me?.username ? `<button class="linkbtn" onclick="showMyInfo()">👤 내 정보</button>` : "") + `<a href="#/learn">🎓 학습</a><button class="linkbtn" onclick="toggleTheme()" title="밝게/어둡게">◐ 테마</button><button class="linkbtn" onclick="showShortcuts()">⌨ 단축키</button>`
     + (me?.username ? `<span>${esc(me.username)} <span class="tag">${roleKo[me.role]}</span></span>${me.role === "admin" ? ' <a href="#/admin">관리</a>' : ""} <a href="#" id="lnkLogout">로그아웃</a>`
     : me?.mode === "open" ? '<a href="#/admin">관리</a>' : "");
   $("#lnkLogout")?.addEventListener("click", async (e) => { e.preventDefault(); await fetch("/api/logout", { method: "POST", headers: { "X-Requested-With": "fetch" } }); location.reload(); });
@@ -1505,6 +1512,8 @@ async function showAdmin() {
       ${cfg.login_required ? `<div class="row" style="margin-top:8px"><input class="s" id="nu" placeholder="아이디"><input class="s" id="np" type="password" placeholder="임시 비밀번호(10자 이상)">
         <select class="s" id="nr"><option>viewer</option><option selected>editor</option><option>admin</option></select><button class="btn primary" id="nAdd">추가</button></div>
         <p class="muted" style="font-size:12px">viewer: 조회·What-if 계산 / editor: 업로드·AI·리스크·시나리오 편집 / admin: 삭제·사용자·팀 설정</p>` : ""}</div>
+    <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">프로젝트 권한</h3><a class="btn" href="#/projects">프로젝트별 멤버 관리 →</a></div>
+      <p class="muted">읽기는 모든 사용자에게 열려 있고, 쓰기는 프로젝트 소유자·멤버(와 관리자)만 할 수 있습니다. 새 프로젝트를 처음 올린 사람이 소유자가 됩니다.</p></div>
     <div class="panel"><h3 style="margin-top:0">추가 휴일 (임시공휴일·선거일 등)</h3>
       <textarea id="exHol" rows="4" style="width:100%" placeholder="2026-06-03 지방선거">${st.extra_holidays.map((h) => `${h.date} ${h.name}`).join("\n")}</textarea>
       <div class="row end"><button class="btn primary" id="hSave">저장</button></div></div>
@@ -1587,4 +1596,84 @@ async function renderInbox(container) {
       <span class="muted" style="font-size:12px">${favs.length ? "★ 관심 프로젝트 우선" : "프로젝트 이름 옆 ★로 관심 프로젝트를 지정하세요"}</span></div>
     ${items.length ? `<div class="inbox">${mine.map(row).join("")}${rest.length ? `<details><summary class="muted">다른 프로젝트 ${rest.length}건</summary>${rest.map(row).join("")}</details>` : ""}</div>`
       : '<p class="muted">확인할 항목이 없습니다. 👍</p>'}</div>`;
+}
+
+// ================================================================ 사용자·프로젝트 권한
+async function renderMembers(box, name) {
+  if (!box.isConnected && box.parentNode === null) return;
+  const cfg = await fetch("/api/config").then((x) => x.json());
+  if (!cfg.login_required) {
+    box.innerHTML = `<div class="panel"><h3 style="margin-top:0">프로젝트 멤버</h3><p class="muted">사용자 계정이 아직 없어 공개 모드입니다. 관리자 계정을 만들면 '읽기는 모두, 쓰기는 자기 프로젝트만' 규칙이 적용됩니다.</p></div>`;
+    return;
+  }
+  const [ms, users] = await Promise.all([api(`/api/projects/${encodeURIComponent(name)}/members`), ctx.canManage ? api("/api/users") : Promise.resolve([])]);
+  const roleKo = { owner: "소유자", member: "멤버" };
+  box.innerHTML = `<div class="panel"><h3 style="margin-top:0">프로젝트 멤버 <span class="muted" style="font-size:13px">${esc(name)}</span></h3>
+    <p class="muted">이 프로젝트는 모든 사용자가 볼 수 있고, 아래 멤버(와 관리자)만 편집할 수 있습니다. 소유자는 멤버를 관리하고 업로드를 삭제할 수 있습니다.</p>
+    <table class="t" data-noexport><thead><tr><th>사용자</th><th>프로젝트 역할</th><th>지정</th><th></th></tr></thead><tbody>
+    ${ms.map((m) => `<tr><td><b>${esc(m.username)}</b></td><td>${ctx.canManage ? `<select class="s sm" data-mrole="${esc(m.username)}">${["owner", "member"].map((x) => `<option value="${x}" ${m.role === x ? "selected" : ""}>${roleKo[x]}</option>`).join("")}</select>` : roleKo[m.role]}</td>
+      <td class="muted">${esc(m.added_by || "")} ${(m.added_at || "").slice(0, 10)}</td><td>${ctx.canManage ? `<button class="btn sm danger" data-mdel="${esc(m.username)}">제외</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="4" class="muted">멤버가 없습니다. 관리자만 편집할 수 있습니다.</td></tr>'}</tbody></table>
+    ${ctx.canManage ? `<div class="row" style="margin-top:8px"><select class="s" id="mAddU"><option value="">사용자 선택</option>${users.filter((u) => u.role !== "viewer" && !ms.some((m) => m.username === u.username)).map((u) => `<option>${esc(u.username)}</option>`).join("")}</select>
+      <select class="s" id="mAddR"><option value="member">멤버</option><option value="owner">소유자</option></select><button class="btn primary" id="mAdd">추가</button>
+      <span class="muted" style="font-size:12px">조회 전용(viewer) 계정은 멤버로 추가할 수 없습니다.</span></div>`
+      : `<p class="muted">편집이 필요하면 소유자(${esc(ms.filter((m) => m.role === "owner").map((m) => m.username).join(", ") || "관리자")})에게 멤버 추가를 요청하세요.</p>`}</div>`;
+  const reload = () => renderMembers(box, name);
+  box.querySelector("#mAdd")?.addEventListener("click", async () => {
+    const u = $("#mAddU").value; if (!u) return toast("사용자를 선택하세요");
+    try { await api(`/api/projects/${encodeURIComponent(name)}/members`, { method: "POST", json: { username: u, role: $("#mAddR").value } }); toast("추가했습니다"); reload(); } catch (e) { toast(e.message); }
+  });
+  box.querySelectorAll("[data-mrole]").forEach((s) => (s.onchange = async () => {
+    try { await api(`/api/projects/${encodeURIComponent(name)}/members`, { method: "POST", json: { username: s.dataset.mrole, role: s.value } }); toast("변경했습니다"); } catch (e) { toast(e.message); reload(); }
+  }));
+  box.querySelectorAll("[data-mdel]").forEach((b) => (b.onclick = async () => {
+    if (!(await ui.confirm(`${b.dataset.mdel} 님을 이 프로젝트에서 제외할까요? 편집 권한이 사라집니다.`, { ok: "제외", danger: true }))) return;
+    try { await api(`/api/projects/${encodeURIComponent(name)}/members/${encodeURIComponent(b.dataset.mdel)}`, { method: "DELETE" }); reload(); } catch (e) { toast(e.message); }
+  }));
+}
+
+async function showProjectsAccess() {
+  $("#crumb").textContent = "/ 프로젝트 권한";
+  ctx.uid = null;
+  const [ps, cfg] = await Promise.all([api("/api/projects"), fetch("/api/config").then((x) => x.json())]);
+  const roleKo = { admin: "관리자", owner: "소유자", member: "멤버" };
+  const mine = ps.filter((p) => p.my_role && p.my_role !== "admin");
+  view.innerHTML = `<h2 style="margin-top:0">👥 프로젝트 권한</h2>
+    <p class="muted">규칙: <b>읽기는 모든 프로젝트</b>, <b>쓰기는 자기 프로젝트(소유자·멤버)만</b>. 관리자는 모든 프로젝트를 편집할 수 있습니다. 새 프로젝트를 처음 올린 사람이 소유자가 되고, 소유자가 멤버를 추가합니다.</p>
+    ${cfg.login_required ? "" : `<div class="panel warn">아직 사용자 계정이 없어 공개 모드(모두 편집 가능)입니다. 관리 화면의 안내에 따라 관리자 계정을 만들면 규칙이 적용됩니다.</div>`}
+    <div class="kpis">${kpi("전체 프로젝트", ps.length)}${kpi("내가 편집 가능", ps.filter((p) => p.can_write).length)}${kpi("내 소유", mine.filter((p) => p.my_role === "owner").length)}${kpi("소유자 없는 프로젝트", ps.filter((p) => !p.members.some((m) => m.role === "owner")).length, ps.some((p) => !p.members.some((m) => m.role === "owner")) ? "crit" : "")}</div>
+    <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">프로젝트 목록</h3>
+      <label><input type="checkbox" id="onlyMine"> 내가 편집할 수 있는 것만</label></div>
+    <table class="t" id="pTable"><thead><tr><th>프로젝트</th><th>최근 Data Date</th><th>소유자</th><th>멤버</th><th>내 권한</th><th></th></tr></thead><tbody>
+    ${ps.map((p) => `<tr data-w="${p.can_write ? 1 : 0}"><td><a href="#/p/${p.latest_id}/overview"><b>${esc(p.name)}</b></a></td><td>${p.data_date}</td>
+      <td>${p.members.filter((m) => m.role === "owner").map((m) => esc(m.username)).join(", ") || '<span class="chip bad">✕ 없음</span>'}</td>
+      <td class="wrap">${p.members.filter((m) => m.role === "member").map((m) => esc(m.username)).join(", ") || "-"}</td>
+      <td>${p.can_write ? `<span class="chip ok">✎ ${roleKo[p.my_role] || "편집"}</span>` : '<span class="chip">👁 읽기</span>'}</td>
+      <td>${p.can_manage ? `<button class="btn sm" data-mg="${esc(p.name)}" data-uid="${p.latest_id}">멤버 관리</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
+  $("#onlyMine").onchange = (e) => view.querySelectorAll("#pTable tbody tr").forEach((tr) => (tr.hidden = e.target.checked && tr.dataset.w !== "1"));
+  view.querySelectorAll("[data-mg]").forEach((b) => (b.onclick = () => {
+    ctx.canManage = true;
+    const d = openDrawer(`멤버 관리 · ${esc(b.dataset.mg)}`, `<div id="mgBox"></div>`);
+    renderMembers(d.querySelector("#mgBox"), b.dataset.mg);
+    d.querySelector("[data-close]").addEventListener("click", () => showProjectsAccess(), { once: true });
+  }));
+  enhance(view);
+}
+
+async function showMyInfo() {
+  const m = await (await fetch("/api/me")).json();
+  const roleKo = { viewer: "조회", editor: "편집", admin: "관리자" }, pr = { owner: "소유자", member: "멤버" };
+  const projects = Object.entries(m.projects || {});
+  const d = _modal(`<form method="dialog" id="fMe"><h3>👤 내 정보</h3>
+    <p><b>${esc(m.username)}</b> · 전역 역할 <span class="tag">${roleKo[m.role]}</span></p>
+    <p class="muted" style="font-size:13px">${m.role === "viewer" ? "조회 전용 계정입니다. 모든 프로젝트를 볼 수 있지만 편집할 수 없습니다." : m.role === "admin" ? "모든 프로젝트를 편집하고 사용자·권한을 관리할 수 있습니다." : "모든 프로젝트를 볼 수 있고, 아래 프로젝트와 내가 새로 올린 프로젝트를 편집할 수 있습니다."}</p>
+    <h4>편집할 수 있는 프로젝트 (${projects.length})</h4>${projects.map(([n, r]) => `<div class="mini">${esc(n)} · ${pr[r]}</div>`).join("") || '<div class="muted">없음</div>'}
+    <h4>비밀번호 변경</h4><label>현재 비밀번호<input type="password" name="current" autocomplete="current-password"></label>
+    <label>새 비밀번호 (10자 이상)<input type="password" name="new" autocomplete="new-password"></label>
+    <div class="row end"><button class="btn" value="cancel" formnovalidate>닫기</button><button class="btn primary" value="ok">비밀번호 변경</button></div><p class="err" id="meErr"></p></form>`);
+  $("#fMe").onsubmit = async (e) => {
+    if (e.submitter?.value !== "ok") return; e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    try { await api("/api/me/password", { method: "POST", json: f }); d.close(); toast("비밀번호를 바꿨습니다. 다시 로그인하세요."); setTimeout(() => location.reload(), 1200); }
+    catch (err) { $("#meErr").textContent = err.message; }
+  };
 }

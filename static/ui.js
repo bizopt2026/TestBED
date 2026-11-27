@@ -221,10 +221,22 @@ function enhance(root) {
 }
 
 // ---------------------------------------------------------------- ⑤ 권한별 UI
+const WRITE_BTNS = "#tab [data-edit], #tab [data-rm], #tab [data-del], #tab [data-commit], #tab [data-con], #tab [data-cdel], #tab #repSave, #tab [data-sv], #tab [data-fix]";
+const WRITE_INPUTS = "#tab [data-done], #tab [data-reason], #tab [data-cst], #tab textarea[data-k]";
 function applyRole(root = document) {
   const role = document.body.dataset.role || "admin";
   const lv = { viewer: 1, editor: 2, admin: 3 }[role] || 3;
-  root.querySelectorAll("[data-need]").forEach((el) => { el.hidden = ({ editor: 2, admin: 3 }[el.dataset.need] || 1) > lv; });
+  root.querySelectorAll("[data-need]").forEach((el) => {
+    let hide = ({ editor: 2, admin: 3 }[el.dataset.need] || 1) > lv;
+    // 프로젝트 화면 안의 편집 버튼: 그 프로젝트에 쓰기 권한이 없으면 숨김 (읽기는 모두, 쓰기는 자기 프로젝트만)
+    if (!hide && el.dataset.need === "editor" && el.dataset.scope !== "global" && ctx.uid && ctx.canWrite === false && el.closest("#view")) hide = true;
+    el.hidden = hide;
+  });
+  // 읽기 전용 프로젝트: 행 단위 편집 버튼은 숨기고, 상태 입력칸은 비활성화
+  if (ctx.uid && ctx.canWrite === false) {
+    root.querySelectorAll(WRITE_BTNS).forEach((el) => { if (el.closest("#view")) el.hidden = true; });
+    root.querySelectorAll(WRITE_INPUTS).forEach((el) => { if (el.closest("#view")) { el.disabled = true; el.title = "읽기 전용 프로젝트"; } });
+  }
 }
 
 // ---------------------------------------------------------------- ⑥ 오래 걸리는 작업: 진행 표시 + 취소

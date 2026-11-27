@@ -91,6 +91,12 @@ def list_users() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def check_password(username: str, pw: str) -> bool:
+    with storage.conn() as c:
+        r = c.execute("SELECT pw_hash, active FROM users WHERE username=?", (username,)).fetchone()
+    return bool(r and r["active"] and verify_pw(pw, r["pw_hash"]))
+
+
 def login(username: str, pw: str) -> str:
     now = time.time()
     recent = [t for t in _fails.get(username, []) if now - t < 600]

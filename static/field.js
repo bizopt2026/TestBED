@@ -32,7 +32,10 @@ window.addEventListener("online", fieldFlush);
 
 async function showField(uid) {
   const u = await load(uid); const r = u.result;
-  ctx.uid = uid; ctx.result = r; ctx.tab = "lookahead";
+  Object.assign(u, await api(`/api/uploads/${uid}/perm`).catch(() => ({})));
+  ctx.uid = uid; ctx.result = r; ctx.tab = "lookahead"; ctx.canWrite = u.can_write !== false;
+  if (!ctx.canWrite) { view.innerHTML = `<div class="fm"><div class="fcard"><h3 style="margin-top:0">${esc(r.name)}</h3><p>이 프로젝트는 <b>읽기 전용</b>입니다. 현장 입력(약속·제약·사진)은 프로젝트 멤버만 할 수 있습니다.</p>
+    <p class="muted">소유자: ${esc((await api(`/api/projects/${encodeURIComponent(r.name)}/members`).catch(() => [])).filter((m) => m.role === "owner").map((m) => m.username).join(", ") || "관리자")}</p><a class="btn" href="#/p/${uid}/lookahead">PC 화면에서 보기</a></div></div>`; return; }
   $("#crumb").textContent = "";
   const mode = sessionStorage.getItem("fieldTab") || "week";
   let la = { rows: [], weeks: [], constraints: [] };
