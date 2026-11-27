@@ -19,7 +19,9 @@ async function fieldSave(path, json) {
   }
 }
 async function fieldFlush() {
-  const q = fqLoad(); if (!q.length || !navigator.onLine) return;
+  const q = fqLoad();
+  if (!navigator.onLine) return;
+  if (!q.length) { if (location.hash.startsWith("#/field/")) route(); return; }
   const left = [];
   for (const it of q) {
     try { await api(it.path, { method: "POST", json: it.json }); } catch (e) { if (e instanceof TypeError || e.status === 0) left.push(it); }
@@ -28,7 +30,13 @@ async function fieldFlush() {
   if (q.length !== left.length) toast(`임시 저장한 ${q.length - left.length}건을 보냈습니다`);
   if (location.hash.startsWith("#/field/")) route();
 }
-window.addEventListener("online", fieldFlush);
+window.addEventListener("online", fieldFlush);   // 다시 연결되면 보내고 화면을 새로 그림(fieldFlush → route)
+window.addEventListener("offline", () => {   // 끊기면 화면은 그대로 두고 상태 줄만 바꿈 (목록을 지우지 않음)
+  const st = document.querySelector(".fm-status"); if (!st) return;
+  st.classList.replace("on", "off");
+  const n = st.querySelector(".fm-net"); if (n) n.textContent = "오프라인 — 입력은 휴대폰에 임시 저장됩니다";
+  st.querySelector("#fqFlush")?.setAttribute("disabled", "");
+});
 
 async function showField(uid) {
   const u = await load(uid); const r = u.result;
@@ -38,21 +46,24 @@ async function showField(uid) {
     <p class="muted">소유자: ${esc((await api(`/api/projects/${encodeURIComponent(r.name)}/members`).catch(() => [])).filter((m) => m.role === "owner").map((m) => m.username).join(", ") || "관리자")}</p><a class="btn" href="#/p/${uid}/lookahead">PC 화면에서 보기</a></div></div>`; return; }
   $("#crumb").textContent = "";
   const mode = sessionStorage.getItem("fieldTab") || "week";
-  let la = { rows: [], weeks: [], constraints: [] };
-  try { la = await api(`/api/uploads/${uid}/lookahead?weeks=2`); } catch (e) { toast(e.message); }
+  let la = { rows: [], weeks: [], constraints: [] }, stale = null;
+  const LK = `fieldLa:${uid}`;
+  try { la = await api(`/api/uploads/${uid}/lookahead?weeks=2`); store.set(LK, JSON.stringify({ at: Date.now(), la })); }
+  catch (e) {   // 연결이 끊겨도 마지막으로 받은 작업 목록으로 계속 입력 (입력은 휴대폰에 임시 저장)
+    try { const c = JSON.parse(store.get(LK, "null")); if (c?.la) { la = c.la; stale = c.at; } } catch { /* 사본 없음 */ }
+    if (!stale && e.status !== 0 && !(e instanceof TypeError)) toast(e.message);
+  }
   const thisWeek = la.weeks[0];
   const queued = fqLoad().length;
-  const online = navigator.onLine;
+  const online = navigator.onLine && !stale;
   view.innerHTML = `<div class="fm">
-    <div class="fm-status ${online ? "on" : "off"}" role="status"><span class="dot" aria-hidden="true"></span>${online ? "온라인" : "오프라인 — 입력은 휴대폰에 임시 저장됩니다"}
+    <div class="fm-status ${online ? "on" : "off"}" role="status"><span class="dot" aria-hidden="true"></span><span class="fm-net">${online ? "온라인" : `오프라인 — 입력은 휴대폰에 임시 저장됩니다${stale ? ` (작업 목록: ${new Date(stale).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} 사본)` : ""}`}</span>
       ${queued ? `<span class="fm-q">보내지 않은 기록 <b>${queued}</b>건</span><button class="btn sm" id="fqFlush" ${online ? "" : "disabled"}>지금 보내기</button>` : '<span class="fm-q muted">보낼 기록 없음</span>'}</div>
     <div class="fm-head"><div><h2>${esc(r.name)}</h2>
       <div class="muted">이번 주 ${thisWeek || ""} · Data Date ${r.data_date}</div></div><a class="btn" href="#/p/${uid}/lookahead">PC 화면</a></div>
     <div class="fm-tabs" role="tablist">${[["week", "이번 주 약속"], ["cons", "제약"], ["daily", "작업일보"]].map(([k, l]) => `<button role="tab" aria-selected="${k === mode}" class="${k === mode ? "on" : ""}" data-m="${k}">${l}</button>`).join("")}</div>
     <div id="fmBody"></div>
     <label class="fab-cam" title="사진 찍고 작업 고르기"><span aria-hidden="true">📷</span><span class="sr-only">사진 찍고 작업에 연결</span><input type="file" accept="image/*" capture="environment" id="fabCam" hidden></label></div>`;
-  window.addEventListener("online", () => location.hash.startsWith("#/field/") && showField(uid), { once: true });
-  window.addEventListener("offline", () => location.hash.startsWith("#/field/") && showField(uid), { once: true });
   $("#fabCam").onchange = async (e) => {   // 사진 촬영 → 작업 고르기 → 올리기
     const f = e.target.files[0]; if (!f) return;
     const todayIso = new Date().toISOString().slice(0, 10);

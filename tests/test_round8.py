@@ -24,7 +24,7 @@ def test_clock_and_whatif_and_portfolio(env, monkeypatch):
 def test_logo_and_static_cache(env):
     adm, vic = login("admin"), login("vic")
     uid = login("alice").post("/api/upload", files={"file": ("p.xer", RAW)}).json()["ids"][0]
-    assert vic.get("/api/logo").status_code == 404
+    assert vic.get("/api/logo").status_code == 204
     assert vic.post("/api/admin/logo", files={"file": ("l.png", PNG, "image/png")}).status_code == 403
     assert adm.post("/api/admin/logo", files={"file": ("x.gif", b"GIF89a....", "image/gif")}).status_code == 400
     assert adm.post("/api/admin/logo", files={"file": ("l.png", PNG, "image/png")}).status_code == 200
@@ -34,7 +34,7 @@ def test_logo_and_static_cache(env):
     docx = next(n for n in z.namelist() if n.endswith(".docx"))
     assert any(n.startswith("word/media/") for n in zipfile.ZipFile(io.BytesIO(z.read(docx))).namelist())   # 머리글 로고
     adm.delete("/api/admin/logo")
-    assert vic.get("/api/logo").status_code == 404
+    assert vic.get("/api/logo").status_code == 204
     html = vic.get("/").text
     assert '/static/app.js?v=' in html and '/static/theme.css?v=' in html
     r = vic.get("/static/app.js?v=1")

@@ -11,14 +11,16 @@ async function hubCommentFlush() {
   if (q.length !== left.length) toast(`보내지 못했던 대시보드 코멘트 ${q.length - left.length}건을 보냈습니다`);
 }
 window.addEventListener("online", hubCommentFlush);
+setInterval(() => { if (hq().length) hubCommentFlush(); }, 60 * 1000);   // 대시보드가 다시 살아나면 1분 안에 보냄
 document.addEventListener("DOMContentLoaded", () => setTimeout(hubCommentFlush, 3000));
 
 async function hubFeedPanel(el, uid) {
-  const f = await api(`/api/uploads/${uid}/hub-feed`).catch(() => null);
+  // 대시보드에 닿지 않아도 패널은 보여 주고(임시 저장 건수·코멘트 입력), 연결되면 자동 전송
+  const f = await api(`/api/uploads/${uid}/hub-feed`).catch((e) => (e.status === 502 || e.status === 0 ? { available: true, issues: [], comments: [], offline: true } : null));
   if (!f?.available || !el.isConnected) return;
   const pend = hq().filter((x) => x.uid === uid);
   const p = document.createElement("div"); p.className = "panel"; p.id = "hubFeed";
-  p.innerHTML = `<div class="row between"><h3 class="m0">${icon("link", 18)} PMS 대시보드 <span class="muted fs13">이슈·코멘트 (대시보드 기준)</span></h3>
+  p.innerHTML = `${f.offline ? '<p class="warn-text fs13 m0" role="status">PMS 대시보드에 연결할 수 없습니다. 남긴 코멘트는 이 PC에 임시 저장했다가 연결되면 보냅니다.</p>' : ""}<div class="row between"><h3 class="m0">${icon("link", 18)} PMS 대시보드 <span class="muted fs13">이슈·코멘트 (대시보드 기준)</span></h3>
       ${pend.length ? `<span class="chip warn">보내지 않은 코멘트 ${pend.length}건</span>` : ""}</div>
     <div class="grid2 mt12"><div><h4 class="mt0">열린 이슈 ${f.issues.length}</h4>${f.issues.map((x) => `<div class="inbox-item ${x.severity === "bad" ? "high" : "mid"}"><span class="sev">${x.severity === "bad" ? "✕" : "!"}</span>
         <span>${esc(x.title)} <span class="muted fs12">· ${({ new: "새로", ack: "확인", doing: "조치 중" })[x.status] || ""}${x.assignee ? ` · ${esc(x.assignee)}` : ""}</span></span><span></span></div>`).join("") || '<p class="muted">대시보드에서 찾은 이슈가 없습니다.</p>'}</div>
@@ -68,7 +70,7 @@ showAdmin = async function () {
   const h = await api("/api/health").catch(() => null);
   const p = document.createElement("div"); p.className = "panel"; p.id = "opsPanel";
   p.innerHTML = `<h3 class="mt0">${icon("shield", 18)} 운영</h3>
-    ${h ? `<div class="kvline">판 <b>${esc(window.PMS.edition_name)}</b> · 버전 ${esc(h.version)} · 프로젝트 ${h.projects} · DB ${h.db_mb}MB${h.hub_projects !== undefined ? ` · 게시 프로젝트 ${h.hub_projects} · 열린 이슈 ${h.open_issues} · 연결 기기 ${h.devices}` : ""}</div>` : ""}
+    ${h ? `<div class="kvline">제품 <b class="nowrap">${esc(window.PMS.edition_name)}</b> · 버전 ${esc(h.version)} · 프로젝트 ${h.projects} · DB ${h.db_mb}MB${h.hub_projects !== undefined ? ` · 게시 프로젝트 ${h.hub_projects} · 열린 이슈 ${h.open_issues} · 연결 기기 ${h.devices}` : ""}</div>` : ""}
     <p class="muted fs13">백업은 사용 중에도 안전하게 만들어지며 data/backups 에도 최근 10개가 남습니다. 복구는 프로그램을 멈춘 뒤 data/app.db 를 백업 파일로 바꾸면 됩니다.</p>
     <div class="row"><button class="btn" id="opsBackup">${icon("arrowup", 15)} 지금 백업 내려받기</button></div>`;
   ($("#updPanel") || view.querySelector("h2"))?.after(p);

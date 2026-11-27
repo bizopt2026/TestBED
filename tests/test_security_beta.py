@@ -94,3 +94,7 @@ def test_password_policy_and_ip_lockout(env):
 def test_config_hides_commit_before_login(env):
     c = TestClient(app)
     assert "(" not in c.get("/api/config").json()["version"]
+
+
+def test_config_has_today(env):
+    assert TestClient(app).get("/api/config").json()["today"]

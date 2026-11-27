@@ -215,8 +215,13 @@ def restore(tid: str) -> dict:
         if t["kind"] == "record":
             it = p["item"]
             data = {k: v for k, v in it.items() if k not in ("id", "scope", "author", "created_at", "updated_at")}
+            if storage.rec_scope(p["kind"], it["id"]) not in (None, it["scope"]):
+                raise ValueError("같은 번호의 기록이 다른 프로젝트에 있어 되돌릴 수 없습니다")
+            # 되돌린 시각을 수정 시각으로: 동기화(나중에 고친 쪽 우선)에서 되돌린 내용이 이기고, 삭제 표시도 지움
+            now = datetime.now().isoformat(timespec="seconds")
             c.execute("INSERT OR REPLACE INTO records VALUES (?,?,?,?,?,?,?)",
-                      (p["kind"], it["scope"], it["id"], json.dumps(data, ensure_ascii=False), it.get("author", ""), it.get("created_at", ""), it.get("updated_at", "")))
+                      (p["kind"], it["scope"], it["id"], json.dumps(data, ensure_ascii=False), it.get("author", ""), it.get("created_at", ""), now))
+            c.execute("DELETE FROM records WHERE kind='tomb' AND id=?", (storage._tomb_id(it["scope"], p["kind"], it["id"]),))
         elif t["kind"] == "scenario":
             sc = p["scenario"]
             c.execute("INSERT OR REPLACE INTO scenarios VALUES (?,?,?,?,?,?,?,?)",

@@ -28,6 +28,9 @@ def init() -> None:
             code TEXT PRIMARY KEY, pid TEXT, version INTEGER, target_user TEXT, expires_at TEXT, max_uses INTEGER, uses INTEGER,
             revoked INTEGER, created_by TEXT, created_at TEXT)""")
         c.execute("""CREATE TABLE IF NOT EXISTS hub_subs (username TEXT, pid TEXT, created_at TEXT, PRIMARY KEY (username, pid))""")
+        cols = {r[1] for r in c.execute("PRAGMA table_info(hub_devices)")}
+        if "machine" not in cols:   # 같은 PC를 알아보는 표시(현장 PC가 만든 임의 ID) — 다시 연결해도 편집 소유권 유지
+            c.execute("ALTER TABLE hub_devices ADD COLUMN machine TEXT")
 
 
 def _now() -> str:
@@ -41,7 +44,7 @@ class HubError(Exception):
 
 
 # ---------------------------------------------------------------- 기기 토큰
-def register_device(username: str, password: str, name: str, ip: str = "") -> dict:
+def register_device(username: str, password: str, name: str, ip: str = "", machine: str = "") -> dict:
     from . import auth
     init()
     if not auth.users_exist():
@@ -53,8 +56,16 @@ def register_device(username: str, password: str, name: str, ip: str = "") -> di
     if not ok:
         raise HubError(401, "PMS 대시보드 아이디 또는 비밀번호가 맞지 않습니다")
     token = secrets.token_urlsafe(32)
+    th = hashlib.sha256(token.encode()).hexdigest()
+    machine = (machine or "")[:64]
     with storage.conn() as c:
-        c.execute("INSERT INTO hub_devices VALUES (?,?,?,?,?,0)", (hashlib.sha256(token.encode()).hexdigest(), username, (name or "PC")[:60], _now(), _now()))
+        c.execute("INSERT INTO hub_devices (token_hash, username, name, created_at, last_seen, revoked, machine) VALUES (?,?,?,?,?,0,?)",
+                  (th, username, (name or "PC")[:60], _now(), _now(), machine or None))
+        if machine:   # 같은 사람·같은 PC의 예전 연결: 편집 소유권을 새 연결로 넘기고 예전 토큰은 끊음
+            old = [r[0][:16] for r in c.execute("SELECT token_hash FROM hub_devices WHERE username=? AND machine=? AND token_hash!=?", (username, machine, th))]
+            for o in old:
+                c.execute("UPDATE hub_projects SET lock_device=? WHERE lock_device=? AND lock_user=?", (th[:16], o, username))
+            c.execute("UPDATE hub_devices SET revoked=1 WHERE username=? AND machine=? AND token_hash!=?", (username, machine, th))
     storage.audit(username, "POST", "/hub/v1/devices", 200, f"기기 등록: {name}")
     return {"token": token, "username": username}
 
@@ -151,6 +162,10 @@ def publish(user: dict, device: str, data: bytes, note: str = "", take_lock: boo
     with storage.conn() as c:
         c.execute("UPDATE hub_projects SET lock_device=?, lock_user=?, lock_at=? WHERE pid=?", (device, user["username"], _now(), pid))
     last = latest(pid)
+    dd = json.loads(files.get("summary.json", b"{}") or b"{}").get("data_date") or manifest.get("data_date")
+    if last and dd and last.get("data_date") and dd < last["data_date"]:
+        raise HubError(409, f"대시보드의 최신 판 v{last['version']}(Data Date {last['data_date']})보다 이전 Data Date({dd})입니다. 최신 업데이트를 골라 게시하세요",
+                       {"older": True})
     ver = (last["version"] if last else 0) + 1
     data = package.with_manifest(data, version=ver, project=p["name"], published_at=_now(), publisher=user["username"])
     uid = package.import_as_project(data, p["name"], user["username"], note=f"v{ver} {note}".strip())
@@ -238,7 +253,20 @@ def make_code(user: dict, pid: str, version: int | None, days: int = 7, max_uses
         raise HubError(403, "프로젝트 소유자·멤버만 공유 코드를 만들 수 있습니다")
     if version is not None and not snapshot(pid, version):
         raise HubError(404, "없는 판입니다")
-    days = max(1, min(int(days or 7), 30))
+    try:
+        days = int(days if days not in (None, "") else 7)
+        max_uses = None if max_uses in (None, "", 0, "0") else int(max_uses)
+    except (TypeError, ValueError):
+        raise HubError(400, "기간과 사용 횟수는 숫자로 입력하세요")
+    if not 1 <= days <= 30:
+        raise HubError(400, "유효 기간은 1~30일입니다")
+    if max_uses is not None and not 1 <= max_uses <= 1000:
+        raise HubError(400, "사용 횟수는 1~1000회입니다 (비우면 제한 없음)")
+    target = (target or "").strip() or None
+    if target:
+        with storage.conn() as c:
+            if not c.execute("SELECT 1 FROM users WHERE username=? AND active=1", (target,)).fetchone():
+                raise HubError(400, f"'{target}' 사용자가 PMS 대시보드에 없습니다")
     raw = "".join(secrets.choice(CODE_ALPHABET) for _ in range(8))
     code = f"PMS-{raw[:4]}-{raw[4:]}"
     exp = (datetime.now() + timedelta(days=days)).isoformat(timespec="seconds")
@@ -274,6 +302,7 @@ def codes(pid: str) -> list[dict]:
 
 
 def revoke_code(user: dict, code: str) -> None:
+    code = (code or "").strip().upper()
     with storage.conn() as c:
         r = c.execute("SELECT pid FROM hub_codes WHERE code=?", (code,)).fetchone()
         if not r:

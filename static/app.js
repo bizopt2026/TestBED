@@ -52,6 +52,7 @@ async function download(path, fallbackName) {
   URL.revokeObjectURL(a.href);
 }
 
+const appToday = () => (window.PMS?.today || new Date().toISOString()).slice(0, 10);   // 서버 기준 오늘 (APP_TODAY 반영)
 const fmtDays = (n) => (n === null || n === undefined ? "" : n);
 const dayMs = 86400000;
 const toT = (s) => (s ? Date.parse(s + "T00:00:00") : null);
@@ -469,7 +470,7 @@ function tabGantt(el, r) {
       <div class="g-split" id="gSplit" role="separator" aria-label="표 너비 조절" aria-orientation="vertical" aria-valuemin="240" aria-valuemax="1000" aria-valuenow="${+store.get("gsplit", "640")}" tabindex="0"></div>
       <div class="g-right"><canvas class="g-head" id="gh"></canvas><div class="g-body" id="gr" tabindex="0" role="region" aria-label="간트 차트. 위아래 화살표로 작업 선택, Enter로 상세, 좌우 화살표로 이동, +/- 확대·축소, T 오늘"><div id="grs"></div><canvas id="gc" style="position:sticky;top:0;left:0"></canvas></div></div>
     </div>
-    <div class="panel detail" id="det"><span class="muted">행을 클릭하면 선·후행 관계를 볼 수 있습니다. 작업 이름을 누르면 상세 패널이 열립니다.</span></div>`;
+    <div class="panel detail" id="det" aria-live="polite"><span class="muted">행을 클릭하면 선·후행 관계를 볼 수 있습니다. 작업 이름을 누르면 상세 패널이 열립니다.</span></div>`;
   { const gm = $("#gMore"), go = $("#gOpts"); const sync = () => { go.hidden = !gm.open; store.set("gMore", gm.open ? "1" : "0"); }; gm.addEventListener("toggle", sync); go.hidden = !gm.open; }
   let blMap = null; // 저장된 베이스라인 사용 시 code -> {start, finish}
   let cmpMap = null, cmpLabel = "";  // 비교 겹쳐보기: 비교 기준 업데이트의 code -> {s, f}
@@ -705,7 +706,7 @@ function tabGantt(el, r) {
     // Data date
     const xd = X(toT(r.data_date)); g.strokeStyle = cssv("--dd"); g.lineWidth = 1.5; g.setLineDash([5, 4]);
     g.beginPath(); g.moveTo(xd, 0); g.lineTo(xd, H); g.stroke(); g.setLineDash([]); g.lineWidth = 1;
-    const xt = X(toT(new Date().toISOString().slice(0, 10)));
+    const xt = X(toT(appToday()));
     if (xt > 0 && xt < W) { g.strokeStyle = cssv("--today"); g.lineWidth = 1.5; g.beginPath(); g.moveTo(xt, 0); g.lineTo(xt, H); g.stroke(); g.lineWidth = 1;
       h.fillStyle = cssv("--today"); h.font = FONTB; h.fillText("오늘", xt + 3, 15); }
   }
@@ -787,7 +788,7 @@ function tabGantt(el, r) {
   };
   $("#fChg").onchange = build;
   $("#gDate").onchange = (e) => scrollToDate(e.target.value);
-  $("#gToday").onclick = () => scrollToDate(new Date().toISOString().slice(0, 10));
+  $("#gToday").onclick = () => scrollToDate(appToday());
   $("#gDD").onclick = () => scrollToDate(r.data_date);
   // 더블클릭 → 상세 서랍
   $("#glr").addEventListener("dblclick", (e) => { const row = e.target.closest("[data-id]"); if (row) openActivity(byId[row.dataset.id].code); });
@@ -904,7 +905,7 @@ function tabGantt(el, r) {
       sel = acts[i].id; const ri = rows.indexOf(acts[i]);
       if (ri * RH < gr.scrollTop || ri * RH > gr.scrollTop + gr.clientHeight - RH * 2) gr.scrollTop = ri * RH - 100;
       render(); detail(byId[sel]);
-    } else if (e.key === "Enter" && sel) { openActivity(byId[sel].code); }
+    } else if (e.key === "Enter" && sel) { e.preventDefault(); openActivity(byId[sel].code); }
     else if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && e.shiftKey && $("#fEdit").checked && sel) {   // 키보드로 What-if (공기 ±1일)
       e.preventDefault(); const a = byId[sel];
       if (a.status_code === "TK_Complete" || a.milestone) return;
@@ -918,7 +919,7 @@ function tabGantt(el, r) {
     else if (e.key === "-") { e.preventDefault(); ppd = Math.max(0.05, ppd / 1.25); build(); }
     else if (e.key === "Home") { e.preventDefault(); gr.scrollLeft = 0; gr.scrollTop = 0; render(); }
     else if (e.key === "End") { e.preventDefault(); gr.scrollLeft = gr.scrollWidth; render(); }
-    else if (e.key.toLowerCase() === "t") { e.preventDefault(); scrollToDate(new Date().toISOString().slice(0, 10)); }
+    else if (e.key.toLowerCase() === "t") { e.preventDefault(); scrollToDate(appToday()); }
   });
   // 표/차트 너비 조절
   const split = $("#gSplit");
@@ -1475,7 +1476,7 @@ async function tabRisk(el, r, uid) {
         tr.querySelectorAll("[data-inl]").forEach((inp) => (inp.onchange = async () => {
           const v = inp.type === "number" ? +inp.value : inp.value;
           const ok = await saveRec(`/api/uploads/${uid}/risks`, { ...x, [inp.dataset.inl]: v, base_updated_at: x.updated_at }, load);
-          if (ok) { inp.classList.add("saved"); toast("저장했습니다"); load(); }
+          if (ok) { if (ok.updated_at) { x.updated_at = ok.updated_at; x[inp.dataset.inl] = v; } inp.classList.add("saved"); toast("저장했습니다"); load(); }   // 연속 수정해도 자기 자신과 충돌하지 않게
         }));
       } else if (x.assignee || x.due) tds[0].insertAdjacentHTML("beforeend", `<div class="muted fs12">👤 ${esc(x.assignee || "-")}${x.due ? ` · 기한 ${x.due}` : ""}</div>`);
       b.parentElement.querySelector("[data-rcmt]").onclick = () => openComments(uid, "risk:" + x.id, x.title);
@@ -1486,7 +1487,7 @@ async function tabRisk(el, r, uid) {
   let editing = null;
   const openForm = (x = {}) => {
     editing = x.id || null; const f = $("#fRisk"); f.reset();
-    for (const [k, v] of Object.entries(x)) if (f[k]) f[k].value = Array.isArray(v) ? v.join(", ") : v ?? "";
+    for (const [k, v] of Object.entries(x)) { const el = f.elements.namedItem(k); if (el && "value" in el) el.value = Array.isArray(v) ? v.join(", ") : v ?? ""; }   // f.id 같은 폼 속성과 헷갈리지 않게
     $("#dlgRisk").showModal();
   };
   $("#fRisk").onsubmit = async (e) => {

@@ -62,12 +62,12 @@ function openDrawer(title, html, { id = "drawer", width } = {}) {
   if (width) d.style.width = width;
   d.setAttribute("aria-labelledby", id + "-t");
   d.innerHTML = `<div class="drawer-head"><h2 class="dh" id="${id}-t">${title}</h2><button class="btn icon" aria-label="닫기" data-close>✕</button></div><div class="drawer-body">${html}</div>`;
-  d.classList.add("open");
+  d.classList.add("open"); d.inert = false;
   d.querySelector("[data-close]").onclick = () => closeDrawer(id);
   d.querySelector("[data-close]").focus();
   return d;
 }
-function closeDrawer(id = "drawer") { $("#" + id)?.classList.remove("open"); }
+function closeDrawer(id = "drawer") { const d = $("#" + id); if (!d) return; d.classList.remove("open"); d.inert = true; }   // 닫힌 서랍은 Tab 순서에서 뺌
 
 // ---------------------------------------------------------------- 현재 프로젝트 맥락
 const ctx = { uid: null, tab: null, result: null };

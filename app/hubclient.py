@@ -66,6 +66,9 @@ def call(method: str, path: str, user: str, body=None, raw: bytes | None = None,
         except ValueError:
             d = None
         msg = d.get("message") if isinstance(d, dict) else d
+        if e.code == 401 and auth and token(user):   # 기기 연결이 끊김(관리자가 끊었거나 만료) → 이 PC의 토큰을 지우고 다시 연결 안내
+            disconnect(user, remote=False)
+            msg = "PMS 대시보드 연결이 끊겼습니다. 내 설정 → PMS 대시보드 연결에서 다시 연결하세요"
         raise HubClientError(e.code, msg or f"PMS 대시보드 오류 ({e.code})", d if isinstance(d, dict) else {})
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         raise HubClientError(0, f"PMS 대시보드({base})에 연결할 수 없습니다: {getattr(e, 'reason', e)}")
@@ -84,13 +87,28 @@ def connect(user: str, base: str, username: str, password: str) -> dict:
     cfg = call_json("GET", "/api/config", user, base=base, auth=False)
     if cfg.get("edition") != "server":
         raise HubClientError(400, "이 주소는 PMS 대시보드가 아닙니다")
-    r = call_json("POST", "/hub/v1/devices", user, {"username": username, "password": password, "name": f"{platform.node() or 'PC'} · PMS 현장"}, base=base, auth=False)
+    mid = storage.setting("*", "machine_id")
+    if not mid:
+        mid = __import__("uuid").uuid4().hex
+        storage.set_setting("*", "machine_id", mid, user)
+    try:
+        r = call_json("POST", "/hub/v1/devices", user, {"username": username, "password": password, "name": f"{platform.node() or 'PC'} · PMS 현장", "machine": mid}, base=base, auth=False)
+    except HubClientError as e:
+        if e.status == 401:   # 대시보드 비밀번호 틀림 — 현장 로그인과 헷갈리지 않게 400
+            raise HubClientError(400, e.message)
+        raise
     storage.set_setting("*", "hub_url", base, user)
     storage.set_setting("*", f"hub_token:{user or '익명'}", r["token"], user)
     return {"url": base, "hub_user": r["username"], "hub_name": cfg.get("edition_name"), "hub_version": cfg.get("version")}
 
 
-def disconnect(user: str) -> None:
+def disconnect(user: str, remote: bool = True) -> None:
+    """이 PC의 연결을 끊는다. remote=True 이면 대시보드의 기기 등록도 지운다(남은 토큰이 쌓이지 않게)."""
+    if remote and token(user):
+        try:
+            call("DELETE", "/hub/v1/me/device", user, timeout=8)
+        except HubClientError:
+            pass   # 대시보드에 닿지 않아도 이 PC에서는 끊음
     storage.set_setting("*", f"hub_token:{user or '익명'}", None, user)
 
 
@@ -139,7 +157,7 @@ def pull(user: str, pid: str, version: int | None = None, source: str = "hub", c
     from . import package
     path = f"/hub/v1/share-codes/{urllib.parse.quote(code)}" if code else f"/hub/v1/projects/{pid}/snapshots/{version or 'latest'}"
     _, h, data = call("GET", path, user, timeout=120)
-    return package.import_package(data, user, source, {"hub_url": url(), "hub_version": int(h.get("X-PMS-Version") or 0)})
+    return package.import_package(data, user, source, {"hub_url": url(), "hub_version": int({k.lower(): v for k, v in h.items()}.get("x-pms-version") or 0)})
 
 
 def sync(user: str) -> dict:

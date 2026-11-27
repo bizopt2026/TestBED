@@ -67,6 +67,21 @@ async function publishDialog(uid, take = false) {
   }
 }
 async function shareCodeDialog(uid) {
+  const codes = await api(`/api/uploads/${uid}/share-codes`).catch(() => []);
+  const live = codes.filter((c) => !c.revoked && c.expires_at > new Date().toISOString().slice(0, 19));
+  if (live.length) {   // 만든 코드 보기·취소
+    const d = _modal(`<form method="dialog" style="min-width:min(560px,92vw)"><h3>공유 코드</h3>
+      <table class="t"><thead><tr><th>코드</th><th>만료</th><th class="num">사용</th><th>받는 사람</th><th></th></tr></thead><tbody>
+      ${live.map((c) => `<tr><td><code>${esc(c.code)}</code></td><td class="nowrap">${esc(c.expires_at.replace("T", " ").slice(0, 16))}</td><td class="num">${c.uses}${c.max_uses ? `/${c.max_uses}` : ""}</td>
+        <td>${esc(c.target_user || "누구나")}</td><td><button type="button" class="btn sm danger" data-rv="${esc(c.code)}">취소</button></td></tr>`).join("")}</tbody></table>
+      <div class="row end"><button class="btn" value="cancel">닫기</button><button class="btn primary" value="new">새 코드 만들기</button></div></form>`);
+    d.querySelectorAll("[data-rv]").forEach((b) => (b.onclick = () => withBusy(b, async () => {
+      try { await api(`/api/uploads/${uid}/share-codes/${encodeURIComponent(b.dataset.rv)}/revoke`, { method: "POST" }); b.closest("tr").remove(); toast("공유 코드를 취소했습니다"); }
+      catch (e) { toast(e.message); }
+    })));
+    const ans = await new Promise((res) => d.addEventListener("close", () => res(d.returnValue), { once: true }));
+    if (ans !== "new") return;
+  }
   const v = await ui.form("공유 코드 만들기", [
     { name: "days", label: "유효 기간(일, 1~30)", type: "number", value: 7, required: true },
     { name: "max_uses", label: "사용 횟수 제한 (비우면 제한 없음)", type: "number" },

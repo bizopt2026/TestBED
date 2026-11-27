@@ -96,7 +96,8 @@ async function openNotifications() {
 async function openPalette() {
   if ($("#palette")) return;
   const d = document.createElement("dialog"); d.id = "palette"; d.className = "palette";
-  d.innerHTML = `<input type="search" id="palQ" placeholder="검색하거나 명령 입력 (예: 리스크 추가, 보고 패키지, A2000)…" aria-label="검색" autocomplete="off"><ul id="palList" role="listbox"></ul>
+  d.innerHTML = `<input type="search" id="palQ" placeholder="검색하거나 명령 입력 (예: 리스크 추가, 보고 패키지, A2000)…" aria-label="검색" autocomplete="off"
+      role="combobox" aria-expanded="true" aria-controls="palList" aria-autocomplete="list"><ul id="palList" role="listbox" aria-label="검색 결과"></ul>
     <div class="muted pal-foot">↑↓ 이동 · Enter 열기 · Esc 닫기</div>`;
   document.body.appendChild(d); d.showModal();
   d.addEventListener("close", () => d.remove());
@@ -118,9 +119,10 @@ async function openPalette() {
     const q = $("#palQ").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
     shown = items.filter((x) => q.every((w) => (x.label + " " + (x.sub || "") + " " + x.kind).toLowerCase().includes(w))).slice(0, 40);
     sel = Math.min(sel, Math.max(0, shown.length - 1));
-    $("#palList").innerHTML = shown.map((x, i) => `<li role="option" aria-selected="${i === sel}" class="${i === sel ? "on" : ""}" data-i="${i}"><span class="k">${x.kind}</span><b>${esc(x.label)}</b><span class="muted">${esc(x.sub || "")}</span></li>`).join("")
+    $("#palList").innerHTML = shown.map((x, i) => `<li role="option" id="pal-o${i}" aria-selected="${i === sel}" class="${i === sel ? "on" : ""}" data-i="${i}"><span class="k">${x.kind}</span><b>${esc(x.label)}</b><span class="muted">${esc(x.sub || "")}</span></li>`).join("")
       || '<li class="muted">결과가 없습니다</li>';
     $("#palList").querySelector(".on")?.scrollIntoView({ block: "nearest" });
+    $("#palQ").setAttribute("aria-activedescendant", shown.length ? `pal-o${sel}` : "");
   };
   const open = (x) => { d.close(); if (!x) return; if (x.run) x.run(); else if (x.act) openActivity(x.act); else location.hash = x.go; };
   $("#palQ").oninput = () => { sel = 0; draw(); };

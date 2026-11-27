@@ -312,7 +312,7 @@ pollNotifications = async function () {
 const _showAdmin8 = showAdmin;
 showAdmin = async function () {
   await _showAdmin8();
-  const has = await fetch("/api/logo").then((r) => r.ok).catch(() => false);
+  const has = await fetch("/api/logo").then((r) => r.status === 200).catch(() => false);
   const p = document.createElement("div"); p.className = "panel"; p.id = "logoPanel";
   p.innerHTML = `<h3 class="mt0">회사 로고</h3><p class="muted fs13">A3 공정표, 인쇄 화면, Word 보고서 머리에 들어갑니다. PNG·JPG, 512KB 이하, 가로형 권장.</p>
     <div class="row">${has ? `<img src="/api/logo?t=${Date.now()}" alt="현재 로고" class="logo-prev">` : '<span class="muted">등록된 로고 없음</span>'}

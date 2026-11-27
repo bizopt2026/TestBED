@@ -32,7 +32,14 @@ def ai_route() -> tuple[str, str]:
         return "off", "AI가 꺼져 있습니다 (PMS_AI_MODE=off)"
     if EDITION == "server":
         return "local", "PMS 대시보드 서버에서 실행"
-    if not HUB_URL:
+    hub = HUB_URL
+    if not hub:   # 내 설정에서 연결한 대시보드 주소도 인정
+        try:
+            from . import storage
+            hub = storage.setting("*", "hub_url")
+        except Exception:  # noqa: BLE001 — 시작 중(DB 준비 전)에는 단독 실행으로 봄
+            hub = None
+    if not hub:
         return "local", "PMS 대시보드에 연결하지 않은 단독 실행: 이 PC에서 실행"
     if AI_MODE == "local":
         return "local", "이 PC에서 실행 (PMS_AI_MODE=local)"

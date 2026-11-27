@@ -51,6 +51,8 @@ def apply_changes(tables: dict, proj_id: str, changes: list[dict]) -> tuple[dict
         op = ch.get("op")
         if op == "set_duration":
             x = task(ch["code"])
+            if float(ch["days"]) < 0:
+                raise ChangeError(f"{ch['code']} 공기는 0일 이상이어야 합니다")
             hrs = float(ch["days"]) * _day_hours(t, x)
             if x.get("status_code") == "TK_Complete":
                 raise ChangeError(f"{ch['code']}는 완료된 작업이라 공기를 바꿀 수 없습니다")
@@ -86,6 +88,18 @@ def apply_changes(tables: dict, proj_id: str, changes: list[dict]) -> tuple[dict
             typ = REL.get((ch.get("type") or "FS").upper())
             if not typ:
                 raise ChangeError(f"관계 유형 오류: {ch.get('type')}")
+            # 후행에서 선행으로 이미 이어지는 경로가 있으면 순환 관계 — 엔진이 조용히 무시해 준공이 엉뚱하게 당겨지던 문제
+            nxt = {}
+            for r in preds:
+                nxt.setdefault(r.get("pred_task_id"), []).append(r.get("task_id"))
+            seen, stack = set(), [s["task_id"]]
+            while stack:
+                cur = stack.pop()
+                if cur == p["task_id"] or ch["pred"] == ch["succ"]:
+                    raise ChangeError(f"순환 관계가 생깁니다: {ch['succ']}에서 {ch['pred']}로 이미 이어져 있어 {ch['pred']} → {ch['succ']}를 추가할 수 없습니다")
+                if cur in seen:
+                    continue
+                seen.add(cur); stack.extend(nxt.get(cur, []))
             new_id = max([int(r.get("task_pred_id") or 0) for r in preds if str(r.get("task_pred_id", "")).isdigit()] + [900000]) + 1
             preds.append({"task_pred_id": str(new_id), "task_id": s["task_id"], "pred_task_id": p["task_id"],
                           "proj_id": proj_id, "pred_proj_id": proj_id, "pred_type": typ,

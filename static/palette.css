@@ -290,3 +290,38 @@ dialog .row.end { margin-top: 14px; }
 #pfCards[hidden], #pfTable[hidden] { display: none; }
 .ask input { min-width: 0; } .ask > button { flex: none; }
 .drawer-body h3.dh3 { font-size: 14px; margin: 16px 0 6px; }
+
+/* 공정표: 태블릿은 표를 줄이고, 휴대폰은 '작업명 + 막대'만 (표만 보이고 막대가 사라지던 문제) */
+@media (max-width: 1100px) and (min-width: 901px) { .gantt { grid-template-columns: 46% 6px 1fr !important; } }
+@media (max-width: 900px) {
+  .gantt { grid-template-columns: minmax(118px, 36%) minmax(0, 1fr) !important; height: 68vh; }
+  .g-right { display: block; }
+  .g-row:not(.wbs) { grid-template-columns: minmax(0, 1fr) !important; }
+  .g-row:not(.wbs) > div:not(:nth-child(2)) { display: none; }
+  .g-row .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+
+/* 클로즈드 테스트(휴대폰·접근성) */
+.help-top { font-weight: 650; }
+.help-top > span[aria-hidden] { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid currentColor; font-size: 11px; }
+body.field .top .split-btn { display: none; }                 /* 현장 모드: 올리기 버튼과 ▾ 모두 숨김 */
+@media (max-width: 900px) { #crumb, .top .crumb { display: none; } }
+.me-form input, .me-form select { width: 100%; min-width: 0; box-sizing: border-box; }
+.fm-tabs button.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+[data-theme="dark"] .fm-tabs button.on { background: var(--point); color: #06120f; border-color: var(--point); }
+/* 인쇄 미리보기는 어두운 화면에서도 종이처럼 밝게 (SVG 글자가 보이도록) */
+[data-theme="dark"] .print-page { background: #fff; color: #18191b; border-color: #d8d7d3; }
+[data-theme="dark"] .print-page .ph, [data-theme="dark"] .print-page .pf { color: #3b3e44; }
+@media (max-width: 640px) {
+  .kpis .kpi .v { font-size: 22px; overflow-wrap: anywhere; }
+  .kpi .v small { font-size: 12px; }
+  nav.groups a, nav.groups button { white-space: nowrap; font-size: 12.5px; }
+}
+.kpi .v { overflow-wrap: anywhere; }
+/* 참조 프로젝트: 읽기 전용 — 고치기 단추 숨김 */
+body.ro-ref #view [data-need="editor"], body.ro-ref #workMenu [data-w="pub"], body.ro-ref #workMenu [data-w="code"], body.ro-ref #workMenu [data-w="recalc"],
+body.ro-ref #workMenu [data-w="req"], body.ro-ref #btnReqAccess, body.ro-ref #rkAdd, body.ro-ref #view [data-edit], body.ro-ref #view [data-rm], body.ro-ref #view [data-cdel],
+body.ro-ref #view [data-con], body.ro-ref #view [data-commit] { display: none !important; }
+/* 숨김 속성은 항상 숨김 — .btn 등의 display 가 hidden 을 덮어써 권한 없는 단추가 보이던 문제 */
+[hidden] { display: none !important; }
+@media (max-width: 760px) { .help-top { display: none; } .split-btn > .split-more { padding-inline: 7px; } }

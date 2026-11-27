@@ -149,6 +149,8 @@ def from_text(text: str) -> bytes:
     t = "".join((text or "").split())
     if not t.startswith(TEXT_PREFIX):
         raise PackageError("PMS 붙여넣기 텍스트가 아닙니다 (PMS1: 로 시작해야 합니다)")
+    if len(t) > TEXT_MAX * 4 // 3 + 64:
+        raise PackageError(f"붙여넣기 텍스트가 너무 큽니다 (최대 {TEXT_MAX // 1024}KB). .pms 파일로 주고받으세요")
     try:
         return base64.urlsafe_b64decode(t[len(TEXT_PREFIX):].encode())
     except (ValueError, TypeError):
@@ -192,16 +194,25 @@ def import_package(data: bytes, user: str = "", source: str = "file", extra_meta
     name = existing or (manifest["project"] + REF_SUFFIX)
     if not existing and access.project_exists(name):
         name = f"{manifest['project']}{REF_SUFFIX} {pid[:4]}"
-    for h in storage.history(name):
-        if (storage.get_extra(h["id"], "ref_version") or {}).get("version") == ver:
-            return {"uid": h["id"], "name": name, "version": ver, "duplicate": True}
+    xh = (manifest.get("files") or {}).get("schedule.xer")
+    hub_num = bool(manifest.get("published_at"))   # 대시보드가 매긴 판 번호인지 (현장 내보내기는 현장 순번)
+    prev_hist = storage.history(name) if existing else []
+    for h in prev_hist:   # 같은 공정표(내용 해시)면 다시 만들지 않음 — 판 번호는 매긴 곳마다 달라 비교하지 않음
+        ex = storage.get_extra(h["id"], "ref_version") or {}
+        same = (ex.get("hub", True) and ex.get("version") == ver) if hub_num else (ex.get("xer") == xh)   # 대시보드 판은 판 번호, 파일·텍스트는 내용으로
+        if same:
+            return {"uid": h["id"], "name": name, "version": ex.get("version") or ver, "duplicate": True}
     settings = json.loads(files.get("settings.json", b"{}") or b"{}")
     opts = settings.get("schedule_options") or {}
     raw = rename_xer(files["schedule.xer"], manifest.get("proj_id"), name)
     proj_id, res = _analyze(raw, manifest.get("proj_id"), name, opts)
     uid = storage.save(manifest.get("source_filename") or "project.xer", proj_id, name, manifest.get("exported_by") or "참조",
                        f"참조 v{ver} · {manifest.get('exported_by') or ''}", raw, res)
-    storage.set_extra(uid, "ref_version", {"version": ver, "exported_at": manifest.get("exported_at")})
+    storage.set_extra(uid, "ref_version", {"version": ver, "exported_at": manifest.get("exported_at"), "xer": xh, "hub": hub_num})
+    latest_dd = max([h["data_date"] for h in prev_hist] or [""])
+    if existing and res["data_date"] < latest_dd:
+        # 더 옛날 판(예: 예전 판의 공유 코드): 이력에만 넣고, 최신 판의 기록·표시는 그대로 둠
+        return {"uid": uid, "name": name, "version": ver, "older": True, "latest_data_date": latest_dd}
     storage.set_setting(name, "schedule_options", opts)
     for k in ("metric_overrides", "status_thresholds"):
         if settings.get(k):

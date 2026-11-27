@@ -112,7 +112,17 @@ function renderSide() {
   $("#sideMini").onclick = () => { const on = !document.body.classList.contains("side-mini"); document.body.classList.toggle("side-mini", on); store.set("sideMini", on ? "1" : "0"); renderSide(); };
   el.querySelectorAll("a").forEach((a) => a.addEventListener("click", () => setSideOpen(false)));
 }
-function setSideOpen(on) { document.body.classList.toggle("side-open", on); $("#btnSide")?.setAttribute("aria-expanded", String(on)); }
+function setSideOpen(on) {
+  document.body.classList.toggle("side-open", on); $("#btnSide")?.setAttribute("aria-expanded", String(on));
+  sideInert();
+  if (on) $("#side")?.querySelector("a, button")?.focus();   // 열면 메뉴 안으로 초점
+}
+function sideInert() {   // 휴대폰에서 닫힌 메뉴는 Tab 순서에서 빠지게
+  const side = $("#side"); if (!side) return;
+  side.inert = matchMedia("(max-width: 900px)").matches && !document.body.classList.contains("side-open");
+}
+matchMedia("(max-width: 900px)").addEventListener?.("change", sideInert);
+document.addEventListener("DOMContentLoaded", sideInert);
 document.addEventListener("DOMContentLoaded", () => {
   if (store.get("sideMini") === "1") document.body.classList.add("side-mini");
   $("#btnSide")?.addEventListener("click", () => setSideOpen(!document.body.classList.contains("side-open")));

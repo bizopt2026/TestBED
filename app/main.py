@@ -35,7 +35,7 @@ SECURE_COOKIE = os.environ.get("SECURE_COOKIE", "0") == "1"
 
 PUBLIC = {"/api/config", "/api/login", "/api/logout", "/api/me"}
 # 조회 권한(viewer)으로도 허용되는 계산 전용 POST
-VIEWER_POST = ("/whatif", "/recovery", "/api/reports/render", "/api/reports/preview", "/outputs/log", "/api/usage", "/api/dashboard/ask", "/hub-comments")
+VIEWER_POST = ("/whatif", "/recovery", "/api/reports/render", "/api/reports/preview", "/outputs/log", "/api/usage", "/api/dashboard/ask", "/hub-comments", "/xer_patch")
 ADMIN_ONLY = ("/api/admin/",)
 
 
@@ -146,7 +146,8 @@ def config(request: Request):
     from . import mpp_convert
     signed = not auth_mod.users_exist() or bool(getattr(request.state, "user", None))
     return {"mpp": mpp_convert.available(), "token_required": bool(APP_TOKEN) and not auth_mod.users_exist(), "login_required": auth_mod.users_exist(),
-            "ai": ai.status()["enabled"], "version": _version_label() if signed else _version_label().split(" ")[0],   # 로그인 전에는 커밋 해시를 보이지 않음 "today": __import__("app.clock", fromlist=["today"]).today().isoformat(),
+            "ai": ai.status()["enabled"], "version": _version_label() if signed else _version_label().split(" ")[0],   # 로그인 전에는 커밋 해시를 보이지 않음
+            "today": __import__("app.clock", fromlist=["today"]).today().isoformat(),
             **edition.config()}
 
 
@@ -395,6 +396,8 @@ def compare(base: str, target: str):
     a, b = storage.get(base), storage.get(target)
     if not a or not b:
         raise HTTPException(404)
+    if a["name"] != b["name"]:
+        raise HTTPException(400, "같은 프로젝트의 업데이트끼리만 비교할 수 있습니다")
     ra, rb = a["result"], b["result"]
     ma = {x["code"]: x for x in ra["activities"]}
     mb = {x["code"]: x for x in rb["activities"]}
@@ -700,12 +703,12 @@ def add_risk(uid: str, body: dict = Body(...), user: str = Depends(_user)):
     old = storage.rec_get("risk", body["id"]) if body.get("id") else None
     if old and old["scope"] != _name(uid):
         raise HTTPException(404)
-    if (c := _conflict(old, body)) is not None:
+    if (c := _conflict(old, body, user)) is not None:
         return c
     x["updated_by"] = user
     rid = storage.rec_put("risk", _name(uid), x, user, rid=body.get("id") or None)
     _notify_assignee(uid, x, old, user, "리스크", "risk")
-    return {"id": rid}
+    return {"id": rid, "updated_at": storage.rec_get("risk", rid)["updated_at"]}   # 화면이 새 기준 시각을 바로 쓰게(연속 수정 시 자기 자신과 충돌 방지)
 
 
 @app.delete("/api/uploads/{uid}/risks/{rid}")
@@ -824,21 +827,24 @@ def put_record(uid: str, kind: str, body: dict = Body(...), user: str = Depends(
         x = _rec_body(kind, body)
     except (ValueError, TypeError):
         raise HTTPException(400, "날짜 형식을 확인하세요")
+    code = x.get("code")
+    if code and code not in {a["code"] for a in services.result(uid)["activities"]}:   # 일괄 입력과 같은 검사
+        raise HTTPException(400, f"없는 작업 코드입니다: {code}")
     rid = body.get("id")
     old = None
     if rid:
         old = storage.rec_get(kind, rid)
         if not old or old["scope"] != _name(uid):
             raise HTTPException(404)
-    if (c := _conflict(old, body)) is not None:
+    if (c := _conflict(old, body, user)) is not None:
         return c
     x["updated_by"] = user
     new_id = storage.rec_put(kind, _name(uid), x, user, rid=rid)
     _notify_assignee(uid, x, old, user, "제약" if kind == "constraint" else "약속", "lookahead")
-    return {"id": new_id}
+    return {"id": new_id, "updated_at": storage.rec_get(kind, new_id)["updated_at"]}
 
 
-def _conflict(old: dict | None, body: dict):
+def _conflict(old: dict | None, body: dict, user: str = ""):
     """동시 편집 충돌: 화면을 연 뒤 다른 사람이 먼저 고쳤으면 409로 알린다 (base_updated_at 이 있을 때만)."""
     base = body.get("base_updated_at")
     if old and base and old.get("updated_at") and old["updated_at"] != base:
@@ -1129,7 +1135,8 @@ async def upload_photo(uid: str, request: Request, ref: str = Form(...), file: U
 
 @app.get("/api/uploads/{uid}/photos")
 def list_photos(uid: str, ref: str | None = None):
-    return storage.file_list(_name(uid), ref)
+    # 사진만 (확정본 zip·로고·대시보드 판 파일은 사진 목록에 넣지 않음)
+    return [f for f in storage.file_list(_name(uid), ref) if f["mime"].startswith("image/")]
 
 
 @app.get("/api/photos/{fid}")
@@ -1142,6 +1149,11 @@ def get_photo(fid: str):
 
 @app.delete("/api/photos/{fid}")
 def del_photo(fid: str):
+    f = storage.file_get(fid)
+    if not f:
+        raise HTTPException(404)
+    if not f["mime"].startswith("image/") or (f["ref"] or "").startswith(("final:", "hub:", "logo")):
+        raise HTTPException(403, "확정본·게시 파일은 지울 수 없습니다")
     if not storage.file_del(fid):
         raise HTTPException(404)
     return {"ok": True}
@@ -1267,6 +1279,10 @@ def get_members(name: str):
 def add_member(name: str, request: Request, body: dict = Body(...)):
     if not access.project_exists(name):
         raise HTTPException(404, "없는 프로젝트입니다")
+    with storage.conn() as c:
+        r = c.execute("SELECT role FROM users WHERE username=? AND active=1", (str(body.get("username", "")),)).fetchone()
+    if r and r["role"] == "viewer":
+        raise HTTPException(400, "조회 전용 계정은 멤버로 지정할 수 없습니다. 관리자가 먼저 편집자로 바꿔 주세요")
     try:
         access.set_member(name, str(body.get("username", "")), str(body.get("role", "member")), request.state.user["username"])
     except ValueError as e:
@@ -1327,7 +1343,7 @@ def activities(uid: str):
 # ---- 코멘트·@멘션 (읽기 사용자도 가능)
 def _mentions(text: str) -> list[str]:
     names = {u["username"] for u in auth_mod.list_users() if u["active"]} if auth_mod.users_exist() else set()
-    found = re.findall(r"@([\w.\-가-힣]+)", text)
+    found = [m.rstrip(".-") for m in re.findall(r"@([\w.\-가-힣]+)", text)]   # 문장 끝 마침표는 이름이 아님 (@bob.)
     return [n for n in dict.fromkeys(found) if n in names]
 
 
@@ -1527,7 +1543,7 @@ async def static_cache(request: Request, call_next):
 def get_logo():
     lg = services.logo()
     if not lg:
-        raise HTTPException(404)
+        return Response(status_code=204)   # 로고 없음 — 화면 콘솔에 404 오류가 남지 않게
     return Response(lg[0], media_type=lg[1], headers={"Cache-Control": "private, max-age=300"})
 
 
@@ -1580,6 +1596,7 @@ def put_thresholds(uid: str, body: dict = Body(...), user: str = Depends(_user))
     except (TypeError, ValueError):
         raise HTTPException(400, "숫자로 입력하세요")
     storage.set_setting(_name(uid), "status_thresholds", v, user)
+    _reevaluate_issues(_name(uid))
     return {"values": v}
 
 
@@ -1640,6 +1657,8 @@ def final_download(uid: str):
     if not f:
         raise HTTPException(404, "확정본이 없습니다")
     data = storage.file_get(f["file_id"])
+    if not data:
+        raise HTTPException(410, "확정본 파일이 없어졌습니다. 관리자에게 문의하세요")
     r = services.result(uid)
     return Response(data["data"], media_type="application/zip",
                     headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_q(r['name'] + '_확정본_' + r['data_date'] + '.zip')}"})
@@ -1722,7 +1741,21 @@ def put_team_thresholds(body: dict = Body(...), user: str = Depends(_user)):
     except (TypeError, ValueError):
         raise HTTPException(400, "숫자로 입력하세요")
     storage.set_setting("*", "status_thresholds", v, user)
+    _reevaluate_issues()
     return {"values": v}
+
+
+def _reevaluate_issues(name: str | None = None) -> None:
+    """기준이 바뀌면 (대시보드) 이슈를 다시 판정해 상태·이유·이슈 보드가 어긋나지 않게."""
+    if edition.EDITION != "server":
+        return
+    from . import issues
+    for p in storage.latest_by_project():
+        if name is None or p["name"] == name:
+            try:
+                issues.evaluate(p["id"])
+            except Exception:  # noqa: BLE001
+                pass
 
 
 @app.get("/api/admin/ai-policy")
@@ -1833,7 +1866,16 @@ def hub_register(request: Request, body: dict = Body(...)):
     from . import hub
     _hub_only()
     return _hub_call(hub.register_device, str(body.get("username") or ""), str(body.get("password") or ""), str(body.get("name") or ""),
-                     request.client.host if request.client else "")
+                     request.client.host if request.client else "", str(body.get("machine") or ""))
+
+
+@app.delete("/hub/v1/me/device")
+def hub_forget_device(request: Request):
+    """현장에서 '연결 끊기' 하면 이 기기 등록을 지운다."""
+    from . import hub
+    _, dev = _hub_auth(request)
+    hub.revoke_device(dev)
+    return {"ok": True}
 
 
 @app.get("/hub/v1/me")
@@ -1910,8 +1952,8 @@ def hub_make_code(request: Request, body: dict = Body(...)):
     from . import hub
     u, _ = _hub_auth(request)
     v = body.get("version")
-    return _hub_call(hub.make_code, u, str(body.get("pid") or ""), int(v) if v else None, int(body.get("days") or 7),
-                     int(body["max_uses"]) if body.get("max_uses") else None, body.get("target") or None)
+    return _hub_call(hub.make_code, u, str(body.get("pid") or ""), int(v) if v else None, body.get("days", 7),
+                     body.get("max_uses"), body.get("target") or None)   # 값 검사는 make_code 에서 (0·음수·없는 사용자 거부)
 
 
 @app.get("/hub/v1/share-codes/{code}")
@@ -2015,7 +2057,10 @@ def _hc(fn, *a, **kw):
     try:
         return fn(*a, **kw)
     except hubclient.HubClientError as e:
-        raise HTTPException(502 if e.status == 0 else e.status, {"message": e.message, **e.extra} if e.extra else e.message)
+        st = 502 if e.status == 0 else e.status
+        if st == 401:   # 대시보드의 401을 그대로 넘기면 현장 로그인이 풀린 것으로 보여 로그인 화면이 반복됨
+            st = 409
+        raise HTTPException(st, {"message": e.message, **e.extra} if e.extra else e.message)
     except package.PackageError as e:
         raise HTTPException(400, str(e))
 
@@ -2088,6 +2133,22 @@ def hubc_project(uid: str, user: str = Depends(_user)):
     return out
 
 
+@app.get("/api/uploads/{uid}/share-codes")
+def hubc_share_codes(uid: str, user: str = Depends(_user)):
+    from . import hubclient
+    pub = storage.setting(storage.name_of(uid), "hub_published")
+    if not pub:
+        return []
+    return _hc(hubclient.call_json, "GET", f"/hub/v1/projects/{pub['pid']}/share-codes", user, timeout=10)
+
+
+@app.post("/api/uploads/{uid}/share-codes/{code}/revoke")
+def hubc_share_code_revoke(uid: str, code: str, user: str = Depends(_user)):
+    from . import hubclient
+    import urllib.parse as _up
+    return _hc(hubclient.call_json, "DELETE", f"/hub/v1/share-codes/{_up.quote(code.strip().upper())}", user)
+
+
 @app.post("/api/uploads/{uid}/share-code")
 def hubc_share_code(uid: str, body: dict = Body(default={}), user: str = Depends(_user)):
     from . import hubclient
@@ -2096,7 +2157,7 @@ def hubc_share_code(uid: str, body: dict = Body(default={}), user: str = Depends
     if not pub:
         raise HTTPException(400, "먼저 PMS 대시보드에 게시하세요")
     return _hc(hubclient.call_json, "POST", "/hub/v1/share-codes", user,
-               {"pid": pub["pid"], "version": body.get("version"), "days": body.get("days") or 7, "max_uses": body.get("max_uses"), "target": body.get("target")})
+               {"pid": pub["pid"], "version": body.get("version"), "days": body.get("days", 7), "max_uses": body.get("max_uses"), "target": body.get("target")})
 
 
 
@@ -2131,6 +2192,11 @@ def issue_update(iid: str, request: Request, body: dict = Body(...), user: str =
     u = request.state.user
     if auth_mod.users_exist() and not (u.get("role") == "admin" or access.can_write(u, x["project"])):
         raise HTTPException(403, "프로젝트 소유자·멤버 또는 관리자만 이슈 상태를 바꿀 수 있습니다")
+    asg = body.get("assignee")
+    if asg and auth_mod.users_exist():
+        with storage.conn() as c:
+            if not c.execute("SELECT 1 FROM users WHERE username=? AND active=1", (str(asg),)).fetchone():
+                raise HTTPException(400, f"'{asg}' 사용자가 없습니다")
     try:
         return issues.update(iid, user, body.get("status"), body.get("assignee"), str(body.get("note") or ""))
     except ValueError as e:

@@ -31,11 +31,11 @@ window.addEventListener("online", () => { offlineBanner(); toast("다시 연결�
 
 // ---------------------------------------------------------------- ⑩ 동시 편집 충돌 처리 저장
 async function saveRec(path, body, reload) {
-  try { await api(path, { method: "POST", json: body }); return true; }
+  try { return (await api(path, { method: "POST", json: body })) || true; }   // 저장 결과(새 updated_at)를 돌려줌
   catch (e) {
     if (e.status !== 409 || !e.detail?.conflict) { toast(e.message); return false; }
     const over = await ui.confirm(`${e.detail.message}.\n내 변경으로 덮어쓸까요? '취소'를 누르면 최신 내용을 다시 불러옵니다.`, { ok: "덮어쓰기", danger: true });
-    if (over) { const { base_updated_at, ...rest } = body; await api(path, { method: "POST", json: rest }); toast("덮어썼습니다"); return true; }
+    if (over) { const { base_updated_at, ...rest } = body; const r = await api(path, { method: "POST", json: rest }); toast("덮어썼습니다"); return r || true; }
     reload?.(); toast("최신 내용을 불러왔습니다"); return false;
   }
 }

@@ -8,6 +8,7 @@ async function userList() { if (!_users) _users = await api("/api/users").catch(
 const fmtAt = (s) => (s || "").replace("T", " ").slice(5, 16);
 let prefs = { start_page: "home", term_mode: store.get("termMode", "mixed"), notify: [] };
 async function loadPrefs() {
+  if (!me) { try { me = await (await fetch("/api/me")).json(); } catch { /* 로그인 전 */ } }   // #/me 를 바로 열거나 새로 고침해도 내 설정이 맞게
   if (!me?.username) return prefs;
   try { prefs = await api("/api/me/prefs"); store.set("termMode", prefs.term_mode); } catch {}
   return prefs;
@@ -325,7 +326,7 @@ async function commentThread(box, uid, target, { compact = false } = {}) {
       ${c.resolved ? `<span class="chip ok">✓ 해결${c.resolved_by ? " · " + esc(c.resolved_by) : ""}</span>` : ""}<span class="spacer"></span>
       <button class="btn sm ghost" data-res="${c.id}" data-v="${c.resolved ? 0 : 1}">${c.resolved ? "다시 열기" : "해결"}</button>
       ${c.author === me?.username || me?.role === "admin" || !me?.username ? `<button class="btn sm ghost" data-cdel="${c.id}" aria-label="코멘트 삭제">✕</button>` : ""}</div>
-    <div class="cmt-b">${esc(c.text).replace(/@([\w.\-가-힣]+)/g, '<span class="mention">@$1</span>')}</div></div>`;
+    <div class="cmt-b">${esc(c.text).replace(/@([\w\-가-힣]+(?:\.[\w\-가-힣]+)*)/g, '<span class="mention">@$1</span>')}</div></div>`;
   box.innerHTML = `${open.map(one).join("") || (compact ? "" : '<p class="muted">아직 코멘트가 없습니다.</p>')}
     ${done.length ? `<details><summary class="muted">해결된 코멘트 ${done.length}건</summary>${done.map(one).join("")}</details>` : ""}
     <form class="cmt-form"><div class="mention-wrap"><textarea class="s" rows="2" placeholder="코멘트 (예: @kim 자재 반입 일정 확인 부탁드립니다)" aria-label="코멘트 입력"></textarea>
@@ -698,7 +699,8 @@ showReports = async function (preUid) {
 const _showPrint0 = showPrint;
 showPrint = async function (uid) {
   await _showPrint0(uid);
-  api(`/api/uploads/${uid}/outputs/log`, { method: "POST", json: { kind: "print" } }).catch(() => {});
+  // 미리보기만 열어도 기록되던 것을 실제 인쇄할 때만 기록
+  window.addEventListener("beforeprint", () => { if (location.hash.startsWith("#/print/")) api(`/api/uploads/${uid}/outputs/log`, { method: "POST", json: { kind: "print" } }).catch(() => {}); }, { once: true });
 };
 // 그룹 메뉴의 '엑셀 리포트' → 보고서 센터
 GROUPS.forEach(([, ts]) => ts.forEach((t) => { if (t[0] === "xlsx") t[1] = "보고서 센터"; }));

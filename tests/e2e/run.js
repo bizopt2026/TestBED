@@ -104,7 +104,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
       await ctx2.close();
     });
     await step("PMS 현장 이름 표시", async () => {
-      await alice.waitForFunction(() => document.querySelector(".top .pms-name")?.textContent === "PMS 현장" && document.title === "PMS 현장");
+      await alice.waitForFunction(() => document.querySelector(".top .pms-name")?.textContent === "PMS 현장" && document.title.endsWith("PMS 현장"));
     });
     await step("빈 홈 화면", async () => { await alice.goto(`${BASE}/#/`); await alice.waitForSelector(".panel.empty"); await a11y(alice, "빈 홈"); });
     await step("업로드 → 상황판", async () => {
@@ -413,7 +413,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
       await a11y(al, "게시 후 상황판");
       await al.context().close();
       const dash = await login(browser, "admin", undefined, HB);
-      await dash.waitForFunction(() => document.title === "PMS 대시보드");
+      await dash.waitForFunction(() => document.title.endsWith("PMS 대시보드"));
       await dash.waitForSelector("#issueBoard");
       await a11y(dash, "PMS 대시보드 홈");
       await shot(dash, "10_dashboard");

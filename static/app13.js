@@ -148,7 +148,6 @@ const _showAdmin27 = showAdmin;
 showAdmin = async function (...a) {
   const r = await _showAdmin27(...a);
   view.querySelectorAll(".ver-line .muted").forEach((m) => { m.textContent = m.textContent.split(" · ").filter((x) => !/^(claude\/|feature\/|fix\/)/.test(x.trim())).join(" · "); });
-  view.querySelectorAll("*").forEach((n) => { if (n.childNodes.length === 1 && n.firstChild.nodeType === 3 && /^판 PMS/.test(n.textContent)) n.textContent = n.textContent.replace(/^판 /, "제품: "); });
   return r;
 };
 

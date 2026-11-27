@@ -806,6 +806,12 @@ def clean_risk(d: dict, valid_codes: set[str]) -> dict:
         except (TypeError, ValueError):
             x[k] = 0.0
     x["prob"] = min(max(x["prob"], 0), 100)
+    if min(x["impact_min"], x["impact_ml"], x["impact_max"], x["cost"]) < 0:
+        raise ValueError("영향(일)과 비용은 0 이상이어야 합니다")
+    if not x["impact_max"] and x["impact_ml"]:   # 최대를 비우면 보통 값으로
+        x["impact_max"] = x["impact_ml"]
+    if not x["impact_min"] <= x["impact_ml"] <= x["impact_max"]:
+        raise ValueError("영향(일)은 최소 ≤ 보통 ≤ 최대 순서로 입력하세요")
     x["status"] = x["status"] if x["status"] in ("open", "closed", "mitigating") else "open"
     return x
 
@@ -1206,8 +1212,10 @@ def unified_level(uid: str, base_level: str) -> dict:
     warn = [x for x in xs if x["severity"] == "warn"]
     lv = "bad" if bad else "warn" if warn else "ok"
     level = max(base_level, lv, key=lambda v: _LV[v])
-    return {"level": level, "base_level": base_level, "issues": {"bad": len(bad), "warn": len(warn)},
-            "reasons": [x["title"] for x in (bad + warn)[:3]]}
+    reasons = [x["title"] for x in (bad + warn)[:3]]
+    if _LV[base_level] > _LV[lv]:
+        reasons.insert(0, "상태 기준(목표 대비 여유·건전성·SPI) 미달")
+    return {"level": level, "base_level": base_level, "issues": {"bad": len(bad), "warn": len(warn)}, "reasons": reasons}
 
 
 # ---------------------------------------------------------------- 6차: 상황판 '왜?' AI 설명

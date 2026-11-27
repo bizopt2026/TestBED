@@ -77,7 +77,7 @@ def test_hub_end_to_end(hub_server, monkeypatch):
     monkeypatch.setattr(ai, "PROVIDER", "cli")
     # ---- A: alice 의 PMS 현장
     db_a = _client_db(); a = _c()
-    assert a.post("/api/hub/connect", json={"url": hub_server, "username": "alice", "password": "wrong"}).status_code == 401
+    assert a.post("/api/hub/connect", json={"url": hub_server, "username": "alice", "password": "wrong"}).status_code == 400   # 401 이면 현장 로그인 화면이 뜸
     assert a.post("/api/hub/connect", json={"url": hub_server, "username": "alice", "password": PW}).json()["hub_user"] == "alice"
     assert a.get("/api/hub/status").json()["connected"] is True
     uid = a.post("/api/upload", files={"file": ("p.xer", RAW)}).json()["ids"][0]
@@ -183,6 +183,7 @@ def test_hub_records_two_way(hub_server, monkeypatch):
     a.post("/api/hub/sync")
     assert {x["id"]: x["title"] for x in hub("GET", f"/api/uploads/{huid}/risks")}[r2] == "크레인 고장(수리 완료)"
     # 대시보드에서 지우면 현장에서도 지워짐 (나중에 고치지 않았으므로)
+    time.sleep(1.1)   # 같은 초의 고침·지움은 '남기기'가 이기므로, 지움을 1초 뒤에
     hub("DELETE", f"/api/uploads/{huid}/risks/{r1}")
     a.post("/api/hub/sync")
     assert [x["id"] for x in storage.rec_list("risk", name)] == [r2]
@@ -195,3 +196,51 @@ def test_hub_records_two_way(hub_server, monkeypatch):
     pub2 = a.post(f"/api/uploads/{uid}/publish", json={}).json()
     assert r3 in {x["id"] for x in hub("GET", f"/api/uploads/{pub2['upload_id']}/risks")}
     assert r3 in {x["id"] for x in storage.rec_list("risk", name)}        # 게시 전에 받아 왔음
+
+
+def test_hub_beta_fixes(hub_server, monkeypatch):
+    """클로즈드 테스트(협업)에서 나온 결함의 회귀 테스트."""
+    from app import notify, recsync
+    monkeypatch.setattr(edition, "EDITION", "client")
+    db = _client_db(); a = _c()
+    a.post("/api/hub/connect", json={"url": hub_server, "username": "bob", "password": PW})
+    # 연결한 현장은 AI를 대시보드에서 실행 (PMS_HUB_URL 없이 내 설정으로 연결해도)
+    monkeypatch.setattr(edition, "HUB_URL", "")
+    assert edition.ai_route()[0] == "gateway"
+    uid = a.post("/api/upload", files={"file": ("p.xer", RAW)}).json()["ids"][0]
+    name = storage.name_of(uid)
+    assert a.post(f"/api/uploads/{uid}/publish", json={}).json()["version"] == 1
+    # 같은 PC에서 다시 연결해도 편집 소유권 유지 (예전 토큰은 끊김)
+    old = storage.setting("*", "hub_token:익명")
+    a.post("/api/hub/connect", json={"url": hub_server, "username": "bob", "password": PW})
+    assert storage.setting("*", "hub_token:익명") != old
+    assert a.post(f"/api/uploads/{uid}/publish", json={}).json()["version"] == 2
+    # 공유 코드 입력 검사
+    assert a.post(f"/api/uploads/{uid}/share-code", json={"days": 0}).status_code == 400
+    assert a.post(f"/api/uploads/{uid}/share-code", json={"days": 3, "max_uses": -1}).status_code == 400
+    assert a.post(f"/api/uploads/{uid}/share-code", json={"days": 3, "target": "nobody"}).status_code == 400
+    code = a.post(f"/api/uploads/{uid}/share-code", json={"days": 3}).json()["code"]
+    assert any(c["code"] == code for c in a.get(f"/api/uploads/{uid}/share-codes").json())
+    assert a.post(f"/api/uploads/{uid}/share-codes/{code.lower()}/revoke").status_code == 200
+    # 휴지통에서 되돌린 리스크는 다음 동기화에서 다시 지워지지 않음
+    rid = a.post(f"/api/uploads/{uid}/risks", json={"title": "되돌림 확인", "codes": [], "prob": 30}).json()["id"]
+    a.post("/api/hub/sync")
+    tid = a.delete(f"/api/uploads/{uid}/risks/{rid}").json()["trash_id"]
+    a.post("/api/hub/sync")
+    notify.restore(tid)
+    a.post("/api/hub/sync")
+    assert rid in {x["id"] for x in storage.rec_list("risk", name)}
+    # 같은 초에 양쪽에서 고쳐도 같은 쪽으로 맞춰짐
+    x = storage.rec_get("risk", rid)
+    mine = {**x, "title": "현장 동시", "updated_at": "2099-01-01T00:00:00", "id": rid}
+    theirs = {**x, "title": "본사 동시", "updated_at": "2099-01-01T00:00:00", "id": rid}
+    storage.rec_put("risk", name, mine, "bob", rid=rid, updated_at="2099-01-01T00:00:00")
+    recsync.merge(name, {"risk": [theirs]}, "대시보드")
+    t1 = storage.rec_get("risk", rid)["title"]
+    storage.rec_put("risk", name, theirs, "bob", rid=rid, updated_at="2099-01-01T00:00:00")
+    recsync.merge(name, {"risk": [mine]}, "현장")
+    assert storage.rec_get("risk", rid)["title"] == t1
+    # 대시보드 기기 연결이 끊기면 현장 로그인 화면(401)이 아니라 다시 연결 안내
+    storage.set_setting("*", "hub_token:익명", "revoked-token")
+    r = a.get(f"/api/uploads/{uid}/hub-feed")
+    assert r.status_code != 401 and storage.setting("*", "hub_token:익명") is None

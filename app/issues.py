@@ -74,7 +74,7 @@ def detect(uid: str) -> list[dict]:
         slip = _dd(r["finish"], prev_r["finish"])
         if slip is not None and slip >= 7:
             H("slip", "직전 대비 악화", "bad", f"예상 준공이 직전 판보다 {slip}일 늦어짐", f"{prev_r['finish']} → {r['finish']}")
-        elif slip is not None and slip >= 3:
+        elif slip is not None and slip >= min(3, t["slip_warn"] if t["slip_warn"] is not None else 3):
             H("slip", "직전 대비 악화", "warn", f"예상 준공이 직전 판보다 {slip}일 늦어짐", f"{prev_r['finish']} → {r['finish']}")
     neg = [a for a in inc if a["tf"] is not None and a["tf"] < 0]
     if neg:
@@ -106,6 +106,8 @@ def detect(uid: str) -> list[dict]:
             H("review", "게시 검토", "warn", f"확인이 필요한 변경 {len(sus)}건", "\n".join(sus))
     if t["health_bad"] is not None and hs is not None and hs < t["health_bad"]:
         H("health_low", "공정표 품질", "bad", f"건전성 점수 {hs}점", "기준 미달")
+    elif t["health_warn"] is not None and hs is not None and hs < t["health_warn"]:
+        H("health_low", "공정표 품질", "warn", f"건전성 점수 {hs}점 (기준 {t['health_warn']} 미만)", "상태 기준 미달")
     overdue = [c for c in storage.rec_list("constraint", name) if c.get("status") != "해결" and c.get("due") and c["due"] < today.isoformat()]
     if overdue:
         H("constraint", "운영", "warn", f"기한 지난 제약 {len(overdue)}건", ", ".join(f"{c.get('code')} {c.get('type')}" for c in overdue[:5]))

@@ -18,6 +18,11 @@ def _body(x: dict) -> dict:
     return {k: v for k, v in x.items() if k not in META}
 
 
+def _key(x: dict) -> str:
+    import json
+    return json.dumps(_body(x), ensure_ascii=False, sort_keys=True)
+
+
 def tombs(name: str) -> list[dict]:
     return [{"kind": t["kind"], "rid": t["rid"], "at": t["at"]} for t in storage.rec_list("tomb", name)]
 
@@ -48,7 +53,7 @@ def merge(name: str, incoming: dict, other: str, by: str = "") -> dict:
             rid, at = x.get("id"), x.get("updated_at") or ""
             if not rid:
                 continue
-            if mine_t.get((kind, rid), "") >= at and (kind, rid) in mine_t:
+            if (kind, rid) in mine_t and mine_t[(kind, rid)] > at:   # 같은 초면 지우기보다 남기기 (내용을 잃지 않게)
                 st["kept"] += 1          # 여기서 더 나중에 지움
                 continue
             l = local.get(rid)
@@ -60,7 +65,7 @@ def merge(name: str, incoming: dict, other: str, by: str = "") -> dict:
                 st["added"] += 1
             elif _body(l) == _body(x):
                 continue
-            elif at > (l.get("updated_at") or ""):
+            elif (at, _key(x)) > ((l.get("updated_at") or ""), _key(l)):   # 같은 초에 고쳤으면 내용으로 정해 양쪽이 같은 쪽을 고름
                 _log(name, kind, l, "덮어씀", other, by)
                 storage.rec_put(kind, name, _body(x), x.get("author") or by, rid=rid, updated_at=at)
                 st["updated"] += 1
@@ -70,7 +75,7 @@ def merge(name: str, incoming: dict, other: str, by: str = "") -> dict:
             if t.get("kind") != kind:
                 continue
             l = local.get(t.get("rid"))
-            if l and (t.get("at") or "") >= (l.get("updated_at") or ""):
+            if l and (t.get("at") or "") > (l.get("updated_at") or ""):
                 _log(name, kind, l, "삭제됨", other, by)
                 storage.rec_del(kind, l["id"], at=t["at"])
                 st["deleted"] += 1
