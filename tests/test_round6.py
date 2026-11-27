@@ -19,14 +19,15 @@ def test_timeline_thresholds(env):
     vic.post(f"/api/uploads/{uid}/comments", json={"target": "project:x", "text": "확인 부탁"})
     tl = vic.get(f"/api/projects/{name}/timeline").json()
     assert tl[0]["id"] == uid and tl[0]["comments"][0]["text"] == "확인 부탁" and tl[0]["final"] is None
-    assert alice.get(f"/api/uploads/{uid}/situation").json()["level"] == "ok"
+    assert alice.get(f"/api/uploads/{uid}/situation").json()["level_detail"]["base_level"] == "ok"
     assert bob.put(f"/api/uploads/{uid}/thresholds", json={"spi_warn": 0.95}).status_code == 403
     assert alice.put(f"/api/uploads/{uid}/thresholds", json={"spi_warn": 0.95}).status_code == 403   # 소유자도 불가(관리자만)
     assert adm.put(f"/api/uploads/{uid}/thresholds", json={"spi_warn": "x"}).status_code == 400
     adm.put(f"/api/uploads/{uid}/thresholds", json={"spi_warn": 0.95, "health_warn": ""})
     assert alice.get(f"/api/uploads/{uid}/thresholds").json()["values"] == {"spi_warn": 0.95}
-    assert alice.get(f"/api/uploads/{uid}/situation").json()["level"] == "warn"   # 샘플 SPI 0.8
-    assert next(p for p in alice.get("/api/portfolio").json() if p["name"] == name)["level"] == "warn"
+    assert alice.get(f"/api/uploads/{uid}/situation").json()["level_detail"]["base_level"] == "warn"   # 샘플 SPI 0.8
+    pf = next(p for p in alice.get("/api/portfolio").json() if p["name"] == name)
+    assert pf["level_detail"]["base_level"] == "warn" and pf["level"] == alice.get(f"/api/uploads/{uid}/situation").json()["level"]   # 화면마다 같은 상태
 
 
 def test_conflict(env):

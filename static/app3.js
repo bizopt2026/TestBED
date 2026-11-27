@@ -239,15 +239,19 @@ function stickyHead() {
 tabOverview = async function (el, r, uid) {
   el.innerHTML = skeleton("tab");
   const [s, st] = await Promise.all([api(`/api/uploads/${uid}/situation${baseQuery(r.name)}`), getAiStatus().catch(() => ({}))]);
-  const order = (prefs.kpis && prefs.kpis.length ? prefs.kpis : s.kpis.map((k) => k.key));
+  const order = (prefs.kpis && prefs.kpis.length ? prefs.kpis : KPI_DEFAULT);
   s.kpis = order.map((k) => s.kpis.find((x) => x.key === k)).filter(Boolean);
-  const lvl = { ok: ["ok", "✓ 정상 범위"], warn: ["warn", "! 주의"], bad: ["bad", "✕ 위험"] }[s.level];
+  const lvl = { ok: ["ok", "정상"], warn: ["warn", "주의"], bad: ["bad", "위험"] }[s.level];
+  const ld = s.level_detail || { issues: {}, reasons: [] };
+  const nIss = (ld.issues.bad || 0) + (ld.issues.warn || 0);
+  const lvIcon = { ok: "check", warn: "alert", bad: "alert" }[s.level];
   const rv = s.review || {};
   el.innerHTML = `
-    <div class="sit ${lvl[0]}"><span class="sit-badge">${lvl[1]}</span><div><div class="sit-line">${esc(s.headline)}</div>
+    <div class="sit ${lvl[0]}"><span class="sit-badge">${typeof icon === "function" ? icon(lvIcon, 14) : ""}${lvl[1]}${nIss ? ` · 이슈 ${nIss}` : ""}</span><div><div class="sit-line">${esc(s.headline)}</div>
+      ${ld.reasons.length ? `<div class="sit-why" aria-label="상태 판정 이유">${ld.reasons.map((t) => `<a href="${isDashboard?.() ? "#/issues" : `#/p/${uid}/analysis`}">${esc(t)}</a>`).join("")}${nIss > ld.reasons.length ? `<span class="muted fs12">외 ${nIss - ld.reasons.length}건</span>` : ""}</div>` : ""}
       <div class="muted fs12">${s.base_data_date ? `비교 기준: DD ${s.base_data_date}` : "비교할 이전 업데이트 없음"} ·
         ${rv.completed_by ? `<span class="chip ok">✓ 월간 점검 완료 · ${esc(rv.completed_by)} ${fmtAt(rv.completed_at)}</span>` : `<a href="#/wizard/${uid}">월간 업데이트 점검 ${Object.keys(rv.steps || {}).length ? `(${Object.keys(rv.steps).length}단계 확인됨) ` : ""}열기 →</a>`}</div></div></div>
-    <div class="kpis kpis6">${s.kpis.map((k) => `<div class="kpi ${kTone(k)}">
+    <div class="kpis ${s.kpis.length <= 4 ? "kpis4" : "kpis6"}">${s.kpis.map((k) => `<div class="kpi ${kTone(k)}">
       <div class="l">${esc(k.label)}${s.why?.[k.key] ? ` <button class="why" data-why="${k.key}" aria-expanded="false" aria-label="${esc(k.label)} 왜 이런가요?">왜?</button>` : ""}</div>
       <div class="v ${k.key === "neg" && k.value ? "crit" : ""}">${k.value === null || k.value === undefined ? "-" : esc(String(k.value))}${k.unit && k.value !== null && typeof k.value === "number" ? `<small>${k.unit}</small>` : ""}</div>
       <div class="row" style="justify-content:space-between;gap:4px">${fmtDelta(k)}<span class="spk" title="${esc(k.series_label || "")}">${spark(k.series)}</span></div>
@@ -258,7 +262,7 @@ tabOverview = async function (el, r, uid) {
       <a class="btn sm ghost" href="#/p/${uid}/settings" data-sub="status" title="정상·주의·위험 판정 기준">상태 기준</a></div>
     <div class="grid2">
       <div class="panel"><h3 class="mt0">이번 주 할 일 <span class="muted fs13">${s.todo_total > s.todo.length ? `(${s.todo_total}건 중 5건)` : ""}</span></h3>
-        ${s.todo.map((t) => `<a class="inbox-item ${t.level}" href="#/p/${uid}/${t.tab}"><span class="sev">${t.level === "high" ? "✕" : t.level === "mid" ? "!" : "·"}</span><span style="grid-column:2/4">${esc(t.text)}</span><span class="go">→</span></a>`).join("")
+        ${s.todo.map((t) => `<a class="inbox-item ${t.level}" href="#/p/${uid}/${t.tab}"><span class="sev">${t.level === "high" ? "✕" : t.level === "mid" ? "!" : "·"}</span><span class="ib-span">${esc(t.text)}</span><span class="go">→</span></a>`).join("")
           || '<p class="muted">✓ 급한 일이 없습니다.</p>'}</div>
       <div class="panel"><h3 class="mt0">마일스톤</h3>
         <div class="scroll"><table class="t" data-noexport><thead><tr><th>ID</th><th>마일스톤</th><th>예정</th><th>계획</th><th class="num">편차</th></tr></thead><tbody>
@@ -280,13 +284,16 @@ tabOverview = async function (el, r, uid) {
 function kTone(k) {
   if (k.key === "neg") return k.value ? "tone-bad" : "tone-good";
   if (k.key === "margin" && typeof k.value === "number") return k.value < 0 ? "tone-bad" : "tone-good";
+  if (k.key === "spi" && typeof k.value === "number") return k.value < 0.8 ? "tone-bad" : k.value < 0.9 ? "tone-warn" : "tone-good";
+  if (k.key === "health" && typeof k.value === "number") return k.value < 60 ? "tone-bad" : k.value < 75 ? "tone-warn" : "tone-good";
   if (!k.delta) return "";
   const better = k.good === "up" ? k.delta > 0 : k.delta < 0;
   return better ? "tone-good" : "tone-bad";
 }
+const KPI_DEFAULT = ["finish", "margin", "spi", "health"];   // 처음에는 4개: 준공·여유·SPI·건전성 (나머지는 '지표 고르기')
 const KPI_LABEL = { finish: "예상 준공", margin: "목표 대비 여유", progress: "공정률", health: "건전성", spi: "SPI", neg: "음수 여유 작업" };
 async function kpiConfig(uid, r) {
-  let cur = [...(prefs.kpis?.length ? prefs.kpis : Object.keys(KPI_LABEL))];
+  let cur = [...(prefs.kpis?.length ? prefs.kpis : KPI_DEFAULT)];
   const d = _modal(`<form method="dialog" id="fKpi"><h3>상황판 지표 고르기</h3><p class="muted fs13">체크한 지표만 보이고, ↑↓로 순서를 바꿉니다. 내 계정에만 적용됩니다.</p>
     <ol id="kpiList" class="kpi-cfg"></ol><div class="row end"><button class="btn" value="cancel" formnovalidate>닫기</button><button class="btn" type="button" id="kpiReset">기본값</button><button class="btn primary" value="ok">저장</button></div></form>`);
   const all = () => [...cur, ...Object.keys(KPI_LABEL).filter((k) => !cur.includes(k))];
@@ -300,7 +307,7 @@ async function kpiConfig(uid, r) {
     $("#kpiList").querySelectorAll("[data-dn]").forEach((b) => (b.onclick = () => mv(+b.dataset.dn, 1)));
   };
   draw();
-  $("#kpiReset").onclick = () => { cur = Object.keys(KPI_LABEL); draw(); };
+  $("#kpiReset").onclick = () => { cur = [...KPI_DEFAULT]; draw(); };
   $("#fKpi").onsubmit = async (e) => {
     if (e.submitter?.value !== "ok") return; e.preventDefault();
     if (!cur.length) return toast("지표를 하나 이상 고르세요");
@@ -775,12 +782,15 @@ renderInbox = async function (container) {
 async function settingsStatus(el, r, uid) {
   const t = await api(`/api/uploads/${uid}/thresholds`);
   const v = t.values;
-  const F = [["margin_bad", "목표 대비 여유가 이 값(일) 미만이면 위험", "기본 0"], ["margin_warn", "목표 대비 여유가 이 값(일) 미만이면 주의", "예: 10"],
-    ["slip_warn", "직전 대비 준공 지연이 이 값(일) 이상이면 주의", "기본 1"], ["health_bad", "건전성 점수가 이 값 미만이면 위험", "예: 60"],
-    ["health_warn", "건전성 점수가 이 값 미만이면 주의", "예: 75"], ["spi_warn", "SPI가 이 값 미만이면 주의", "예: 0.9"]];
+  const F = [["margin_bad", "목표 대비 여유가 이 값(일) 미만이면 위험"], ["margin_warn", "목표 대비 여유가 이 값(일) 미만이면 주의"],
+    ["slip_warn", "직전 대비 준공 지연이 이 값(일) 이상이면 주의"], ["health_bad", "건전성 점수가 이 값 미만이면 위험"],
+    ["health_warn", "건전성 점수가 이 값 미만이면 주의"], ["spi_warn", "SPI가 이 값 미만이면 주의"]];
+  const eff = t.effective || {};
+  const effTxt = (k) => eff[k] === null || eff[k] === undefined ? "지금: 쓰지 않음" : `지금 적용: ${eff[k]}${v[k] === undefined || v[k] === "" ? " (전사 기본값)" : ""}`;
   el.innerHTML = `<div class="panel"><h3 class="mt0">상태 판정 기준 <span class="muted fs13">${esc(r.name)}</span></h3>
     <p class="muted">상황판 머리 문장과 홈 포트폴리오 카드의 정상·주의·위험 색을 정하는 기준입니다. 비워 두면 그 기준은 쓰지 않습니다. 음수 여유 작업이 있으면 항상 위험입니다.</p>
-    <div class="th-grid">${F.map(([k, l, ph]) => `<label>${l}<input class="s" type="number" step="${k === "spi_warn" ? "0.01" : "1"}" data-th="${k}" value="${v[k] ?? ""}" placeholder="${ph}"></label>`).join("")}</div>
+    <p class="muted fs13">이 기준과 함께 <b>이슈 규칙</b>(마일스톤 계획 대비 +14일, SPI 0.8 미만, 직전 대비 7일 이상 악화, 기한 지난 제약 등)도 상태에 반영되어, 상황판·홈·이슈 보드가 같은 상태를 보여 줍니다.</p>
+    <div class="th-grid">${F.map(([k, l]) => `<label>${l}<input class="s" type="number" step="${k === "spi_warn" ? "0.01" : "1"}" data-th="${k}" value="${v[k] ?? ""}" placeholder="비워 두면 전사 기본값" aria-describedby="th-${k}"><span class="muted fs12" id="th-${k}">${effTxt(k)}</span></label>`).join("")}</div>
     <div class="row end"><button class="btn primary" id="thSave" data-need="editor">저장</button></div></div>`;
   applyRole(el);
   $("#thSave").onclick = () => withBusy($("#thSave"), async () => {

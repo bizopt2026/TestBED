@@ -151,10 +151,20 @@ def evaluate(uid: str) -> dict:
     if bad:
         notify.push(set(notify.project_people(name)) | set(notify.admins()), "issue",
                     f"'{name}' 새 위험 이슈 {len(bad)}건: {bad[0]['title']}", f"#/issues?project={name}")
+    storage.set_setting(name, "issues_evaluated_at", _now())
     return {"created": len(created), "resolved": len(resolved), "open": len(hits)}
 
 
 # ---------------------------------------------------------------- 조회·상태 변경
+def evaluated(project: str) -> bool:
+    """이 프로젝트를 이슈 엔진이 판정한 적이 있는지 (없으면 즉석 판정으로 대신)."""
+    init()
+    with storage.conn() as c:
+        if c.execute("SELECT 1 FROM issues WHERE project=? LIMIT 1", (project,)).fetchone():
+            return True
+    return bool(storage.setting(project, "issues_evaluated_at"))
+
+
 def listing(project: str | None = None, status: str | None = None) -> list[dict]:
     init()
     q, args = "SELECT * FROM issues WHERE 1=1", []

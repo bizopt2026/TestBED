@@ -24,14 +24,14 @@
 
 <dialog id="dlgUpload">
   <form method="dialog" id="formUpload">
-    <h3>공정표 업로드</h3>
+    <h3>공정표 올리기</h3>
     <p class="muted">Primavera P6 XER(.xer), MS Project(.mpp, .xml, .mpx), P6 XML 파일을 올리면 팀 전체가 결과를 공유합니다.</p>
     <label>파일<input type="file" name="file" accept=".xer,.xml,.mpp,.mpt,.mpx,.pms" required></label>
     <label>업로더 이름<input name="uploader" placeholder="예: 홍길동"></label>
     <label>메모<input name="note" placeholder="예: 3월 월간 업데이트"></label>
     <div class="row end">
       <button class="btn" value="cancel" formnovalidate>취소</button>
-      <button class="btn primary" id="btnDoUpload" value="ok">업로드 및 분석</button>
+      <button class="btn primary" id="btnDoUpload" value="ok">올리고 분석</button>
     </div>
     <p class="err" id="uploadErr"></p>
   </form>
@@ -63,5 +63,6 @@
 <script defer src="/static/app10.js"></script>
 <script defer src="/static/app11.js"></script>
 <script defer src="/static/app12.js"></script>
+<script defer src="/static/app13.js"></script>
 </body>
 </html>

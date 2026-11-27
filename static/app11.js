@@ -78,7 +78,7 @@ async function showIssues(keepDrawer = false) {
     if ($("#isProj").options.length === 1) $("#isProj").insertAdjacentHTML("beforeend", projs.map((p) => `<option ${p === st.project ? "selected" : ""}>${esc(p)}</option>`).join(""));
     const ys = xs.filter((x) => !st.sev || x.severity === st.sev);
     $("#isList").innerHTML = ys.length ? `<table class="t"><thead><tr><th>심각도</th><th>프로젝트</th><th>이슈</th><th>분류</th><th>상태</th><th>담당</th><th class="num">지속</th><th>최근</th></tr></thead><tbody>
-      ${ys.map((x) => `<tr><td><span class="status-badge ${SEV[x.severity][0]}">${SEV[x.severity][1]}</span></td><td>${esc(x.project)}</td>
+      ${ys.map((x) => `<tr><td><span class="status-badge ${SEV[x.severity][0]}">${SEV[x.severity][1]}</span></td><td>${x.upload_id ? `<a class="is-proj" href="#/p/${x.upload_id}/overview">${esc(x.project)}</a>` : esc(x.project)}</td>
         <td class="wrap"><a href="#/issues?id=${x.id}" data-issue="${x.id}">${esc(x.title)}</a></td><td>${esc(x.rule)}</td><td>${IST[x.status]}</td><td>${esc(x.assignee || "")}</td>
         <td class="num">${x.occurrences}</td><td class="fs12">${x.last_seen.replace("T", " ").slice(5, 16)}</td></tr>`).join("")}</tbody></table>` : emptyState("해당하는 이슈가 없습니다");
     bindIssueRows($("#isList")); enhance($("#isList"));

@@ -91,7 +91,7 @@ async function openActivity(code) {
       ${a.act_start ? `<dt>실적</dt><dd>${a.act_start} ~ ${a.act_end || "진행중"}</dd>` : ""}
       ${a.constraint ? `<dt>제약조건</dt><dd>${esc(a.constraint)} ${a.constraint_date || ""}</dd>` : ""}
     </dl>
-    <h4>선·후행 관계</h4><table class="t" data-noexport><tbody>${rel(a.preds, "선행")}${rel(a.succs, "후행")}</tbody></table>
+    <h3 class="dh3">선·후행 관계</h3><table class="t" data-noexport><tbody>${rel(a.preds, "선행")}${rel(a.succs, "후행")}</tbody></table>
     <div id="actExtra" class="muted">관련 리스크·제약·변경 이력을 불러오는 중...</div>
     <div class="row mt12">
       <a class="btn sm" href="#/p/${ctx.uid}/gantt" data-goto-gantt="${esc(a.code)}">공정표에서 보기</a>
@@ -108,10 +108,10 @@ async function openActivity(code) {
   const ch = (fr.changes?.items || []).filter((x) => x.code === code);
   const box = d.querySelector("#actExtra"); if (!box) return;
   box.classList.remove("muted");
-  box.innerHTML = `<h4>연결된 리스크 (${rk.length})</h4>${rk.map((x) => `<div class="mini">${esc(x.title)} · ${x.prob}% · ${x.impact_ml}일</div>`).join("") || '<div class="muted">없음</div>'}
-    <h4>제약 (${cs.length})</h4>${cs.map((x) => `<div class="mini">${esc(x.type)} · ${esc(x.desc)} · ${esc(x.status)} ${x.due || ""}</div>`).join("") || '<div class="muted">없음</div>'}
-    <h4>직전 업데이트 대비 변경 (${ch.length})</h4>${ch.map((x) => `<div class="mini">${esc(x.category)}: ${esc(x.before)} → ${esc(x.after)}</div>`).join("") || '<div class="muted">없음</div>'}`;
-  box.insertAdjacentHTML("beforeend", `<h4>코멘트</h4><div id="actComments"></div>`);
+  box.innerHTML = `<h3 class="dh3">연결된 리스크 (${rk.length})</h3>${rk.map((x) => `<div class="mini">${esc(x.title)} · ${x.prob}% · ${x.impact_ml}일</div>`).join("") || '<div class="muted">없음</div>'}
+    <h3 class="dh3">제약 (${cs.length})</h3>${cs.map((x) => `<div class="mini">${esc(x.type)} · ${esc(x.desc)} · ${esc(x.status)} ${x.due || ""}</div>`).join("") || '<div class="muted">없음</div>'}
+    <h3 class="dh3">직전 업데이트 대비 변경 (${ch.length})</h3>${ch.map((x) => `<div class="mini">${esc(x.category)}: ${esc(x.before)} → ${esc(x.after)}</div>`).join("") || '<div class="muted">없음</div>'}`;
+  box.insertAdjacentHTML("beforeend", `<h3 class="dh3">코멘트</h3><div id="actComments"></div>`);
   if (typeof commentThread === "function") commentThread(box.querySelector("#actComments"), ctx.uid, "activity:" + code, { compact: true });
 }
 document.addEventListener("click", (e) => {

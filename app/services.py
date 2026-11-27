@@ -1034,7 +1034,7 @@ def portfolio() -> list[dict]:
                                     "bl": a.get("bl_finish"), "done": a["status_code"] == "TK_Complete", "longest": a.get("longest")}
                                    for a in r["activities"] if a.get("milestone")][:12],
                     "start": min((a["start"] for a in r["activities"] if a.get("start")), default=r["data_date"]),
-                    "level": _level(r["name"], margin, sum(1 for a in inc if a["tf"] is not None and a["tf"] < 0), slip, p["id"], e.get("spi")),
+                    **_level_full(r["name"], margin, sum(1 for a in inc if a["tf"] is not None and a["tf"] < 0), slip, p["id"], e.get("spi")),
                     "history": [{"id": h["id"], "data_date": h["data_date"], "finish": h["result"]["finish"], "created_at": h.get("created_at"),
                                  "note": h.get("note") or h.get("filename")} for h in reversed(hist)][:12]})
     return out
@@ -1174,8 +1174,40 @@ def learn_sample(user: str = "") -> str:
 
 
 def _level(name, margin, neg, slip, uid, spi):
+    return _level_full(name, margin, neg, slip, uid, spi)["level"]
+
+
+def _level_full(name, margin, neg, slip, uid, spi) -> dict:
     from .workflow import status_level
-    return status_level(name, margin, neg, slip, health_score(uid), spi)
+    ul = unified_level(uid, status_level(name, margin, neg, slip, health_score(uid), spi))
+    return {"level": ul["level"], "level_detail": ul}
+
+
+_LV = {"ok": 0, "warn": 1, "bad": 2}
+
+
+def project_issues(uid: str) -> list[dict]:
+    """프로젝트의 열린 이슈. PMS 대시보드는 저장된 이슈(담당·상태 반영), PMS 현장은 같은 규칙으로 즉석 판정."""
+    from . import edition, issues
+    try:
+        if edition.EDITION == "server":
+            hist = storage.history(result(uid)["name"])
+            if hist and hist[-1]["id"] == uid and issues.evaluated(result(uid)["name"]):   # 최신 판: 저장된 열린 이슈(담당·상태 반영)
+                return issues.listing(result(uid)["name"], "open")
+        return issues.detect(uid)
+    except Exception:  # noqa: BLE001 — 이슈 판정 실패가 상태 표시를 막지 않게
+        return []
+
+
+def unified_level(uid: str, base_level: str) -> dict:
+    """상태는 한 가지: 여유·건전성 기준(base_level)과 이슈 규칙 중 더 나쁜 쪽. 상황판·카드·홈·이슈 보드가 같은 값을 쓴다."""
+    xs = project_issues(uid)
+    bad = [x for x in xs if x["severity"] == "bad"]
+    warn = [x for x in xs if x["severity"] == "warn"]
+    lv = "bad" if bad else "warn" if warn else "ok"
+    level = max(base_level, lv, key=lambda v: _LV[v])
+    return {"level": level, "base_level": base_level, "issues": {"bad": len(bad), "warn": len(warn)},
+            "reasons": [x["title"] for x in (bad + warn)[:3]]}
 
 
 # ---------------------------------------------------------------- 6차: 상황판 '왜?' AI 설명

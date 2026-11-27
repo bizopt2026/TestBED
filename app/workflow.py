@@ -97,8 +97,9 @@ def situation(uid: str, base_uid: str | None = None) -> dict:
         if top:
             cause = top[0]
             parts.append(f"주원인 {cause['code']} {cause['name']}(+{cause['introduced']}일)")
-    level = status_level(r["name"], margin, len(neg), _dd(r["finish"], base["finish"]) if base else None, hs,
-                         e.get("spi") if e.get("available") else None)
+    ul = services.unified_level(uid, status_level(r["name"], margin, len(neg), _dd(r["finish"], base["finish"]) if base else None, hs,
+                                                  e.get("spi") if e.get("available") else None))
+    level = ul["level"]
     # 이번 주 할 일
     from .clock import today as _today
     today = _today()
@@ -127,7 +128,7 @@ def situation(uid: str, base_uid: str | None = None) -> dict:
     for kk in kpis:
         kk["series_label"] = f"최근 {len([v for v in kk['series'] if v is not None])}회 업데이트" if kk["series"] else ""
     so = signoffs(uid)
-    return {"why": explain(uid, kpis), "review": so, "headline": ", ".join(parts), "level": level, "base_id": bid, "base_data_date": base["data_date"] if base else None,
+    return {"why": explain(uid, kpis), "review": so, "headline": ", ".join(parts), "level": level, "level_detail": ul, "base_id": bid, "base_data_date": base["data_date"] if base else None,
             "kpis": kpis, "todo": todo[:5], "todo_total": len(todo), "readiness": ready,
             "readiness_missing": [x for x in ready if not x["ok"]],
             "milestones": [{"code": a["code"], "name": a["name"], "finish": a["act_end"] or a["finish"], "bl": a["bl_finish"],

@@ -31,7 +31,7 @@ tabOverview = async function (el, r, uid) {
       <div class="row" style="justify-content:space-between;gap:4px">${fmtDelta(k)}<span class="spk">${spark(k.series)}</span></div></div>`).join("")}</div>
     <div class="grid2">
       <div class="panel"><h3 class="mt0">이번 주 할 일 <span class="muted fs13">${s.todo_total > s.todo.length ? `(${s.todo_total}건 중 5건)` : ""}</span></h3>
-        ${s.todo.map((t) => `<a class="inbox-item ${t.level}" href="#/p/${uid}/${t.tab}"><span class="sev">${t.level === "high" ? "✕" : t.level === "mid" ? "!" : "·"}</span><span style="grid-column:2/4">${esc(t.text)}</span><span class="go">→</span></a>`).join("")
+        ${s.todo.map((t) => `<a class="inbox-item ${t.level}" href="#/p/${uid}/${t.tab}"><span class="sev">${t.level === "high" ? "✕" : t.level === "mid" ? "!" : "·"}</span><span class="ib-span">${esc(t.text)}</span><span class="go">→</span></a>`).join("")
           || '<p class="muted">✓ 급한 일이 없습니다.</p>'}</div>
       <div class="panel"><h3 class="mt0">마일스톤</h3>
         <table class="t" data-noexport><thead><tr><th>ID</th><th>마일스톤</th><th>예정</th><th>계획</th><th class="num">편차</th></tr></thead><tbody>
@@ -43,11 +43,13 @@ tabOverview = async function (el, r, uid) {
 // ---------------------------------------------------------------- ⑤ 데이터 준비도
 function readinessPanel(items, uid, compact = false) {
   const miss = items.filter((x) => !x.ok);
-  return `<div class="panel readiness ${miss.length ? "" : "done"}"><div class="row between"><h3 class="m0">데이터 준비도 <span class="muted fs13">${items.length - miss.length}/${items.length}</span></h3>
-      ${miss.length ? `<span class="muted fs12">빠진 데이터를 채우면 잠긴 분석이 열립니다</span>` : '<span class="chip ok">✓ 모든 분석 사용 가능</span>'}</div>
+  const fold = !compact && miss.length <= 2;   // 거의 준비됐으면 한 줄로 접어 둠
+  const head = `<h3 class="m0">데이터 준비도 <span class="muted fs13">${items.length - miss.length}/${items.length}</span></h3>
+      ${miss.length ? `<span class="muted fs12">${fold ? `잠긴 분석 ${miss.length}개 · ${miss.map((x) => esc(x.label)).join(", ")}` : "빠진 데이터를 채우면 잠긴 분석이 열립니다"}</span>` : '<span class="chip ok">✓ 모든 분석 사용 가능</span>'}`;
+  return `<${fold ? "details" : "div"} class="panel readiness ${miss.length ? "" : "done"}">${fold ? `<summary class="row between rd-sum">${head}</summary>` : `<div class="row between">${head}</div>`}
     <div class="ready-grid">${items.map((x) => `<div class="ready ${x.ok ? "ok" : "no"}"><span class="mk" aria-label="${x.ok ? "준비됨" : "없음"}">${x.ok ? "✓" : "✕"}</span>
       <div><b>${esc(x.label)}</b> <span class="muted">${esc(x.detail)}</span><div class="muted fs12">${x.ok ? "사용 가능: " : "잠김: "}${esc(x.unlocks)}</div>
-      ${x.ok || compact ? "" : `<div class="fix">${esc(x.fix)} <a href="#/p/${uid}/${x.tab}">이동 →</a></div>`}</div></div>`).join("")}</div></div>`;
+      ${x.ok || compact ? "" : `<div class="fix">${esc(x.fix)} <a href="#/p/${uid}/${x.tab}">이동 →</a></div>`}</div></div>`).join("")}</div></${fold ? "details" : "div"}>`;
 }
 
 // ---------------------------------------------------------------- ⑥ 홈 알림함: 심각도 필터 · 내 프로젝트 · 확인함 · 오래된 항목 접기

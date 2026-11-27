@@ -460,6 +460,8 @@ function runTour() {
   const hole = document.createElement("div"); hole.className = "tour-hole";
   const pop = document.createElement("div"); pop.className = "tour-pop"; pop.setAttribute("role", "dialog"); pop.setAttribute("aria-live", "polite");
   document.body.append(hole, pop);
+  if (el?.closest(".g-opts[hidden]")) { $("#gMore").open = true; el.closest(".g-opts").hidden = false; }
+  for (let d = el?.closest("details:not([open])"); d; d = d.parentElement?.closest("details:not([open])")) d.open = true;   // 접힌 옵션 안의 대상은 펼쳐서 보여 줌
   if (el) el.scrollIntoView({ block: "center", behavior: "instant" });
   const place = () => {
     const r = el ? el.getBoundingClientRect() : { left: innerWidth / 2 - 100, top: innerHeight / 3, width: 200, height: 40, bottom: innerHeight / 3 + 40 };
@@ -518,7 +520,7 @@ function maybeOnboard() {
   if (!ctx.uid) return;
   store.set("onboarded", "1");
   const t = document.createElement("div"); t.className = "tour-pop"; t.style.right = "16px"; t.style.bottom = "16px"; t.style.left = "auto"; t.style.top = "auto";
-  t.innerHTML = `<h4>처음이신가요? 👋</h4><div>2분 둘러보기로 화면 구조를 익히거나, 학습 센터에서 단계별로 배울 수 있습니다.</div>
+  t.innerHTML = `<h3 class="tour-h">처음이신가요?</h3><div>2분 둘러보기로 화면 구조를 익히거나, 학습 센터에서 단계별로 배울 수 있습니다.</div>
     <div class="row"><button class="btn sm" id="obNo">나중에</button><span><a class="btn sm" href="#/learn">학습 센터</a> <button class="btn sm primary" id="obGo">둘러보기</button></span></div>`;
   document.body.appendChild(t);
   const shrink = () => { t.remove(); helpFab(); };

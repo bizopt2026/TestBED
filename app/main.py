@@ -145,7 +145,8 @@ def _user(request: Request) -> str:
 def config():
     from . import mpp_convert
     return {"mpp": mpp_convert.available(), "token_required": bool(APP_TOKEN) and not auth_mod.users_exist(), "login_required": auth_mod.users_exist(),
-            "ai": ai.status()["enabled"], "version": _version_label(), **edition.config()}
+            "ai": ai.status()["enabled"], "version": _version_label(), "today": __import__("app.clock", fromlist=["today"]).today().isoformat(),
+            **edition.config()}
 
 
 _VER = None
@@ -1554,7 +1555,8 @@ def project_timeline(name: str):
 
 @app.get("/api/uploads/{uid}/thresholds")
 def get_thresholds(uid: str):
-    return {"values": storage.setting(_name(uid), "status_thresholds", {}) or {}, "defaults": workflow.TH_DEFAULT}
+    return {"values": storage.setting(_name(uid), "status_thresholds", {}) or {}, "defaults": workflow.TH_DEFAULT,
+            "effective": workflow.thresholds(_name(uid))}
 
 
 @app.put("/api/uploads/{uid}/thresholds")

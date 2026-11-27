@@ -79,7 +79,7 @@ $("#formUpload").addEventListener("submit", async (e) => {
     const r = await api("/api/upload", { method: "POST", body: fd });
     $("#dlgUpload").close();
     f.reset();
-    toast("업로드 및 분석 완료");
+    toast("올리고 분석했습니다");
     uploadsCache = null;
     location.hash = `#/p/${r.ids[0]}/overview`;
     const ir = r.import_report;
@@ -92,7 +92,7 @@ $("#formUpload").addEventListener("submit", async (e) => {
   } catch (err) {
     $("#uploadErr").textContent = err.message;
   } finally {
-    btn.disabled = false; btn.textContent = "업로드 및 분석";
+    btn.disabled = false; btn.textContent = "올리고 분석";
   }
 });
 
@@ -427,31 +427,36 @@ function tabGantt(el, r) {
   const COLS = [["od", "원공기"], ["rd", "잔여"], ["st", "시작"], ["fn", "종료"], ["tf", "TF"]];
   const hidden = new Set(JSON.parse(store.get("gcols", "[]")));
   el.innerHTML = `
-    <div class="row toolbar" style="margin-bottom:6px">
-      <select class="s" id="gView" aria-label="저장된 보기"><option value="">보기: 기본</option></select>
-      <button class="btn sm" id="gSaveView" data-need="editor" title="현재 필터·배율을 팀 공유 보기로 저장">보기 저장</button>
-      <label class="muted">베이스라인 <select class="s sm" id="gBl"><option value="target">P6 계획(Target)</option></select></label>
-      <label><input type="checkbox" id="fLines"> 최장경로 관계선</label>
-      <details class="cols"><summary class="btn sm">열 설정</summary><div class="menu" id="colMenu"></div></details>
-      <label class="muted">묶기 <select class="s sm" id="gGroup" aria-label="묶어 보기"><option value="wbs">WBS</option><option value="trade">공종</option><option value="crit">주공정 여부</option><option value="status">진행 상태</option></select></label>
-      <label title="막대를 끌어 옮기거나 오른쪽 끝을 늘려 What-if 계산 (원본은 그대로)"><input type="checkbox" id="fEdit"> 끌어서 What-if</label>
-      <span class="muted fs12">드래그: 이동 · Ctrl+휠: 확대 · ↑↓ Enter: 선택·상세</span>
+    <div class="row toolbar g-tb">
+      <input class="s" id="q" type="search" placeholder="ID / 이름 검색 ( / )" aria-label="작업 검색">
+      <label class="g-tg"><input type="checkbox" id="fCrit"> 주공정만</label>
+      <label class="g-tg"><input type="checkbox" id="fInc" checked> 완료 제외</label>
+      ${highlight.size ? `<label class="g-tg"><input type="checkbox" id="fHl" checked> AI 답변 작업만 (${highlight.size})</label>` : ""}
+      <label class="muted g-zoom">배율 <select class="s sm" id="zoom"><option value="3">일</option><option value="1.2" selected>주</option><option value="0.35">월</option><option value="0.12">분기</option><option value="fit">전체</option></select></label>
+      <button class="btn sm" id="gToday" title="오늘 날짜로 이동 (T)">오늘</button>
+      <span class="spacer"></span>
+      <details class="g-more" id="gMore" ${store.get("gMore", matchMedia("(min-width: 761px)").matches ? "1" : "0") === "1" ? "open" : ""}><summary class="btn sm">보기 옵션</summary></details>
     </div>
-    <div class="row mb10">
-      <input class="s" id="q" type="search" placeholder="ID / 이름 검색 ( / )" style="width:220px">
-      <label><input type="checkbox" id="fCrit"> 주공정/최장경로만</label>
-      ${highlight.size ? `<label><input type="checkbox" id="fHl" checked> AI 답변 작업만 (${highlight.size})</label>` : ""}
-      <label><input type="checkbox" id="fInc" checked> 완료 제외</label>
-      <label><input type="checkbox" id="fBl" checked> 계획(Target) 표시</label>
-      <label class="muted">배율 <select class="s" id="zoom"><option value="3">일</option><option value="1.2" selected>주</option><option value="0.35">월</option><option value="0.12">분기</option><option value="fit">전체</option></select></label>
-      <button class="btn sm" id="gFit" title="전체 공기를 한 화면에 맞춤">전체 맞춤</button>
-      <label class="muted">날짜 이동 <input class="s sm" type="date" id="gDate" aria-label="날짜로 이동"></label>
-      <button class="btn sm" id="gToday" title="오늘 날짜로 이동">오늘</button>
-      <button class="btn sm" id="gDD" title="Data Date로 이동">Data Date</button>
-      <label title="비교 기준 업데이트(보기 설정)의 막대를 점선으로 겹쳐 봅니다"><input type="checkbox" id="fCmp"> 비교 겹쳐보기</label>
-      <label><input type="checkbox" id="fChg" disabled> 바뀐 작업만 <span class="muted" id="chgN"></span></label>
-      <label class="muted" title="작업을 클릭하면 연결된 선행·후행 체인을 강조">경로 추적 <select class="s sm" id="fTrace"><option value="">끄기</option><option value="drive">구동 경로(Driving)</option><option value="all">전체 선·후행</option></select></label>
-      <span class="spacer"></span><a class="btn sm" href="#/print/${el.dataset.uid}">A3 인쇄</a>
+    <div class="g-opts" id="gOpts">
+      <div class="g-og"><span class="g-ol">보기</span>
+        <select class="s sm" id="gView" aria-label="저장된 보기"><option value="">보기: 기본</option></select>
+        <button class="btn sm" id="gSaveView" data-need="editor" title="현재 필터·배율을 팀 공유 보기로 저장">보기 저장</button>
+        <details class="cols"><summary class="btn sm">열 설정</summary><div class="menu" id="colMenu"></div></details>
+        <label class="muted">묶기 <select class="s sm" id="gGroup" aria-label="묶어 보기"><option value="wbs">WBS</option><option value="trade">공종</option><option value="crit">주공정 여부</option><option value="status">진행 상태</option></select></label>
+        <button class="btn sm" id="gFit" title="전체 공기를 한 화면에 맞춤">전체 맞춤</button>
+        <label class="muted">날짜 <input class="s sm" type="date" id="gDate" aria-label="날짜로 이동"></label>
+        <button class="btn sm" id="gDD" title="Data Date로 이동">Data Date</button></div>
+      <div class="g-og"><span class="g-ol">계획·비교</span>
+        <label class="muted">베이스라인 <select class="s sm" id="gBl"><option value="target">P6 계획(Target)</option></select></label>
+        <label><input type="checkbox" id="fBl" checked> 계획 표시</label>
+        <label><input type="checkbox" id="fLines"> 최장경로 관계선</label>
+        <label title="비교 기준 업데이트(보기 설정)의 막대를 점선으로 겹쳐 봅니다"><input type="checkbox" id="fCmp"> 비교 겹쳐보기</label>
+        <label><input type="checkbox" id="fChg" disabled> 바뀐 작업만 <span class="muted" id="chgN"></span></label>
+        <label class="muted" title="작업을 클릭하면 연결된 선행·후행 체인을 강조">경로 추적 <select class="s sm" id="fTrace"><option value="">끄기</option><option value="drive">구동 경로(Driving)</option><option value="all">전체 선·후행</option></select></label></div>
+      <div class="g-og"><span class="g-ol">도구</span>
+        <label title="막대를 끌어 옮기거나 오른쪽 끝을 늘려 What-if 계산 (원본은 그대로)"><input type="checkbox" id="fEdit"> 끌어서 What-if</label>
+        <a class="btn sm" href="#/print/${el.dataset.uid}">A3 인쇄</a>
+        <span class="muted fs12 hide-sm">끌기: 이동 · Ctrl+휠: 확대 · ↑↓: 선택 · Enter·이름 클릭: 상세</span></div>
     </div>
     <div class="legend legend-sticky" aria-label="범례"><span><i style="background:var(--bar)"></i>일반</span><span><i style="background:var(--crit)"></i>주공정</span>
       <span><i style="background:var(--done)"></i>완료</span><span><i style="background:var(--bl);height:4px"></i>계획</span>
@@ -464,7 +469,8 @@ function tabGantt(el, r) {
       <div class="g-split" id="gSplit" role="separator" aria-label="표 너비 조절" aria-orientation="vertical" aria-valuemin="240" aria-valuemax="1000" aria-valuenow="${+store.get("gsplit", "640")}" tabindex="0"></div>
       <div class="g-right"><canvas class="g-head" id="gh"></canvas><div class="g-body" id="gr" tabindex="0" role="region" aria-label="간트 차트. 위아래 화살표로 작업 선택, Enter로 상세, 좌우 화살표로 이동, +/- 확대·축소, T 오늘"><div id="grs"></div><canvas id="gc" style="position:sticky;top:0;left:0"></canvas></div></div>
     </div>
-    <div class="panel detail" id="det"><span class="muted">행을 클릭하면 선·후행 관계를 볼 수 있습니다. 더블클릭하면 상세 패널이 열립니다.</span></div>`;
+    <div class="panel detail" id="det"><span class="muted">행을 클릭하면 선·후행 관계를 볼 수 있습니다. 작업 이름을 누르면 상세 패널이 열립니다.</span></div>`;
+  { const gm = $("#gMore"), go = $("#gOpts"); const sync = () => { go.hidden = !gm.open; store.set("gMore", gm.open ? "1" : "0"); }; gm.addEventListener("toggle", sync); go.hidden = !gm.open; }
   let blMap = null; // 저장된 베이스라인 사용 시 code -> {start, finish}
   let cmpMap = null, cmpLabel = "";  // 비교 겹쳐보기: 비교 기준 업데이트의 code -> {s, f}
   const changed = (a) => cmpMap && (!cmpMap[a.code] || cmpMap[a.code].s !== a.start || cmpMap[a.code].f !== a.finish);
@@ -735,6 +741,7 @@ function tabGantt(el, r) {
     const row = e.target.closest("[data-id]"); if (!row) return;
     if (e.target.closest(".qi")) { openActivity(byId[row.dataset.id].code); return; }
     sel = row.dataset.id; render(); detail(byId[sel]);
+    if (e.target.closest(".nm") && !$("#fEdit")?.checked) openActivity(byId[sel].code);   // 이름을 누르면 바로 상세
   });
   gc.addEventListener("click", (e) => {
     if (gc._suppress) { gc._suppress = false; return; }
@@ -1451,7 +1458,7 @@ async function tabRisk(el, r, uid) {
         <td class="num">${x.prob}%</td><td>${x.impact_min}/${x.impact_ml}/${x.impact_max}</td><td class="num"><b>${x.exposure_days}</b></td><td class="wrap">${esc(x.mitigation || "")}<div class="muted fs12">${esc(x.owner || "")}</div></td>
         <td><span class="tag ${x.status === "closed" ? "done" : x.status === "mitigating" ? "" : "fail"}">${{ open: "열림", mitigating: "대응중", closed: "종결" }[x.status]}</span></td>
         <td><button class="btn sm" data-edit="${x.id}">수정</button> <button class="btn sm danger" data-rm="${x.id}">삭제</button></td></tr>`).join("")}</tbody></table>`
-      : `<p class="muted">등록된 리스크가 없습니다.</p>`;
+      : `<div class="empty-note">${icon("alert", 18)}<div><b>등록된 리스크가 없습니다</b><p class="muted fs13">'리스크 추가'로 직접 넣거나, 회의록·공문을 붙여 넣어 '문서에서 찾기'로 후보를 뽑습니다${aiStatus?.enabled === false ? " (AI를 쓸 수 없어 지금은 직접 입력만 가능)" : ""}.</p></div></div>`;
     $("#rkList").querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => openForm(list.find((x) => x.id === b.dataset.edit))));
     $("#rkList").querySelectorAll("[data-rm]").forEach((b) => (b.onclick = async () => { await deleteWithUndo(`/api/uploads/${uid}/risks/${b.dataset.rm}`, "리스크", load); }));
     // 5차: 담당자·기한 표시 + 코멘트
@@ -1664,7 +1671,7 @@ async function tabLookahead(el, r, uid) {
             ${!c.done ? `<select class="s sm" data-reason="${c.id}"><option value="">미완료 사유</option>${REASONS.map((x) => `<option ${c.reason === x ? "selected" : ""}>${x}</option>`).join("")}</select>` : ""}`
           : `<button class="btn sm" data-commit="${esc(a.code)}" data-name="${esc(a.name)}">약속 등록</button>`}</td></tr>`;
       }).join("")}</tbody></table></div></div>
-    <div class="grid2"><div class="panel"><h3 class="mt0">주간 PPC</h3><canvas id="ppcCv" style="width:100%;height:200px"></canvas>
+    <div class="grid2"><div class="panel"><h3 class="mt0">주간 PPC</h3>${p.weeks.length ? '<canvas id="ppcCv" style="width:100%;height:200px"></canvas>' : `<div class="empty-note">${icon("calendar", 18)}<div><b>아직 주간 PPC가 없습니다</b><p class="muted fs13">위 표에서 작업마다 '약속 등록'을 하고, 주말에 완료 여부를 체크하면 주마다 PPC(약속 이행률)가 쌓입니다.</p></div></div>`}
       <table class="t"><tbody>${p.weeks.map((w) => `<tr><td>${w.week}</td><td class="num">${w.done}/${w.planned}</td><td class="num"><b>${w.ppc ?? "-"}%</b></td></tr>`).join("") || '<tr><td class="muted">아직 약속이 없습니다.</td></tr>'}</tbody></table></div>
       <div class="panel"><h3 class="mt0">미완료 사유 · 협력업체별 PPC</h3>
       ${p.reasons.map(([k, v]) => `<div class="hbar"><span>${esc(k)}</span><div><i style="width:${(100 * v) / p.reasons[0][1]}%;background:var(--warn)"></i></div><b>${v}</b></div>`).join("") || '<p class="muted">없음</p>'}

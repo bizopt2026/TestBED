@@ -116,7 +116,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
       uid = alice.url().split("#/p/")[1].split("/")[0];
       await alice.waitForSelector(".sit");
       await closeDialogs(alice);
-      assert(await alice.locator(".kpis .kpi").count() >= 5, "KPI 카드가 없습니다");
+      assert(await alice.locator(".kpis .kpi").count() >= 4, "KPI 카드가 없습니다");
       const h = await alice.locator("#phead").boundingBox();
       assert(h.height <= 110, `프로젝트 헤더 높이 ${h.height}px > 110px`);
       await shot(alice, "01_overview");
@@ -125,8 +125,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
     await step("보기 설정 팝오버·작업 메뉴", async () => {
       await alice.click("#btnView"); await alice.waitForSelector("#viewPop:not([hidden])");
       await alice.keyboard.press("Escape"); assert(await alice.locator("#viewPop").isHidden(), "Esc로 닫히지 않음");
-      await alice.click("#btnWork"); await alice.waitForSelector("#workMenu:not([hidden])");
-      await alice.click('#workMenu a[href^="#/wizard/"]');
+      await alice.click('#side a[href^="#/wizard/"]');
       await alice.waitForSelector(".stepper");
     });
     await step("월간 점검 팀 기록", async () => {
@@ -236,14 +235,14 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
     });
     await step("상황판 지표 고르기 · 상태 기준", async () => {
       await alice.goto(`${BASE}/#/p/${uid}/overview`); await alice.waitForSelector("#kpiCfg");
-      await alice.click("#kpiCfg"); await alice.uncheck('#kpiList [data-k="neg"]'); await alice.click("#fKpi button[value=ok]");
+      await alice.click("#kpiCfg"); await alice.check('#kpiList [data-k="progress"]'); await alice.click("#fKpi button[value=ok]");
       await alice.waitForFunction(() => document.querySelectorAll(".kpis .kpi").length === 5);
       await alice.goto(`${BASE}/#/p/${uid}/settings`); await alice.click('.seg-tabs button:has-text("상태 기준")');
       await alice.waitForSelector('[data-th="spi_warn"]:disabled', { timeout: 8000 });   // 관리자가 아니면 조회 전용
       const admTmp = await login(browser, "admin");
       await admTmp.evaluate(() => api("/api/admin/thresholds", { method: "PUT", json: { spi_warn: 0.95 } }));
       await admTmp.context().close();
-      await alice.goto(`${BASE}/#/p/${uid}/overview`); await alice.waitForSelector(".sit.warn");
+      await alice.goto(`${BASE}/#/p/${uid}/overview`); await alice.waitForSelector(".sit.warn, .sit.bad");
     });
     await step("리스크 표에서 바로 고치기 + 작업 ID 자동완성", async () => {
       await alice.goto(`${BASE}/#/p/${uid}/risk`); await alice.waitForSelector("#rkAdd");

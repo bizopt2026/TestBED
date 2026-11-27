@@ -44,10 +44,10 @@ def test_project_ai_policy(env):
 def test_team_thresholds_admin_only(env):
     alice, adm = login("alice"), login("admin")
     uid = alice.post("/api/upload", files={"file": ("p.xer", RAW)}).json()["ids"][0]
-    assert alice.get(f"/api/uploads/{uid}/situation").json()["level"] == "ok"
+    assert alice.get(f"/api/uploads/{uid}/situation").json()["level_detail"]["base_level"] == "ok"
     assert alice.put("/api/admin/thresholds", json={"spi_warn": 0.95}).status_code == 403
     assert adm.put("/api/admin/thresholds", json={"spi_warn": 0.95}).json()["values"] == {"spi_warn": 0.95}
-    assert alice.get(f"/api/uploads/{uid}/situation").json()["level"] == "warn"     # 전사 기본값이 적용됨
+    assert alice.get(f"/api/uploads/{uid}/situation").json()["level_detail"]["base_level"] == "warn"     # 전사 기본값이 적용됨
     assert alice.get(f"/api/uploads/{uid}/thresholds").status_code == 200           # 조회는 가능
 
 
