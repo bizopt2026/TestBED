@@ -44,7 +44,7 @@ async function download(path, fallbackName) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = m ? decodeURIComponent(m[1]) : fallbackName;
-  a.click();
+  document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
   URL.revokeObjectURL(a.href);
 }
 
@@ -73,7 +73,14 @@ $("#formUpload").addEventListener("submit", async (e) => {
     $("#dlgUpload").close();
     f.reset();
     toast("업로드 및 분석 완료");
+    uploadsCache = null;
     location.hash = `#/p/${r.ids[0]}/overview`;
+    const ir = r.import_report;
+    if (ir) ui.notice(`${ir.source} 가져오기 결과`, `<table class="t" data-noexport><tbody>
+      <tr><td>액티비티</td><td class="num">${ir.activities}</td></tr><tr><td>관계</td><td class="num">${ir.relationships}</td></tr>
+      <tr><td>WBS(요약 작업)</td><td class="num">${ir.wbs}</td></tr><tr><td>캘린더</td><td class="num">${ir.calendars}</td></tr>
+      <tr><td>자원 배정(비용)</td><td class="num">${ir.assignments}</td></tr><tr><td>Data Date(상태 날짜)</td><td>${ir.status_date}</td></tr></tbody></table>
+      ${ir.warnings.length ? `<h4>확인할 점</h4><ul>${ir.warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul>` : "<p>✓ 특이사항 없음</p>"}`);
     route();
   } catch (err) {
     $("#uploadErr").textContent = err.message;
@@ -92,6 +99,7 @@ async function route() {
     if (parts[0] === "p" && parts[1]) return await showProject(parts[1], parts[2] || "overview");
     if (parts[0] === "cmp" && parts[1] && parts[2]) return await showCompare(parts[1], parts[2]);
     if (parts[0] === "admin") return await showAdmin();
+    if (parts[0] === "reports") return await showReports(parts[1]);
     if (parts[0] === "learn") return await showLearn(parts[1], parts[2]);
     if (parts[0] === "field" && parts[1]) return await showField(parts[1]);
     if (parts[0] === "print" && parts[1]) return await showPrint(parts[1]);
@@ -116,7 +124,7 @@ async function showList() {
   view.innerHTML = `
   <div id="inbox"></div>
   <div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">포트폴리오</h2>
-    <div class="row"><a class="btn" href="#/learn">🎓 학습 센터</a><button class="btn" onclick="showGenerate()" data-need="editor">+ 새 공정표 만들기</button></div></div>
+    <div class="row"><a class="btn" href="#/reports">📊 엑셀 리포트</a><a class="btn" href="#/learn">🎓 학습 센터</a><button class="btn" onclick="showGenerate()" data-need="editor">+ 새 공정표 만들기</button></div></div>
   <div class="cards">${pf.sort((a, b) => JSON.parse(store.get("favs", "[]")).includes(b.name) - JSON.parse(store.get("favs", "[]")).includes(a.name)).map((p) => `<a class="card" data-name="${esc(p.name)}" href="#/p/${p.id}/overview">
       <div class="row" style="justify-content:space-between"><b>${esc(p.name)}</b><span class="muted" style="font-size:12px">DD ${p.data_date}</span></div>
       <div class="big">${p.finish}<span class="muted" style="font-size:12px"> 예상 준공</span></div>
@@ -173,7 +181,7 @@ const GROUPS = [
   ["현황", [["overview", "개요"], ["gantt", "공정표"], ["critical", "주공정"], ["scurve", "S-Curve"], ["evm", "베이스라인·EVM"], ["resources", "자원"]]],
   ["품질·진단", [["health", "건전성·DCMA"], ["analysis", "업데이트 분석"], ["p6", "P6 일정 비교"], ["korea", "국내 기준"], ["rels", "관계 추천"]]],
   ["리스크·대응", [["risk", "리스크·예측"], ["recovery", "자동 만회안"], ["whatif", "What-if"]]],
-  ["현장·보고", [["lookahead", "룩어헤드·PPC"], ["daily", "작업일보 진도"], ["report", "월간 보고서"], ["trades", "공종 분류"], ["bench", "벤치마크"]]],
+  ["현장·보고", [["lookahead", "룩어헤드·PPC"], ["daily", "작업일보 진도"], ["report", "월간 보고서"], ["xlsx", "엑셀 리포트"], ["trades", "공종 분류"], ["bench", "벤치마크"]]],
 ];
 const TAB_GROUP = Object.fromEntries(GROUPS.flatMap(([g, ts]) => ts.map(([k]) => [k, g])));
 const TAB_LABEL = Object.fromEntries(GROUPS.flatMap(([, ts]) => ts));
@@ -194,7 +202,7 @@ async function showProject(uid, tab) {
   const r = u.result;
   ctx.uid = uid; ctx.tab = tab; ctx.result = r;
   uploadsCache = uploadsCache || await api("/api/uploads");
-  const same = uploadsCache.filter((x) => x.name === r.name).sort((a, b) => (a.data_date < b.data_date ? 1 : -1));
+  const same = uploadsCache.filter((x) => x.name === r.name).sort((a, b) => (b.data_date + b.created_at).localeCompare(a.data_date + a.created_at));
   const latest = same[0]?.id === uid;
   const favs = JSON.parse(store.get("favs", "[]"));
   $("#crumb").innerHTML = `/ <a href="#/p/${uid}/overview">${esc(r.name)}</a> / ${esc(TAB_LABEL[tab] || (tab === "settings" ? "설정" : ""))}`;
@@ -234,7 +242,7 @@ async function showProject(uid, tab) {
      chat: tabChat, report: tabReport, delay: tabDelay, whatif: tabWhatif, rels: tabRels, trades: tabTrades,
      risk: tabRisk, bench: tabBench, daily: tabDaily, health: tabHealth, forensic: tabForensic, predict: tabPredict,
      recovery: tabRecovery, evm: tabEvm, resources: tabResources, korea: tabKorea, lookahead: tabLookahead,
-     settings: tabSettings, analysis: tabAnalysis }[tab] || tabOverview)(el, r, uid);
+     settings: tabSettings, analysis: tabAnalysis, xlsx: (e) => { location.hash = `#/reports/${uid}`; } }[tab] || tabOverview)(el, r, uid);
   enhance(el);
   maybeStartTour(tab);
 }
@@ -925,7 +933,7 @@ async function downloadPost(path, json, fallback) {
   const r = await api(path, { method: "POST", json });
   const blob = await r.blob();
   const m = (r.headers.get("content-disposition") || "").match(/filename\*=UTF-8''([^;]+)/);
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = m ? decodeURIComponent(m[1]) : fallback; a.click();
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = m ? decodeURIComponent(m[1]) : fallback; document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
 }
 
 // ---------------------------------------------------------------- ⑥ 관계 추천

@@ -204,7 +204,7 @@ function addExportButtons(root) {
       const h = p.querySelector("h3")?.childNodes[0]?.textContent?.trim() || "표";
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([tableToCsv(t)], { type: "text/csv" }));
-      a.download = `${ctx.result?.name || "export"}_${h}_${ctx.result?.data_date || ""}.csv`; a.click();
+      a.download = `${ctx.result?.name || "export"}_${h}_${ctx.result?.data_date || ""}.csv`; document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
     };
     const bar = document.createElement("div"); bar.className = "export-bar"; bar.appendChild(b);
     const anchor = t.closest(".scroll") || t;

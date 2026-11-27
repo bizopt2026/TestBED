@@ -261,3 +261,13 @@ body.field .top .crumb, body.field #btnUpload { display: none; }
   .userbox .linkbtn, .userbox a[href="#/learn"] { display: none; }
   .phead .row .btn { padding: 6px 8px; font-size: 13px; }
 }
+
+/* 엑셀 리포트 */
+.steps3 { display: grid; grid-template-columns: 1.3fr 1fr 0.8fr; gap: 16px; }
+.tpl { display: grid; grid-template-columns: 20px 1fr auto; gap: 8px; align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; cursor: pointer; }
+.tpl.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.btn.big { width: 100%; padding: 14px; font-size: 16px; }
+.fields { max-height: 420px; overflow: auto; } .fields h4 { margin: 10px 0 4px; }
+.fld { display: grid; grid-template-columns: 260px 1fr; gap: 8px; width: 100%; text-align: left; background: none; border: none; border-bottom: 1px dashed var(--line); padding: 5px 2px; cursor: copy; color: var(--text); font: inherit; font-size: 13px; }
+.fld:hover { background: var(--hover); } .fields details { margin: 6px 0; } .fields summary { cursor: pointer; padding: 4px 0; }
+@media (max-width: 1100px) { .steps3 { grid-template-columns: 1fr; } .fld { grid-template-columns: 1fr; } }

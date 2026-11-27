@@ -237,7 +237,7 @@ def latest_by_project() -> list[dict]:
     with conn() as c:
         rows = c.execute("""SELECT u.id, u.name, u.data_date, u.finish, u.activities, u.created_at FROM uploads u
             JOIN (SELECT name, MAX(data_date) dd FROM uploads GROUP BY name) m ON u.name=m.name AND u.data_date=m.dd
-            ORDER BY u.name""").fetchall()
+            ORDER BY u.name, u.created_at DESC""").fetchall()
     seen, out = set(), []
     for r in rows:
         if r["name"] not in seen:

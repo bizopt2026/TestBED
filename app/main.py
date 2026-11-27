@@ -30,7 +30,7 @@ SECURE_COOKIE = os.environ.get("SECURE_COOKIE", "0") == "1"
 
 PUBLIC = {"/api/config", "/api/login", "/api/logout", "/api/me"}
 # 조회 권한(viewer)으로도 허용되는 계산 전용 POST
-VIEWER_POST = ("/whatif", "/recovery")
+VIEWER_POST = ("/whatif", "/recovery", "/api/reports/render")
 ADMIN_ONLY = ("/api/admin/",)
 
 
@@ -83,7 +83,8 @@ def auth():  # 인증·권한은 미들웨어에서 처리 (하위 호환용)
 
 @app.get("/api/config")
 def config():
-    return {"token_required": bool(APP_TOKEN) and not auth_mod.users_exist(), "login_required": auth_mod.users_exist(),
+    from . import mpp_convert
+    return {"mpp": mpp_convert.available(), "token_required": bool(APP_TOKEN) and not auth_mod.users_exist(), "login_required": auth_mod.users_exist(),
             "ai": ai.status()["enabled"]}
 
 
@@ -128,11 +129,23 @@ async def upload(request: Request, file: UploadFile = File(...), uploader: str =
     if auth_mod.users_exist():
         uploader = request.state.user["username"]
     fname = file.filename or "upload.xer"
+    import_report = None
     try:
-        if fname.lower().endswith(".xml"):
+        low = fname.lower()
+        ext = os.path.splitext(low)[1]
+        if ext in (".xml", ".mpp", ".mpt", ".mpx"):
+            from . import mpp_convert
             from .importers import msp_xml_to_tables, tables_to_xer
-            raw = tables_to_xer(msp_xml_to_tables(raw))
-            fname = re.sub(r"\.xml$", "", fname, flags=re.I) + "_MSP변환.xer"
+            source = "MS Project XML"
+            if ext != ".xml":
+                raw = mpp_convert.convert(raw, ext)
+                source = {".mpp": "MS Project(.mpp)", ".mpt": "MS Project 템플릿(.mpt)", ".mpx": "MPX"}[ext]
+            elif b"APIBusinessObjects" in raw[:4000]:
+                raw = mpp_convert.convert(raw, ".xml")
+                source = "Primavera P6 XML"
+            import_report = {"source": source}
+            raw = tables_to_xer(msp_xml_to_tables(raw, import_report))
+            fname = re.sub(r"\.(xml|mpp|mpt|mpx)$", "", fname, flags=re.I) + "_변환.xer"
         tables = parse_xer(raw)
         projects = list_projects(tables)
         if not projects:
@@ -150,7 +163,7 @@ async def upload(request: Request, file: UploadFile = File(...), uploader: str =
             raise ValueError("분석 가능한 프로젝트(액티비티 포함)가 없습니다")
     except ValueError as e:
         raise HTTPException(400, str(e))
-    return {"ids": ids}
+    return {"ids": ids, "import_report": import_report}
 
 
 @app.get("/api/uploads", dependencies=[Depends(auth)])
@@ -652,6 +665,120 @@ def del_record(uid: str, kind: str, rid: str):
         raise HTTPException(404)
     storage.rec_del(kind, rid)
     return {"ok": True}
+
+
+# ---- 엑셀 양식 리포트
+TPL_SCOPE = "__tpl__"
+
+
+def _tpl_list():
+    from .report_samples import BUILTIN
+    out = [{"id": f"builtin:{k}", "name": v[0], "desc": v[1], "builtin": True} for k, v in BUILTIN.items()]
+    for r in storage.rec_list("report_tpl", "*"):
+        out.append({"id": r["id"], "name": r["name"], "desc": r.get("desc", ""), "builtin": False, "author": r["author"],
+                    "created_at": r["created_at"], "scan": r.get("scan", {}), "size": r.get("size")})
+    return out
+
+
+def _tpl_bytes(tid: str) -> tuple[bytes, str]:
+    from .report_samples import BUILTIN
+    if tid.startswith("builtin:"):
+        k = tid.split(":", 1)[1]
+        if k not in BUILTIN:
+            raise HTTPException(404)
+        return BUILTIN[k][2](), BUILTIN[k][0]
+    r = storage.rec_get("report_tpl", tid)
+    if not r:
+        raise HTTPException(404, "양식을 찾을 수 없습니다")
+    f = storage.file_get(r["file_id"])
+    return f["data"], r["name"]
+
+
+@app.get("/api/reports/templates")
+def report_templates():
+    return _tpl_list()
+
+
+@app.get("/api/reports/fields")
+def report_fields():
+    from .report_context import field_catalog
+    return field_catalog()
+
+
+@app.post("/api/reports/templates")
+async def upload_template(request: Request, file: UploadFile = File(...), name: str = Form(""), desc: str = Form("")):
+    from . import xlsx_report
+    raw = await file.read()
+    if len(raw) > 20 * 1024 * 1024:
+        raise HTTPException(413, "양식은 20MB 이하만 올릴 수 있습니다")
+    if not (file.filename or "").lower().endswith(".xlsx"):
+        raise HTTPException(400, "엑셀 통합문서(.xlsx) 파일만 올릴 수 있습니다")
+    try:
+        sc = xlsx_report.scan(raw)
+    except xlsx_report.TemplateError as e:
+        raise HTTPException(400, str(e))
+    except Exception:
+        raise HTTPException(400, "엑셀 파일을 읽을 수 없습니다")
+    user = request.state.user["username"]
+    fid = storage.file_put(TPL_SCOPE, "template", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", raw, user)
+    nm = (name or re.sub(r"\.xlsx$", "", file.filename or "양식", flags=re.I)).strip()[:60]
+    summary = {"fields": len(sc["found"]), "lists": sc["lists"], "sheets": sc["sheets"], "unknown": sc["unknown"][:50]}
+    rid = storage.rec_put("report_tpl", "*", {"name": nm, "desc": desc.strip()[:200], "file_id": fid, "size": len(raw), "scan": summary}, user)
+    return {"id": rid, "scan": summary}
+
+
+@app.delete("/api/reports/templates/{tid}")
+def delete_template(tid: str):
+    r = storage.rec_get("report_tpl", tid)
+    if not r:
+        raise HTTPException(404)
+    storage.file_del(r["file_id"])
+    storage.rec_del("report_tpl", tid)
+    return {"ok": True}
+
+
+@app.get("/api/reports/templates/{tid}/file")
+def template_file(tid: str):
+    data, name = _tpl_bytes(tid)
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_q(name + '.xlsx')}"})
+
+
+@app.post("/api/reports/render")
+def render_report(request: Request, body: dict = Body(...)):
+    from . import xlsx_report
+    from .report_context import Context
+    tid, uid = str(body.get("template_id") or ""), str(body.get("upload_id") or "")
+    user = request.state.user
+    use_ai = bool(body.get("ai"))
+    if use_ai and auth_mod.ROLES[user["role"]] < auth_mod.ROLES["editor"]:
+        raise HTTPException(403, "AI 문장 작성은 편집 권한 이상만 쓸 수 있습니다")
+    if not storage.get_raw(uid):
+        raise HTTPException(404, "프로젝트를 선택하세요")
+    raw, tname = _tpl_bytes(tid)
+    try:
+        out, warnings, stats = xlsx_report.render(raw, Context(uid, user["username"], use_ai))
+    except xlsx_report.TemplateError as e:
+        raise HTTPException(400, str(e))
+    r = services.result(uid)
+    storage.rec_put("report_log", r["name"], {"template": tname, "upload_id": uid, "data_date": r["data_date"],
+                                             "warnings": warnings[:20], "stats": stats}, user["username"])
+    storage.audit(user["username"], "POST", "/api/reports/render", 200, f"{tname} / {r['name']} {r['data_date']}")
+    fname = f"{r['name']}_{tname}_{r['data_date']}.xlsx"
+    from urllib.parse import quote as _quote
+    return Response(out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_q(fname)}",
+                             "X-Report-Warnings": _quote(json.dumps(warnings, ensure_ascii=False)),
+                             "X-Report-Stats": _quote(json.dumps(stats)),
+                             "Access-Control-Expose-Headers": "X-Report-Warnings, X-Report-Stats"})
+
+
+@app.get("/api/reports/history")
+def report_history():
+    out = []
+    for p in storage.latest_by_project():
+        out += [{**x, "project": p["name"]} for x in storage.rec_list("report_log", p["name"])]
+    return sorted(out, key=lambda x: x["created_at"], reverse=True)[:100]
 
 
 # ---- 3차: UX 지원

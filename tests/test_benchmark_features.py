@@ -135,7 +135,7 @@ def test_lookahead_commitments_ppc(client):
 def test_msp_import_template_generate_portfolio(client):
     uid = up(client, open(MSP, "rb").read(), "plan.xml")
     d = client.get(f"/api/uploads/{uid}").json()
-    assert d["filename"].endswith("_MSP변환.xer") and d["result"]["summary"]["activities"] == 5
+    assert d["filename"].endswith("_변환.xer") and d["result"]["summary"]["activities"] == 5
     g = client.post("/api/generate", data={"project": "신규 물류센터", "start": "2026-05-04", "mode": "template", "template": "building"}).json()
     r = client.get(f"/api/uploads/{g['id']}").json()["result"]
     assert r["summary"]["activities"] == 20 and all(a["bl_finish"] for a in r["activities"])
@@ -172,3 +172,22 @@ def test_users_roles_csrf_audit(client):
     assert c.get("/api/admin/users").status_code == 403
     with storage.conn() as con:
         assert con.execute("SELECT pw_hash FROM users WHERE username='admin1'").fetchone()[0].startswith("scrypt$")
+
+
+def test_msp_full_import_report_and_mpx(client):
+    raw = open(os.path.join(ROOT, "samples", "sample_msproject_full.xml"), "rb").read()
+    r = client.post("/api/upload", files={"file": ("full.xml", raw)}).json()
+    rep = r["import_report"]
+    assert rep["activities"] == 6 and rep["wbs"] == 2 and rep["assignments"] == 3 and rep["status_date"] == "2026-04-01"
+    acts = {a["code"]: a for a in client.get(f"/api/uploads/{r['ids'][0]}").json()["result"]["activities"]}
+    assert acts["1.1"]["wbs"] == "토목" and acts["2.2"]["constraint"] == "Start On or After"
+    assert acts["2.2"]["preds"][0]["type"] == "SS" and acts["2.2"]["preds"][0]["lag"] == 5
+    assert acts["1.2"]["bl_finish"] == "2026-03-26"
+    e = client.get(f"/api/uploads/{r['ids'][0]}/evm").json()
+    assert e["available"] and e["bac"] == 14000000
+    from app import mpp_convert
+    if mpp_convert.available():
+        m = client.post("/api/upload", files={"file": ("p.mpx", open(os.path.join(ROOT, "samples", "sample_msproject.mpx"), "rb").read())})
+        assert m.status_code == 200 and m.json()["import_report"]["source"] == "MPX"
+    bad = client.post("/api/upload", files={"file": ("x.mpp", b"not a project file")})
+    assert bad.status_code == 400
