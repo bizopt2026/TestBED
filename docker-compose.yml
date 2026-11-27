@@ -9,6 +9,10 @@ services:
       # 팀 접근 토큰 (비우면 인증 없음). 예: APP_TOKEN=my-team-secret
       APP_TOKEN: ${APP_TOKEN:-}
       MAX_UPLOAD_MB: "100"
+      # 사용자 계정 (지정하면 첫 실행 때 관리자 생성 → 로그인 필수 모드)
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      SECURE_COOKIE: ${SECURE_COOKIE:-0}   # HTTPS 뒤에서 운영하면 1
       # AI 기능 (비우면 규칙 기반으로만 동작)
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       AI_PROVIDER: ${AI_PROVIDER:-anthropic}

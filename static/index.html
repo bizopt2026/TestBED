@@ -11,15 +11,16 @@
   <a class="brand" href="#/">▦ 공정관리 분석기</a>
   <span class="crumb" id="crumb"></span>
   <span class="spacer"></span>
-  <button class="btn primary" id="btnUpload">XER 업로드</button>
+  <span id="userBox" class="userbox"></span>
+  <button class="btn primary" id="btnUpload">파일 업로드</button>
 </header>
 <main id="view"></main>
 
 <dialog id="dlgUpload">
   <form method="dialog" id="formUpload">
-    <h3>XER 파일 업로드</h3>
-    <p class="muted">Primavera P6에서 내보낸 .xer 파일을 올리면 팀 전체가 결과를 공유합니다.</p>
-    <label>파일<input type="file" name="file" accept=".xer,.XER" required></label>
+    <h3>공정표 업로드</h3>
+    <p class="muted">Primavera P6 XER(.xer) 또는 MS Project XML(.xml) 파일을 올리면 팀 전체가 결과를 공유합니다.</p>
+    <label>파일<input type="file" name="file" accept=".xer,.XER,.xml,.XML" required></label>
     <label>업로더 이름<input name="uploader" placeholder="예: 홍길동"></label>
     <label>메모<input name="note" placeholder="예: 3월 월간 업데이트"></label>
     <div class="row end">

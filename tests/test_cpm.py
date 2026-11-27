@@ -76,3 +76,21 @@ def test_out_of_sequence_progress_keeps_logic():
     a, _ = run([("A", 10, "TK_Active", "2026-02-23 08:00", None), ("B", 5, "TK_Active", "2026-02-27 08:00", None),
                 ("C", 5)], [("A", "B", "FS", 0), ("B", "C", "FS", 0)])
     assert a["A"]["tf"] == 0 and a["B"]["tf"] == 0
+
+
+def test_loe_spans_and_does_not_drive():
+    a, s = run([("A", 5), ("B", 10), ("L", 1, None, None, None, "TT_LOE")],
+               [("A", "B", "FS", 0), ("A", "L", "SS", 0), ("L", "B", "FF", 0)])
+    assert a["L"]["start"] == a["A"]["start"] and a["L"]["finish"] == a["B"]["finish"]
+    assert not a["L"]["longest"] and a["A"]["longest"]
+
+
+def test_progress_override_ignores_logic_for_started():
+    from app.schedule import Schedule
+    from app.xer_parser import parse_xer
+    from helpers import build_xer
+    raw = build_xer([("A", 10, "TK_Active", "2026-02-23 08:00", None), ("B", 5, "TK_Active", "2026-02-27 08:00", None)],
+                    [("A", "B", "FS", 0)])
+    s1 = {x["code"]: x for x in Schedule(parse_xer(raw)).to_dict()["activities"]}
+    s2 = {x["code"]: x for x in Schedule(parse_xer(raw), options={"progress_override": True}).to_dict()["activities"]}
+    assert s1["B"]["finish"] > s2["B"]["finish"]   # Retained: A 종료 후 잔여 / Override: Data Date 부터 바로

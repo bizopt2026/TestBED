@@ -34,6 +34,16 @@ def init() -> None:
         c.execute("""CREATE TABLE IF NOT EXISTS scenarios (
             id TEXT PRIMARY KEY, upload_id TEXT, name TEXT, kind TEXT, changes TEXT, summary TEXT,
             author TEXT, created_at TEXT)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS records (
+            kind TEXT, scope TEXT, id TEXT, data TEXT, author TEXT, created_at TEXT, updated_at TEXT,
+            PRIMARY KEY (kind, id))""")
+        c.execute("CREATE INDEX IF NOT EXISTS records_scope ON records(kind, scope)")
+        c.execute("""CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY, pw_hash TEXT, role TEXT, active INTEGER, created_at TEXT, last_login TEXT)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS sessions (
+            token_hash TEXT PRIMARY KEY, username TEXT, expires_at REAL)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS audit (
+            at TEXT, username TEXT, method TEXT, path TEXT, status INTEGER, detail TEXT)""")
         c.execute("""CREATE TABLE IF NOT EXISTS ai_log (
             at TEXT, upload_id TEXT, feature TEXT, user TEXT, tokens_in INTEGER, tokens_out INTEGER,
             seconds REAL, ok INTEGER)""")
@@ -170,4 +180,77 @@ def ai_usage() -> list[dict]:
     with conn() as c:
         rows = c.execute("SELECT feature, COUNT(*) n, SUM(tokens_in) tin, SUM(tokens_out) tout, "
                          "SUM(1-ok) failed FROM ai_log GROUP BY feature").fetchall()
+    return [dict(r) for r in rows]
+
+
+
+# ---------------------------------------------------------------- 범용 레코드 (리스크, 약속, 제약, 설정 등)
+def rec_list(kind: str, scope: str | None = None) -> list[dict]:
+    with conn() as c:
+        if scope is None:
+            rows = c.execute("SELECT * FROM records WHERE kind=? ORDER BY created_at", (kind,)).fetchall()
+        else:
+            rows = c.execute("SELECT * FROM records WHERE kind=? AND scope=? ORDER BY created_at", (kind, scope)).fetchall()
+    return [{**json.loads(r["data"]), "id": r["id"], "scope": r["scope"], "author": r["author"],
+             "created_at": r["created_at"], "updated_at": r["updated_at"]} for r in rows]
+
+
+def rec_get(kind: str, rid: str):
+    with conn() as c:
+        r = c.execute("SELECT * FROM records WHERE kind=? AND id=?", (kind, rid)).fetchone()
+    return {**json.loads(r["data"]), "id": r["id"], "scope": r["scope"]} if r else None
+
+
+def rec_put(kind: str, scope: str, data: dict, author: str = "", rid: str | None = None) -> str:
+    now = datetime.now().isoformat(timespec="seconds")
+    data = {k: v for k, v in data.items() if k not in ("id", "scope", "author", "created_at", "updated_at")}
+    with conn() as c:
+        if rid:
+            old = c.execute("SELECT created_at, author FROM records WHERE kind=? AND id=?", (kind, rid)).fetchone()
+            c.execute("INSERT OR REPLACE INTO records VALUES (?,?,?,?,?,?,?)",
+                      (kind, scope, rid, json.dumps(data, ensure_ascii=False), old["author"] if old else author,
+                       old["created_at"] if old else now, now))
+            return rid
+        rid = uuid.uuid4().hex[:10]
+        c.execute("INSERT INTO records VALUES (?,?,?,?,?,?,?)",
+                  (kind, scope, rid, json.dumps(data, ensure_ascii=False), author, now, now))
+    return rid
+
+
+def rec_del(kind: str, rid: str) -> bool:
+    with conn() as c:
+        return c.execute("DELETE FROM records WHERE kind=? AND id=?", (kind, rid)).rowcount > 0
+
+
+def setting(scope: str, key: str, default=None):
+    r = rec_get("setting", f"{scope}::{key}")
+    return r["value"] if r else default
+
+
+def set_setting(scope: str, key: str, value, author: str = "") -> None:
+    rec_put("setting", scope, {"value": value}, author, rid=f"{scope}::{key}")
+
+
+def latest_by_project() -> list[dict]:
+    with conn() as c:
+        rows = c.execute("""SELECT u.id, u.name, u.data_date, u.finish, u.activities, u.created_at FROM uploads u
+            JOIN (SELECT name, MAX(data_date) dd FROM uploads GROUP BY name) m ON u.name=m.name AND u.data_date=m.dd
+            ORDER BY u.name""").fetchall()
+    seen, out = set(), []
+    for r in rows:
+        if r["name"] not in seen:
+            seen.add(r["name"])
+            out.append(dict(r))
+    return out
+
+
+def audit(username, method, path, status, detail="") -> None:
+    with conn() as c:
+        c.execute("INSERT INTO audit VALUES (?,?,?,?,?,?)",
+                  (datetime.now().isoformat(timespec="seconds"), username, method, path, status, detail[:500]))
+
+
+def audit_list(limit: int = 300) -> list[dict]:
+    with conn() as c:
+        rows = c.execute("SELECT * FROM audit ORDER BY at DESC LIMIT ?", (limit,)).fetchall()
     return [dict(r) for r in rows]

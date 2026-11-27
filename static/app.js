@@ -15,10 +15,13 @@ function toast(msg) {
 }
 
 async function api(path, opts = {}) {
-  opts.headers = { ...(opts.headers || {}), "X-App-Token": store.get("token"), "X-User": encodeURIComponent(store.get("uploader")) };
+  opts.headers = { ...(opts.headers || {}), "X-App-Token": store.get("token"), "X-User": encodeURIComponent(store.get("uploader")), "X-Requested-With": "fetch" };
+  opts.credentials = "same-origin";
   if (opts.json !== undefined) { opts.body = JSON.stringify(opts.json); opts.headers["Content-Type"] = "application/json"; delete opts.json; }
   const r = await fetch(path, opts);
-  if (r.status === 401) {
+  if (r.status === 401 && path !== "/api/login") {
+    const cfg = await fetch("/api/config").then((x) => x.json());
+    if (cfg.login_required) { await showLogin(); return api(path, opts); }
     const dlg = $("#dlgToken");
     dlg.showModal();
     await new Promise((res) => dlg.addEventListener("close", res, { once: true }));
@@ -85,6 +88,8 @@ async function route() {
   try {
     if (parts[0] === "p" && parts[1]) return await showProject(parts[1], parts[2] || "overview");
     if (parts[0] === "cmp" && parts[1] && parts[2]) return await showCompare(parts[1], parts[2]);
+    if (parts[0] === "admin") return await showAdmin();
+    if (parts[0] === "print" && parts[1]) return await showPrint(parts[1]);
     return await showList();
   } catch (err) {
     view.innerHTML = `<div class="panel err">오류: ${esc(err.message)}</div>`;
@@ -94,13 +99,32 @@ async function route() {
 // ---------------------------------------------------------------- 목록
 async function showList() {
   $("#crumb").textContent = "";
-  const list = await api("/api/uploads");
+  const [list, pf] = await Promise.all([api("/api/uploads"), api("/api/portfolio")]);
   if (!list.length) {
     view.innerHTML = `<div class="panel empty"><h2>업로드된 공정표가 없습니다</h2>
-      <p>오른쪽 위 <b>XER 업로드</b> 버튼으로 Primavera P6에서 내보낸 XER 파일을 올려 보세요.</p></div>`;
+      <p>P6 XER 또는 MS Project XML 파일을 올리거나, 템플릿·문서로 초기 공정표를 만들어 보세요.</p>
+      <div class="row" style="justify-content:center"><button class="btn primary" onclick="$('#btnUpload').click()">파일 업로드</button>
+      <button class="btn" onclick="showGenerate()">새 공정표 만들기</button></div></div>`;
     return;
   }
+  const sig = (v, good, warn) => v === null || v === undefined ? "" : v >= good ? "ok" : v >= warn ? "warn" : "bad";
   view.innerHTML = `
+  <div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">포트폴리오</h2>
+    <button class="btn" onclick="showGenerate()">+ 새 공정표 만들기</button></div>
+  <div class="cards">${pf.map((p) => `<a class="card" href="#/p/${p.id}/overview">
+      <div class="row" style="justify-content:space-between"><b>${esc(p.name)}</b><span class="muted" style="font-size:12px">DD ${p.data_date}</span></div>
+      <div class="big">${p.finish}<span class="muted" style="font-size:12px"> 예상 준공</span></div>
+      <div class="chips">
+        <span class="chip ${p.margin === null ? "" : p.margin >= 0 ? "ok" : "bad"}">${p.margin === null ? "목표 준공 없음" : p.margin >= 0 ? `여유 ${p.margin}일` : `지연 ${-p.margin}일`}</span>
+        ${p.slip !== null ? `<span class="chip ${p.slip > 0 ? "bad" : "ok"}">전회 ${p.slip > 0 ? "+" : ""}${p.slip}일</span>` : ""}
+        <span class="chip ${sig(p.health, 75, 60)}">건전성 ${p.health ?? "-"}</span>
+        ${p.spi !== null ? `<span class="chip ${sig(p.spi, 0.95, 0.85)}">SPI ${p.spi}</span>` : ""}
+        ${p.cpi !== null ? `<span class="chip ${sig(p.cpi, 0.95, 0.85)}">CPI ${p.cpi}</span>` : ""}
+        ${p.open_risks ? `<span class="chip warn">리스크 ${p.open_risks}</span>` : ""}
+        ${p.negative_float ? `<span class="chip bad">음수여유 ${p.negative_float}</span>` : ""}
+      </div>
+      <div class="bar"><i style="width:${p.progress}%"></i></div><div class="muted" style="font-size:12px">공정률 ${p.progress}% · 업데이트 ${p.updates}회</div>
+    </a>`).join("")}</div>
   <div class="panel">
     <div class="row" style="justify-content:space-between;margin-bottom:10px">
       <h3 style="margin:0">팀 공정표 목록 <span class="muted">(${list.length})</span></h3>
@@ -135,10 +159,13 @@ async function showList() {
 }
 
 // ---------------------------------------------------------------- 프로젝트
-const TABS = [["overview", "개요"], ["gantt", "공정표"], ["critical", "주공정"], ["dcma", "DCMA 14 점검"],
-  ["scurve", "S-Curve"], ["p6", "P6 일정 비교"]];
-const AI_TABS = [["chat", "✦ AI 어시스턴트"], ["report", "월간 보고서"], ["delay", "지연 원인"], ["whatif", "What-if"],
-  ["rels", "관계 추천"], ["trades", "공종 분류"], ["risk", "리스크"], ["bench", "벤치마크"], ["daily", "작업일보 진도"]];
+const GROUPS = [
+  ["현황", [["overview", "개요"], ["gantt", "공정표"], ["critical", "주공정"], ["scurve", "S-Curve"], ["evm", "베이스라인·EVM"], ["resources", "자원"]]],
+  ["품질·진단", [["health", "건전성 점수"], ["dcma", "DCMA 14"], ["forensic", "업데이트 포렌식"], ["p6", "P6 일정 비교"], ["korea", "국내 기준"], ["rels", "관계 추천"]]],
+  ["리스크·대응", [["risk", "리스크 레지스터"], ["delay", "지연 원인"], ["predict", "지연 예측"], ["recovery", "자동 만회안"], ["whatif", "What-if"]]],
+  ["현장·보고", [["lookahead", "룩어헤드·PPC"], ["daily", "작업일보 진도"], ["report", "월간 보고서"], ["trades", "공종 분류"], ["bench", "벤치마크"]]],
+];
+const TAB_GROUP = Object.fromEntries(GROUPS.flatMap(([g, ts]) => ts.map(([k]) => [k, g])));
 let aiStatus = null;
 async function getAiStatus() { if (!aiStatus) aiStatus = await api("/api/ai/status"); return aiStatus; }
 
@@ -159,8 +186,10 @@ async function showProject(uid, tab) {
       <button class="btn" id="btnRecalc" title="최신 엔진으로 다시 계산">재계산</button></div>
     </div>
     ${r.warnings.map((w) => `<div class="panel err">⚠ ${esc(w)}</div>`).join("")}
-    <nav class="tabs">${TABS.map(([k, l]) => `<a href="#/p/${uid}/${k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</nav>
-    <nav class="tabs ai">${AI_TABS.map(([k, l]) => `<a href="#/p/${uid}/${k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</nav>
+    <nav class="groups">${GROUPS.map(([g, ts]) => `<a href="#/p/${uid}/${ts[0][0]}" class="${TAB_GROUP[tab] === g ? "on" : ""}">${g}</a>`).join("")}
+      <a href="#/p/${uid}/chat" class="ai-link ${tab === "chat" ? "on" : ""}">✦ AI 어시스턴트</a>
+      <a href="#/p/${uid}/settings" class="${tab === "settings" ? "on" : ""}">⚙ 설정</a></nav>
+    ${TAB_GROUP[tab] ? `<nav class="tabs">${GROUPS.find(([g]) => g === TAB_GROUP[tab])[1].map(([k, l]) => `<a href="#/p/${uid}/${k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</nav>` : ""}
     <div id="tab"></div>`;
   $("#btnCsv").onclick = () => download(`/api/uploads/${uid}/activities.csv`, "activities.csv");
   $("#btnRecalc").onclick = async () => {
@@ -171,7 +200,9 @@ async function showProject(uid, tab) {
   el.dataset.uid = uid;
   ({ overview: tabOverview, gantt: tabGantt, critical: tabCritical, dcma: tabDcma, scurve: tabScurve, p6: tabP6,
      chat: tabChat, report: tabReport, delay: tabDelay, whatif: tabWhatif, rels: tabRels, trades: tabTrades,
-     risk: tabRisk, bench: tabBench, daily: tabDaily }[tab] || tabOverview)(el, r, uid);
+     risk: tabRisk, bench: tabBench, daily: tabDaily, health: tabHealth, forensic: tabForensic, predict: tabPredict,
+     recovery: tabRecovery, evm: tabEvm, resources: tabResources, korea: tabKorea, lookahead: tabLookahead,
+     settings: tabSettings }[tab] || tabOverview)(el, r, uid);
 }
 
 function kpi(label, value, cls = "") {
@@ -332,7 +363,7 @@ function tabGantt(el, r) {
       <label><input type="checkbox" id="fInc" checked> 완료 제외</label>
       <label><input type="checkbox" id="fBl" checked> 계획(Target) 표시</label>
       <label class="muted">배율 <select class="s" id="zoom"><option value="3">일</option><option value="1.2" selected>주</option><option value="0.35">월</option><option value="0.12">분기</option></select></label>
-      <span class="spacer"></span>
+      <span class="spacer"></span><a class="btn sm" href="#/print/${el.dataset.uid}">A3 인쇄</a>
       <div class="legend"><span><i style="background:var(--bar)"></i>일반</span><span><i style="background:var(--crit)"></i>주공정</span>
       <span><i style="background:var(--done)"></i>완료</span><span><i style="background:var(--bl);height:4px"></i>계획</span>
       <span><i style="background:#16a34a;width:2px"></i>Data Date</span></div>
@@ -818,31 +849,6 @@ async function tabTrades(el, r, uid) {
 }
 
 // ---------------------------------------------------------------- ⑧⑨ 리스크
-async function tabRisk(el, r, uid) {
-  el.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">준공 리스크 (몬테카를로)</h3>
-    <div class="row"><label class="muted">반복 <input class="s" id="mcN" type="number" value="500" style="width:80px"></label><button class="btn primary" id="mcRun">시뮬레이션 실행</button></div></div>
-    <div id="mcBody" class="muted" style="margin-top:8px">잔여공기 불확실성을 반영해 준공일 분포를 계산합니다.</div></div>
-    <div class="panel"><h3 style="margin-top:0">지연 위험 작업</h3><div id="rkBody" class="muted">계산 중...</div></div>`;
-  $("#mcRun").onclick = () => withBusy($("#mcRun"), async () => {
-    const m = await api(`/api/uploads/${uid}/montecarlo?n=${$("#mcN").value}`);
-    $("#mcBody").classList.remove("muted");
-    $("#mcBody").innerHTML = `<div class="kpis">${kpi("결정론적 준공", m.deterministic)}${kpi("P50", m.p50)}${kpi("P80", m.p80, "crit")}${kpi("P90", m.p90)}
-      ${m.prob_meet_target !== null ? kpi(`목표(${m.must_finish}) 달성 확률`, m.prob_meet_target + "%", m.prob_meet_target < 50 ? "crit" : "") : ""}</div>
-      <canvas id="mcHist" style="width:100%;height:200px"></canvas>
-      <p class="muted">${esc(m.assumption)} · 반복 ${m.iterations}회</p>
-      <h4>주공정 지수 (시뮬레이션 중 최장경로에 포함된 비율)</h4>
-      <table class="t"><thead><tr><th>ID</th><th>작업</th><th class="num">주공정 지수</th></tr></thead><tbody>
-      ${m.criticality.map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}</td><td class="num">${x.index}%</td></tr>`).join("")}</tbody></table>`;
-    drawHist($("#mcHist"), m.histogram);
-  });
-  const rk = await api(`/api/uploads/${uid}/risk`);
-  $("#rkBody").classList.remove("muted");
-  $("#rkBody").innerHTML = `<p class="muted">${esc(rk.note)} (누적 업데이트 ${rk.history_updates}회)</p>
-    <div class="scroll"><table class="t"><thead><tr><th>ID</th><th>작업</th><th>공종</th><th>상태</th><th>종료</th><th class="num">TF</th><th class="num">위험</th><th>사유</th></tr></thead><tbody>
-    ${rk.items.map((x) => `<tr><td>${esc(x.code)}</td><td class="wrap">${esc(x.name)}</td><td>${esc(x.trade)}</td><td>${esc(x.status)}</td><td>${x.finish}</td><td class="num">${fmtDays(x.tf)}</td>
-      <td class="num"><span class="tag ${x.score >= 50 ? "fail" : x.score >= 30 ? "" : "ok"}">${x.score}</span></td><td class="wrap">${x.reasons.map(esc).join(", ")}</td></tr>`).join("")}</tbody></table></div>`;
-}
-
 function drawHist(cv, hist) {
   const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
   cv.width = W * dpr; cv.height = H * dpr; const g = cv.getContext("2d"); g.scale(dpr, dpr);
@@ -900,3 +906,492 @@ async function tabDaily(el, r, uid) {
     $("#dXer").onclick = () => withBusy($("#dXer"), () => downloadPost(`/api/uploads/${uid}/xer_patch`, { changes: chosen() }, "progress.xer"));
   });
 }
+
+// ================================================================ 2차: 벤치마크 반영 화면
+function lineChart(cv, labels, series, opts = {}) {
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr; const g = cv.getContext("2d"); g.scale(dpr, dpr);
+  const pad = { l: opts.left || 56, r: 12, t: 12, b: 26 };
+  const vals = series.flatMap((s) => s.values).filter((v) => v !== null && v !== undefined);
+  if (!vals.length || !labels.length) return;
+  let lo = opts.min ?? Math.min(...vals), hi = opts.max ?? Math.max(...vals); if (hi === lo) { hi += 1; lo -= 1; }
+  const X = (i) => pad.l + (labels.length === 1 ? (W - pad.l - pad.r) / 2 : (i / (labels.length - 1)) * (W - pad.l - pad.r));
+  const Y = (v) => H - pad.b - ((v - lo) / (hi - lo)) * (H - pad.t - pad.b);
+  g.font = "11px sans-serif"; g.strokeStyle = "#e5e7eb"; g.fillStyle = "#6b7280";
+  for (let k = 0; k <= 4; k++) { const v = lo + (k * (hi - lo)) / 4; g.beginPath(); g.moveTo(pad.l, Y(v)); g.lineTo(W - pad.r, Y(v)); g.stroke(); g.fillText(opts.fmt ? opts.fmt(v) : Math.round(v), 4, Y(v) + 4); }
+  const step = Math.ceil(labels.length / 10);
+  labels.forEach((l, i) => { if (i % step === 0) g.fillText(l, X(i) - 20, H - 8); });
+  series.forEach((s) => {
+    g.strokeStyle = s.color; g.fillStyle = s.color; g.lineWidth = 2; g.setLineDash(s.dash || []); g.beginPath();
+    let started = false;
+    s.values.forEach((v, i) => { if (v === null || v === undefined) return; started ? g.lineTo(X(i), Y(v)) : g.moveTo(X(i), Y(v)); started = true; });
+    g.stroke(); g.setLineDash([]);
+    if (s.dots) s.values.forEach((v, i) => { if (v !== null && v !== undefined) { g.beginPath(); g.arc(X(i), Y(v), 3.5, 0, 7); g.fill(); } });
+  });
+}
+const legend = (items) => `<div class="legend">${items.map(([c, l]) => `<span><i style="background:${c}"></i>${l}</span>`).join("")}</div>`;
+const signed = (v) => (v > 0 ? "+" : "") + v;
+const won = (v) => v === null || v === undefined ? "-" : (Math.abs(v) >= 1e8 ? (v / 1e8).toFixed(2) + "억" : Math.abs(v) >= 1e4 ? Math.round(v / 1e4).toLocaleString() + "만" : Math.round(v).toLocaleString());
+
+// ---------------------------------------------------------------- 건전성 점수
+async function tabHealth(el, r, uid) {
+  const h = await api(`/api/uploads/${uid}/health`);
+  const color = h.score >= 90 ? "var(--ok)" : h.score >= 75 ? "#65a30d" : h.score >= 60 ? "var(--warn)" : "var(--crit)";
+  const groups = [...new Set(h.metrics.map((m) => m.group))];
+  el.innerHTML = `<div class="row" style="gap:16px;align-items:stretch;margin-bottom:16px">
+      <div class="panel score"><div class="muted">종합 건전성 점수</div><div class="big" style="color:${color}">${h.score}<small>/100</small></div>
+        <div class="grade" style="background:${color}">${h.grade}</div><div class="muted" style="font-size:12px">${h.passed}/${h.evaluated} 항목 통과</div></div>
+      <div class="panel" style="flex:1"><h4 style="margin-top:0">그룹별 점수</h4>
+        ${Object.entries(h.groups).map(([g, v]) => `<div class="hbar"><span>${g}</span><div><i style="width:${v}%;background:${v >= 75 ? "var(--ok)" : v >= 60 ? "var(--warn)" : "var(--crit)"}"></i></div><b>${v}</b></div>`).join("")}
+        <p class="muted" style="font-size:12px;margin-bottom:0">DCMA 14-Point, GAO 일정 평가 모범사례, AACE 권고에서 쓰는 점검 항목 ${h.metrics.length}개를 가중 평균했습니다. 기준값과 가중치는 <a href="#/p/${uid}/settings">설정</a>에서 바꿀 수 있습니다.</p></div></div>
+    ${groups.map((g) => `<div class="panel"><h3 style="margin-top:0">${g}</h3><table class="t"><thead><tr><th>ID</th><th>항목</th><th>설명</th><th class="num">결과</th><th>기준</th><th class="num">점수</th><th>판정</th></tr></thead><tbody>
+      ${h.metrics.filter((m) => m.group === g).map((m, i) => `<tr class="${m.items.length ? "clickable" : ""}" data-m="${m.id}">
+        <td>${m.id}</td><td><b>${esc(m.name)}</b></td><td class="wrap muted">${esc(m.desc)}</td>
+        <td class="num">${m.unit === "%" && m.total ? `${m.count}/${m.total} · ` : ""}${m.value}${m.unit === "%" ? "%" : m.unit === "개" ? "개" : ""}</td>
+        <td>${m.cmp === "info" ? "참고" : (m.cmp === "le" ? "≤ " : "≥ ") + m.threshold + (m.unit === "%" ? "%" : "")}</td>
+        <td class="num">${m.score ?? "-"}</td>
+        <td>${m.pass === null ? '<span class="tag">참고</span>' : m.pass ? '<span class="tag ok">통과</span>' : '<span class="tag fail">미달</span>'}</td></tr>
+        <tr hidden id="mi-${m.id}"><td></td><td colspan="6" class="dcma-items">${m.items.map(esc).join(", ")}</td></tr>`).join("")}</tbody></table></div>`).join("")}`;
+  el.querySelectorAll("tr[data-m]").forEach((tr) => (tr.onclick = () => { const x = $(`#mi-${tr.dataset.m}`); if (x.querySelector("td:last-child").textContent) x.hidden = !x.hidden; }));
+}
+
+// ---------------------------------------------------------------- 포렌식
+async function tabForensic(el, r, uid) {
+  const list = (await api("/api/uploads")).filter((u) => u.name === r.name && u.id !== uid && u.data_date < r.data_date);
+  el.innerHTML = `<div class="panel"><div class="row"><b>비교 기준</b><select class="s" id="fBase">${list.map((u) => `<option value="${u.id}">${u.data_date} · ${esc(u.note || u.filename)}</option>`).join("") || "<option value=''>이전 업데이트 없음</option>"}</select></div></div><div id="fBody">불러오는 중...</div>`;
+  const draw = async () => {
+    const f = await api(`/api/uploads/${uid}/forensic${$("#fBase").value ? "?base=" + $("#fBase").value : ""}`);
+    const tr = f.trend;
+    let html = `<div class="panel"><h3 style="margin-top:0">업데이트 추세</h3>
+      ${legend([["#dc2626", "예상 준공 변동(누적, 일)"], ["#2563eb", "건전성 점수"], ["#16a34a", "공정률 %"]])}
+      <canvas id="trendCv" style="width:100%;height:240px"></canvas>
+      <table class="t"><thead><tr><th>Data Date</th><th>예상 준공</th><th class="num">변동</th><th class="num">공정률</th><th class="num">최장경로</th><th class="num">음수여유</th><th class="num">건전성</th><th class="num">DCMA</th></tr></thead><tbody>
+      ${tr.map((x) => `<tr><td><a href="#/p/${x.id}/forensic">${x.data_date}</a></td><td>${x.finish}</td><td class="num" style="color:${x.finish_change > 0 ? "var(--crit)" : ""}">${signed(x.finish_change)}</td>
+        <td class="num">${x.progress}%</td><td class="num">${x.longest}</td><td class="num">${x.negative_float}</td><td class="num">${x.health ?? "-"}</td><td class="num">${x.dcma_pass}/14</td></tr>`).join("")}</tbody></table></div>`;
+    if (!f.available) html += `<div class="panel empty">${esc(f.message)}</div>`;
+    else {
+      const c = f.compression;
+      html += `<div class="panel ${c.suspected ? "warn" : ""}"><h3 style="margin-top:0">공기 압축(Compression) 탐지 ${c.suspected ? '<span class="tag fail">의심</span>' : '<span class="tag ok">특이 없음</span>'}</h3>
+        <p class="muted">${esc(c.note)} 최장경로 단축 합계 <b>${c.longest_path_cut_days}일</b>, 준공 변동 ${signed(c.finish_slip)}일.</p>
+        ${c.items.length ? `<table class="t"><thead><tr><th>ID</th><th>작업</th><th class="num">잔여(전)</th><th class="num">예상 잔여</th><th class="num">잔여(후)</th><th class="num">진척 없는 단축</th><th>공정률</th></tr></thead><tbody>
+        ${c.items.map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}${x.longest ? ' <span class="tag crit">주공정</span>' : ""}</td><td class="num">${x.rem_before}</td><td class="num">${x.expected}</td><td class="num">${x.rem_after}</td><td class="num" style="color:var(--crit)">-${x.cut}</td><td>${x.pct_before}% → ${x.pct_after}%</td></tr>`).join("")}</tbody></table>` : ""}</div>
+        <div class="panel"><h3 style="margin-top:0">변경 로그 (${f.changes.items.length}건)</h3>
+        <div class="chips">${Object.entries(f.changes.counts).map(([k, v]) => `<span class="chip filter" data-cat="${esc(k)}">${esc(k)} ${v}</span>`).join("")}<span class="chip filter on" data-cat="">전체</span></div>
+        <div class="scroll"><table class="t" id="chgTable"><thead><tr><th>구분</th><th>ID</th><th>대상</th><th>변경 전</th><th>변경 후</th><th>비고</th></tr></thead><tbody>
+        ${f.changes.items.map((x) => `<tr data-cat="${esc(x.category)}"><td>${esc(x.category)}</td><td>${esc(x.code)}</td><td class="wrap">${esc(x.name)}</td><td>${esc(x.before)}</td><td>${esc(x.after)}</td><td class="wrap ${x.note ? "warn-text" : ""}">${esc(x.note)}</td></tr>`).join("")}</tbody></table></div></div>`;
+    }
+    $("#fBody").innerHTML = html;
+    const base = tr.length ? Date.parse(tr[0].finish) : 0;
+    lineChart($("#trendCv"), tr.map((x) => x.data_date.slice(2)), [
+      { color: "#dc2626", values: tr.map((x) => Math.round((Date.parse(x.finish) - base) / 864e5)), dots: true },
+      { color: "#2563eb", values: tr.map((x) => x.health), dots: true, dash: [4, 3] },
+      { color: "#16a34a", values: tr.map((x) => x.progress), dots: true, dash: [2, 3] }], { left: 36 });
+    el.querySelectorAll(".chip.filter").forEach((ch) => (ch.onclick = () => {
+      el.querySelectorAll(".chip.filter").forEach((x) => x.classList.toggle("on", x === ch));
+      el.querySelectorAll("#chgTable tbody tr").forEach((tr) => (tr.hidden = ch.dataset.cat && tr.dataset.cat !== ch.dataset.cat));
+    }));
+  };
+  $("#fBase").onchange = draw; draw();
+}
+
+// ---------------------------------------------------------------- 리스크 레지스터 + 시뮬레이션
+async function tabRisk(el, r, uid) {
+  const st = await getAiStatus();
+  el.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">리스크 레지스터</h3>
+      <div class="row"><button class="btn" id="rkExtract" ${st.enabled ? "" : "disabled title='AI 미설정'"}>✦ 문서에서 리스크 찾기</button><button class="btn primary" id="rkAdd">+ 리스크 추가</button></div></div>
+      <p class="muted">리스크(아직 일어나지 않은 사건)를 영향받는 액티비티에 연결하면 몬테카를로 시뮬레이션에 반영됩니다. 노출도 = 확률 × 평균 영향일.</p>
+      <div id="rkList"></div></div>
+    <div class="panel"><div class="row" style="justify-content:space-between"><h3 style="margin:0">준공 리스크 시뮬레이션</h3>
+      <div class="row"><label><input type="checkbox" id="simRisk" checked> 리스크 사건 반영</label><label><input type="checkbox" id="simUnc" checked> 공기 불확실성</label>
+      <label class="muted">반복 <input class="s" id="simN" type="number" value="1000" style="width:80px"></label><button class="btn primary" id="simRun">실행</button></div></div>
+      <div id="simBody" class="muted" style="margin-top:8px">실행하면 P50/P80/P90 준공일, 목표 달성 확률, 민감도(Tornado)를 계산합니다.</div></div>
+    <dialog id="dlgRisk"><form method="dialog" id="fRisk"><h3>리스크</h3>
+      <label>제목<input name="title" required></label><label>설명<input name="desc"></label>
+      <label>분류<select name="category">${["설계", "인허가", "자재·장비", "인력", "기상", "민원·환경", "발주처", "협력업체", "기술", "기타"].map((c) => `<option>${c}</option>`).join("")}</select></label>
+      <label>영향 액티비티 ID (쉼표로 구분)<input name="codes" placeholder="A2000, A2010"></label>
+      <div class="row"><label>발생확률 %<input name="prob" type="number" min="0" max="100"></label><label>영향 최소(일)<input name="impact_min" type="number"></label>
+      <label>최빈<input name="impact_ml" type="number"></label><label>최대<input name="impact_max" type="number"></label></div>
+      <div class="row"><label>비용 영향(원)<input name="cost" type="number"></label><label>담당<input name="owner"></label><label>상태<select name="status"><option value="open">열림</option><option value="mitigating">대응중</option><option value="closed">종결</option></select></label></div>
+      <label>대응 방안<input name="mitigation"></label>
+      <div class="row end"><button class="btn" value="cancel" formnovalidate>취소</button><button class="btn primary" value="ok">저장</button></div></form></dialog>
+    <dialog id="dlgExtract"><form method="dialog"><h3>문서에서 리스크 찾기</h3><p class="muted">회의록, 공문, 일보 등을 붙여 넣으세요. AI가 리스크 후보를 제안하면 검토 후 등록합니다.</p>
+      <textarea id="exText" rows="10" style="width:100%"></textarea><div id="exOut"></div>
+      <div class="row end"><button class="btn" value="cancel">닫기</button><button class="btn primary" id="exRun" type="button">찾기</button></div></form></dialog>`;
+  let list = [];
+  const load = async () => {
+    list = await api(`/api/uploads/${uid}/risks`);
+    $("#rkList").innerHTML = list.length ? `<table class="t"><thead><tr><th>리스크</th><th>분류</th><th>영향 작업</th><th class="num">확률</th><th>영향(일)</th><th class="num">노출도</th><th>대응</th><th>상태</th><th></th></tr></thead><tbody>
+      ${list.map((x) => `<tr><td class="wrap"><b>${esc(x.title)}</b><div class="muted" style="font-size:12px">${esc(x.desc || "")}</div></td><td>${esc(x.category || "")}</td><td>${x.codes.map(esc).join(", ")}</td>
+        <td class="num">${x.prob}%</td><td>${x.impact_min}/${x.impact_ml}/${x.impact_max}</td><td class="num"><b>${x.exposure_days}</b></td><td class="wrap">${esc(x.mitigation || "")}<div class="muted" style="font-size:12px">${esc(x.owner || "")}</div></td>
+        <td><span class="tag ${x.status === "closed" ? "done" : x.status === "mitigating" ? "" : "fail"}">${{ open: "열림", mitigating: "대응중", closed: "종결" }[x.status]}</span></td>
+        <td><button class="btn sm" data-edit="${x.id}">수정</button> <button class="btn sm danger" data-rm="${x.id}">삭제</button></td></tr>`).join("")}</tbody></table>`
+      : `<p class="muted">등록된 리스크가 없습니다.</p>`;
+    $("#rkList").querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => openForm(list.find((x) => x.id === b.dataset.edit))));
+    $("#rkList").querySelectorAll("[data-rm]").forEach((b) => (b.onclick = async () => { if (confirm("삭제할까요?")) { await api(`/api/uploads/${uid}/risks/${b.dataset.rm}`, { method: "DELETE" }); load(); } }));
+  };
+  let editing = null;
+  const openForm = (x = {}) => {
+    editing = x.id || null; const f = $("#fRisk"); f.reset();
+    for (const [k, v] of Object.entries(x)) if (f[k]) f[k].value = Array.isArray(v) ? v.join(", ") : v ?? "";
+    $("#dlgRisk").showModal();
+  };
+  $("#fRisk").onsubmit = async (e) => {
+    if (e.submitter?.value !== "ok") return; e.preventDefault();
+    const d = Object.fromEntries(new FormData(e.target)); d.codes = d.codes.split(/[,\s]+/).filter(Boolean); if (editing) d.id = editing;
+    try { await api(`/api/uploads/${uid}/risks`, { method: "POST", json: d }); $("#dlgRisk").close(); load(); } catch (err) { toast(err.message); }
+  };
+  $("#rkAdd").onclick = () => openForm();
+  $("#rkExtract").onclick = () => { $("#exOut").innerHTML = ""; $("#dlgExtract").showModal(); };
+  $("#exRun").onclick = () => withBusy($("#exRun"), async () => {
+    const xs = await api(`/api/uploads/${uid}/risks/extract`, { method: "POST", json: { text: $("#exText").value } });
+    $("#exOut").innerHTML = xs.length ? `<table class="t">${xs.map((x, i) => `<tr><td><input type="checkbox" class="exc" data-i="${i}" checked></td><td class="wrap"><b>${esc(x.title)}</b><div class="muted">${esc(x.desc)}</div></td><td>${x.codes.join(", ")}</td><td>${x.prob}% · ${x.impact_ml}일</td></tr>`).join("")}</table>
+      <div class="row end"><button class="btn primary" type="button" id="exSave">선택 항목 등록</button></div>` : `<p class="muted">찾은 리스크가 없습니다.</p>`;
+    $("#exSave")?.addEventListener("click", async () => {
+      for (const c of $("#exOut").querySelectorAll(".exc:checked")) await api(`/api/uploads/${uid}/risks`, { method: "POST", json: xs[+c.dataset.i] });
+      $("#dlgExtract").close(); load(); toast("등록했습니다");
+    });
+  });
+  $("#simRun").onclick = () => withBusy($("#simRun"), async () => {
+    const m = await api(`/api/uploads/${uid}/simulate?n=${$("#simN").value}&risks=${$("#simRisk").checked ? 1 : 0}&uncertainty=${$("#simUnc").checked ? 1 : 0}`);
+    const maxImp = Math.max(1, ...m.risk_tornado.map((t) => t.impact_days));
+    $("#simBody").classList.remove("muted");
+    $("#simBody").innerHTML = `<div class="kpis">${kpi("결정론적 준공", m.deterministic)}${kpi("P50", m.p50)}${kpi("P80", m.p80, "crit")}${kpi("P90", m.p90)}
+      ${m.prob_meet_target !== null ? kpi(`목표(${m.must_finish}) 달성 확률`, m.prob_meet_target + "%", m.prob_meet_target < 50 ? "crit" : "") : ""}</div>
+      <canvas id="mcHist" style="width:100%;height:180px"></canvas><p class="muted">${esc(m.assumption)} · 반복 ${m.iterations}회</p>
+      <div class="grid2"><div><h4>리스크 민감도 (발생 시 준공 영향)</h4>${m.risk_tornado.length ? m.risk_tornado.map((t) => `<div class="hbar"><span title="${esc(t.label)}">${esc(t.label)}</span><div><i style="width:${(100 * t.impact_days) / maxImp}%;background:var(--crit)"></i></div><b>+${t.impact_days}일</b></div>`).join("") : '<p class="muted">반영된 리스크가 없습니다.</p>'}</div>
+      <div><h4>작업 공기 민감도 (상관계수)</h4>${m.activity_tornado.map((t) => `<div class="hbar"><span title="${esc(t.label)}">${esc(t.label)}</span><div><i style="width:${100 * t.correlation}%;background:var(--bar)"></i></div><b>${t.correlation}</b></div>`).join("") || '<p class="muted">없음</p>'}</div></div>
+      <h4>주공정 지수</h4><table class="t"><tbody>${m.criticality.slice(0, 12).map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}</td><td class="num">${x.index}%</td></tr>`).join("")}</tbody></table>`;
+    drawHist($("#mcHist"), m.histogram);
+  });
+  load();
+}
+
+// ---------------------------------------------------------------- 지연 예측 (위험 점수 + 학습 모델)
+async function tabPredict(el, r, uid) {
+  const [rk, pr] = await Promise.all([api(`/api/uploads/${uid}/risk`), api(`/api/uploads/${uid}/prediction`)]);
+  const md_ = pr.model;
+  el.innerHTML = `<div class="panel ${md_.trained ? "" : "warn"}"><h3 style="margin-top:0">학습 기반 예측 모델</h3>
+      ${md_.trained ? `<p>업데이트 이력 표본 <b>${md_.samples}</b>개로 학습했습니다. 검증 오차(MAE) <b>${md_.mae_days}일</b>, 설명력 R² <b>${md_.r2}</b>.</p>
+        <p class="muted">영향 큰 요인: ${md_.importance.slice(0, 5).map((x) => `${x.feature}(${x.weight > 0 ? "+" : ""}${x.weight})`).join(", ")}</p>
+        <table class="t"><thead><tr><th>ID</th><th>작업</th><th class="num">다음 업데이트 예상 순연(일)</th><th class="num">TF</th></tr></thead><tbody>
+        ${pr.items.slice(0, 20).map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}${x.longest ? ' <span class="tag crit">주공정</span>' : ""}</td><td class="num" style="color:${x.predicted_slip > 3 ? "var(--crit)" : ""}">${x.predicted_slip}</td><td class="num">${fmtDays(x.tf)}</td></tr>`).join("")}</tbody></table>`
+      : `<p>${esc(md_.message)}</p><p class="muted">그동안은 아래의 설명 가능한 규칙 기반 위험 점수를 사용하세요.</p>`}</div>
+    <div class="panel"><h3 style="margin-top:0">지연 위험 점수</h3><p class="muted">${esc(rk.note)} (누적 업데이트 ${rk.history_updates}회)</p>
+    <div class="scroll"><table class="t"><thead><tr><th>ID</th><th>작업</th><th>공종</th><th>상태</th><th>종료</th><th class="num">TF</th><th class="num">위험</th><th>사유</th></tr></thead><tbody>
+    ${rk.items.map((x) => `<tr><td>${esc(x.code)}</td><td class="wrap">${esc(x.name)}</td><td>${esc(x.trade)}</td><td>${esc(x.status)}</td><td>${x.finish}</td><td class="num">${fmtDays(x.tf)}</td>
+      <td class="num"><span class="tag ${x.score >= 50 ? "fail" : x.score >= 30 ? "" : "ok"}">${x.score}</span></td><td class="wrap">${x.reasons.map(esc).join(", ")}</td></tr>`).join("")}</tbody></table></div></div>`;
+}
+
+// ---------------------------------------------------------------- 자동 만회안
+async function tabRecovery(el, r, uid) {
+  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">자동 만회안 탐색</h3>
+    <p class="muted">목표 일수만큼 준공을 당기기 위해 최장경로 작업의 공기 단축(Crashing)과 병행(Fast-tracking) 조합을 자동으로 찾고, 재계산으로 검증합니다.</p>
+    <div class="row"><label>만회 목표 <input class="s" id="rvDays" type="number" value="10" style="width:80px"> 일</label>
+      <label>작업별 최대 단축률 <select class="s" id="rvRatio"><option value="0.2">20%</option><option value="0.3" selected>30%</option><option value="0.5">50%</option></select></label>
+      <label>제외 작업 <input class="s" id="rvEx" placeholder="A1050, A2000" style="width:180px"></label>
+      <button class="btn primary" id="rvRun">탐색</button></div>
+    <details style="margin-top:8px"><summary class="muted">작업별 일당 단축 비용 입력 (선택)</summary><textarea id="rvCost" rows="3" style="width:100%" placeholder="A2010=3&#10;A3030=1.5"></textarea></details></div>
+    <div id="rvOut"></div>`;
+  $("#rvRun").onclick = () => withBusy($("#rvRun"), async () => {
+    const costs = Object.fromEntries($("#rvCost").value.split("\n").map((l) => l.split("=").map((x) => x.trim())).filter((x) => x.length === 2 && x[1]));
+    const res = await api(`/api/uploads/${uid}/recovery`, { method: "POST", json: { days: +$("#rvDays").value, max_ratio: +$("#rvRatio").value, costs, exclude: $("#rvEx").value.split(/[,\s]+/).filter(Boolean) } });
+    $("#rvOut").innerHTML = `<p class="muted">${esc(res.note)}</p><div class="grid3">${res.options.map((o, i) => `<div class="panel option ${o.achieved ? "" : "dim"}">
+      <div class="row" style="justify-content:space-between"><b>${esc(o.policy)}</b>${i === 0 && o.achieved ? '<span class="tag ok">추천</span>' : ""}</div>
+      <div class="big">${o.gained_days}<small>일 만회</small></div><div class="muted">목표 ${o.target_days}일 ${o.achieved ? "달성" : "미달"} · 상대 비용 ${o.relative_cost}${o.finish_after ? ` · 준공 ${o.finish_after}` : ""}</div>
+      ${o.crashed.length ? `<h4>공기 단축</h4><ul>${o.crashed.map((c) => `<li>${esc(c.code)} ${esc(c.name)} <b>-${c.days}일</b></li>`).join("")}</ul>` : ""}
+      ${o.fast_tracked.length ? `<h4>병행 (FS→SS)</h4><ul>${o.fast_tracked.map((f) => `<li>${esc(f.pred)} → ${esc(f.succ)} SS+${f.lag}</li>`).join("")}</ul>` : ""}
+      ${o.changes.length ? `<div class="row"><button class="btn sm" data-wi="${i}">What-if로 열기</button><button class="btn sm" data-sv="${i}">시나리오 저장</button></div>` : '<p class="muted">적용 가능한 조치가 없습니다.</p>'}</div>`).join("")}</div>`;
+    $("#rvOut").querySelectorAll("[data-wi]").forEach((b) => (b.onclick = () => { sessionStorage.setItem("whatif:" + uid, JSON.stringify(res.options[+b.dataset.wi].changes)); location.hash = `#/p/${uid}/whatif`; }));
+    $("#rvOut").querySelectorAll("[data-sv]").forEach((b) => (b.onclick = async () => {
+      const o = res.options[+b.dataset.sv];
+      await api(`/api/uploads/${uid}/scenarios`, { method: "POST", json: { name: `만회안 ${o.policy} ${o.gained_days}일`, kind: "만회안", changes: o.changes } }); toast("저장했습니다");
+    }));
+  });
+}
+
+// ---------------------------------------------------------------- 베이스라인·EVM
+async function tabEvm(el, r, uid) {
+  const [bls, ups] = await Promise.all([api(`/api/uploads/${uid}/baselines`), api("/api/uploads")]);
+  const same = ups.filter((u) => u.name === r.name);
+  el.innerHTML = `<div class="panel"><div class="row" style="justify-content:space-between"><div class="row"><b>베이스라인</b>
+      <select class="s" id="blSel"><option value="target">P6 계획(Target) 날짜</option>${bls.map((b) => `<option value="${b.id}">${esc(b.label)} (DD ${b.data_date})</option>`).join("")}</select></div>
+      <div class="row"><select class="s" id="blSrc">${same.map((u) => `<option value="${u.id}">${u.data_date} · ${esc(u.note || u.filename)}</option>`).join("")}</select>
+      <input class="s" id="blLabel" placeholder="이름 (예: 최초 승인)"><button class="btn" id="blAdd">베이스라인 지정</button></div></div></div>
+    <div id="evBody"></div><div id="varBody"></div>`;
+  $("#blAdd").onclick = async () => { await api(`/api/uploads/${uid}/baselines`, { method: "POST", json: { upload_id: $("#blSrc").value, label: $("#blLabel").value } }); toast("지정했습니다"); tabEvm(el, r, uid); };
+  const draw = async () => {
+    const b = $("#blSel").value;
+    const [e, v] = await Promise.all([api(`/api/uploads/${uid}/evm?baseline=${b}`), api(`/api/uploads/${uid}/variance?baseline=${b}`)]);
+    $("#evBody").innerHTML = !e.available ? `<div class="panel muted">${esc(e.message)}</div>` : `<div class="kpis">
+      ${kpi("BAC (총예산)", won(e.bac))}${kpi("PV / EV / AC", `<span style="font-size:15px">${won(e.pv)} / ${won(e.ev)} / ${won(e.ac)}</span>`)}
+      ${kpi("SPI", e.spi ?? "-", e.spi < 0.95 ? "crit" : "")}${kpi("CPI", e.cpi ?? "-", e.cpi < 0.95 ? "crit" : "")}
+      ${kpi("EAC (실적+잔여)", won(e.eac))}${kpi("VAC", won(e.vac), e.vac < 0 ? "crit" : "")}</div>
+      <div class="panel"><h3 style="margin-top:0">비용 S-Curve</h3>${legend([["#f59e0b", "PV (계획)"], ["#3b82f6", "현재 일정 예측"], ["#16a34a", "EV (업데이트별)"], ["#dc2626", "AC (업데이트별)"]])}
+      <canvas id="evCv" style="width:100%;height:280px"></canvas></div>
+      ${e.worst_cv.length ? `<div class="panel"><h3 style="margin-top:0">원가 초과 작업 (CV 작은 순)</h3><table class="t"><thead><tr><th>ID</th><th>작업</th><th class="num">BAC</th><th class="num">EV</th><th class="num">AC</th><th class="num">CV</th></tr></thead><tbody>
+        ${e.worst_cv.map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}</td><td class="num">${won(x.bac)}</td><td class="num">${won(x.ev)}</td><td class="num">${won(x.ac)}</td><td class="num" style="color:${x.cv < 0 ? "var(--crit)" : ""}">${won(x.cv)}</td></tr>`).join("")}</tbody></table></div>` : ""}`;
+    if (e.available) {
+      const labels = e.curve.map((c) => c.date);
+      const hist = Object.fromEntries((e.history || []).map((h) => [h.date, h]));
+      const near = (key) => labels.map((d, i) => { const h = (e.history || []).find((x) => x.date >= d && (i + 1 >= labels.length || x.date < labels[i + 1])); return h ? h[key] : null; });
+      lineChart($("#evCv"), labels.map((d) => d.slice(2)), [
+        { color: "#f59e0b", values: e.curve.map((c) => c.pv) }, { color: "#3b82f6", values: e.curve.map((c) => c.forecast), dash: [5, 4] },
+        { color: "#16a34a", values: near("ev"), dots: true }, { color: "#dc2626", values: near("ac"), dots: true }], { fmt: won, left: 52 });
+    }
+    $("#varBody").innerHTML = `<div class="panel"><h3 style="margin-top:0">베이스라인 대비 편차 <span class="muted" style="font-size:13px">(기준: ${esc(v.source)})</span></h3>
+      <div class="kpis">${kpi("베이스라인 준공", v.bl_project_finish || "-")}${kpi("현재 예상 준공", v.project_finish)}${kpi("준공 편차", v.project_var === null ? "-" : signed(v.project_var) + "일", v.project_var > 0 ? "crit" : "")}${kpi("지연 작업 수", v.late_count)}</div>
+      <div class="scroll"><table class="t"><thead><tr><th>ID</th><th>작업</th><th>상태</th><th>BL 시작</th><th>시작</th><th class="num">Δ</th><th>BL 종료</th><th>종료</th><th class="num">Δ</th></tr></thead><tbody>
+      ${v.rows.slice(0, 300).map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}${x.longest ? ' <span class="tag crit">주공정</span>' : ""}</td><td>${esc(x.status)}</td><td>${x.bl_start || "-"}</td><td>${x.start}</td><td class="num">${x.start_var ?? "-"}</td><td>${x.bl_finish}</td><td>${x.finish}</td>
+        <td class="num" style="color:${x.finish_var > 0 ? "var(--crit)" : x.finish_var < 0 ? "var(--ok)" : ""}">${signed(x.finish_var)}</td></tr>`).join("")}</tbody></table></div></div>`;
+  };
+  $("#blSel").onchange = draw; draw();
+}
+
+// ---------------------------------------------------------------- 자원 히스토그램
+async function tabResources(el, r, uid) {
+  const h = await api(`/api/uploads/${uid}/resources`);
+  if (!h.series.length) { el.innerHTML = `<div class="panel empty">XER에 잔여 물량(TASKRSRC remain_qty)이 있는 자원 배정이 없습니다.</div>`; return; }
+  const colors = ["#3b82f6", "#f59e0b", "#16a34a", "#8b5cf6", "#dc2626", "#0891b2", "#db2777"];
+  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">자원 히스토그램 (주간 잔여 물량, Early 일정 기준)</h3>
+    ${legend(h.series.map((s, i) => [colors[i % colors.length], `${s.name} (최대 ${s.peak})`]))}<canvas id="rsCv" style="width:100%;height:300px"></canvas>
+    <p class="muted">막대가 급격히 솟는 주는 자원 과부하 가능성이 있습니다. 여유가 있는 작업을 뒤로 미루면 평준화할 수 있습니다(What-if).</p></div>`;
+  const cv = $("#rsCv"), dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr; const g = cv.getContext("2d"); g.scale(dpr, dpr);
+  const tot = h.weeks.map((_, i) => h.series.reduce((a, s) => a + s.values[i], 0)), max = Math.max(...tot, 1);
+  const bw = (W - 50) / h.weeks.length; g.font = "11px sans-serif";
+  h.weeks.forEach((w, i) => {
+    let y = H - 22;
+    h.series.forEach((s, k) => { const hh = (s.values[i] / max) * (H - 40); g.fillStyle = colors[k % colors.length]; g.fillRect(44 + i * bw + 1, y - hh, bw - 2, hh); y -= hh; });
+    if (i % Math.ceil(h.weeks.length / 10) === 0) { g.fillStyle = "#6b7280"; g.fillText(w.slice(2), 44 + i * bw, H - 6); }
+  });
+  g.fillStyle = "#6b7280"; g.fillText(Math.round(max), 4, 16);
+}
+
+// ---------------------------------------------------------------- 국내 기준
+async function tabKorea(el, r, uid) {
+  const k = await api(`/api/uploads/${uid}/korea`);
+  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">캘린더 법정공휴일 점검</h3>
+      <p class="muted">Data Date부터 예상 준공까지의 법정공휴일·대체공휴일(${k.holidays.length}일)이 공정 캘린더에 비작업일로 들어 있는지 확인합니다. 임시공휴일·선거일은 <a href="#/admin">관리자 화면</a>에서 추가하세요.</p>
+      ${k.calendars.map((c) => `<div class="cal-row"><b>${esc(c.name)}</b> ${c.missing.length ? `<span class="tag fail">누락 ${c.missing.length}일</span>` : '<span class="tag ok">이상 없음</span>'}
+        ${c.note ? `<span class="muted"> ${esc(c.note)}</span>` : ""}
+        ${c.missing.length ? `<div class="muted" style="font-size:12px;margin:4px 0">${c.missing.map((m) => `${m.date.slice(5)} ${esc(m.name)}`).join(", ")}</div>
+          <button class="btn sm" data-fix="${c.clndr_id}">공휴일 반영 XER 다운로드</button> <button class="btn sm" data-wi="${c.clndr_id}">반영 시 일정 영향 보기</button>` : ""}</div>`).join("")}
+      <div id="kWi"></div></div>
+    <div class="panel"><h3 style="margin-top:0">기상 비작업일 기반 적정 공기 검토</h3>
+      <p class="muted">월별 기상 비작업일(강우·강설·한파·폭염 등)을 현장 지역의 기상청 통계로 산정해 입력하세요. 필요 비작업일보다 캘린더 비작업일이 적은 달은 작업일을 과다하게 잡은 것입니다. 기준 캘린더: ${esc(k.default_calendar || "-")}</p>
+      <div class="months">${Array.from({ length: 12 }, (_, i) => `<label>${i + 1}월<input class="s" type="number" step="0.5" min="0" data-m="${i + 1}" value="${k.weather_days[i + 1] ?? ""}"></label>`).join("")}</div>
+      <div class="row end"><button class="btn primary" id="kSave">저장 후 재검토</button></div>
+      <table class="t"><thead><tr><th>월</th><th class="num">일수</th><th class="num">주말·공휴일</th><th class="num">기상</th><th class="num">필요 비작업일</th><th class="num">캘린더 비작업일</th><th class="num">부족</th></tr></thead><tbody>
+      ${k.review.months.map((m) => `<tr><td>${m.month}</td><td class="num">${m.days}</td><td class="num">${m.holidays_weekends}</td><td class="num">${m.weather}</td><td class="num">${m.required_nonwork}</td><td class="num">${m.calendar_nonwork}</td>
+        <td class="num" style="color:${m.shortage > 0 ? "var(--crit)" : ""}">${m.shortage || ""}</td></tr>`).join("")}</tbody></table>
+      <p><b>부족 비작업일 합계: ${k.review.total_shortage_days}일</b> <span class="muted">${esc(k.review.note)}</span></p></div>`;
+  const ch = (id) => [{ op: "add_holidays", clndr_ids: [id], dates: k.calendars.find((c) => c.clndr_id === id).missing.map((m) => m.date) }];
+  el.querySelectorAll("[data-fix]").forEach((b) => (b.onclick = () => downloadPost(`/api/uploads/${uid}/xer_patch`, { changes: ch(b.dataset.fix) }, "holidays.xer")));
+  el.querySelectorAll("[data-wi]").forEach((b) => (b.onclick = async () => { $("#kWi").innerHTML = whatifResult(await api(`/api/uploads/${uid}/whatif`, { method: "POST", json: { changes: ch(b.dataset.wi) } })); }));
+  $("#kSave").onclick = async () => {
+    const wd = Object.fromEntries([...el.querySelectorAll("[data-m]")].filter((x) => x.value !== "").map((x) => [x.dataset.m, +x.value]));
+    await api(`/api/uploads/${uid}/settings`, { method: "PUT", json: { weather_days: wd } }); tabKorea(el, r, uid);
+  };
+}
+
+// ---------------------------------------------------------------- 룩어헤드·PPC
+const REASONS = ["선행작업 미완료", "자재 미입고", "인력 부족", "장비 고장", "도면·설계 변경", "기상", "검측·승인 지연", "기타"];
+async function tabLookahead(el, r, uid) {
+  const [la, p] = await Promise.all([api(`/api/uploads/${uid}/lookahead`), api(`/api/uploads/${uid}/ppc`)]);
+  const thisWeek = la.weeks[0];
+  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">3주 룩어헤드 <span class="muted" style="font-size:13px">(${la.weeks[0]} 주부터)</span></h3>
+      <p class="muted">CPM 일정에서 향후 3주 작업을 뽑았습니다. 협력업체가 이번 주에 하겠다고 약속한 작업을 등록하고, 주말에 완료 여부를 체크하면 PPC(계획 대비 완료율)가 집계됩니다. 착수를 막는 제약(도면·자재 등)도 함께 관리하세요.</p>
+      <div class="scroll"><table class="t la"><thead><tr><th>ID</th><th>작업</th><th>기간</th><th class="num">TF</th>${la.weeks.map((w) => `<th>${w.slice(5)} 주</th>`).join("")}<th>제약</th><th>이번 주 약속</th></tr></thead><tbody>
+      ${la.rows.map((a) => {
+        const c = a.commitments.find((x) => x.week === thisWeek);
+        return `<tr><td>${esc(a.code)}</td><td class="wrap">${esc(a.name)}${a.longest ? ' <span class="tag crit">주공정</span>' : ""}</td><td style="font-size:12px">${a.start.slice(5)}~${a.finish.slice(5)}</td><td class="num">${fmtDays(a.tf)}</td>
+        ${la.weeks.map((w) => `<td class="wk ${a.weeks.includes(w) ? (a.longest ? "on crit" : "on") : ""}"></td>`).join("")}
+        <td>${a.constraints.map((x) => `<span class="tag fail" title="${esc(x.desc)}">${esc(x.type)}</span>`).join(" ")} <button class="btn sm" data-con="${esc(a.code)}">+</button></td>
+        <td>${c ? `<label><input type="checkbox" data-done="${c.id}" ${c.done ? "checked" : ""}> ${esc(c.company || "")}</label>
+            ${!c.done ? `<select class="s sm" data-reason="${c.id}"><option value="">미완료 사유</option>${REASONS.map((x) => `<option ${c.reason === x ? "selected" : ""}>${x}</option>`).join("")}</select>` : ""}`
+          : `<button class="btn sm" data-commit="${esc(a.code)}" data-name="${esc(a.name)}">약속 등록</button>`}</td></tr>`;
+      }).join("")}</tbody></table></div></div>
+    <div class="grid2"><div class="panel"><h3 style="margin-top:0">주간 PPC</h3><canvas id="ppcCv" style="width:100%;height:200px"></canvas>
+      <table class="t"><tbody>${p.weeks.map((w) => `<tr><td>${w.week}</td><td class="num">${w.done}/${w.planned}</td><td class="num"><b>${w.ppc ?? "-"}%</b></td></tr>`).join("") || '<tr><td class="muted">아직 약속이 없습니다.</td></tr>'}</tbody></table></div>
+      <div class="panel"><h3 style="margin-top:0">미완료 사유 · 협력업체별 PPC</h3>
+      ${p.reasons.map(([k, v]) => `<div class="hbar"><span>${esc(k)}</span><div><i style="width:${(100 * v) / p.reasons[0][1]}%;background:var(--warn)"></i></div><b>${v}</b></div>`).join("") || '<p class="muted">없음</p>'}
+      <table class="t" style="margin-top:10px"><tbody>${p.companies.map((c) => `<tr><td>${esc(c.company)}</td><td class="num">${c.done}/${c.planned}</td><td class="num">${c.ppc}%</td></tr>`).join("")}</tbody></table></div></div>
+    <div class="panel"><h3 style="margin-top:0">제약 로그</h3><table class="t"><thead><tr><th>ID</th><th>유형</th><th>내용</th><th>담당</th><th>해소 기한</th><th>상태</th><th></th></tr></thead><tbody>
+      ${la.constraints.map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.type)}</td><td class="wrap">${esc(x.desc)}</td><td>${esc(x.owner || "")}</td>
+        <td style="color:${x.status !== "해결" && x.due && x.due < la.data_date ? "var(--crit)" : ""}">${x.due || ""}</td>
+        <td><select class="s sm" data-cst="${x.id}">${["미해결", "진행", "해결"].map((s) => `<option ${x.status === s ? "selected" : ""}>${s}</option>`).join("")}</select></td>
+        <td><button class="btn sm danger" data-cdel="${x.id}">삭제</button></td></tr>`).join("") || '<tr><td colspan="7" class="muted">등록된 제약이 없습니다.</td></tr>'}</tbody></table></div>`;
+  const save = (kind, body) => api(`/api/uploads/${uid}/records/${kind}`, { method: "POST", json: body });
+  const reload = () => tabLookahead(el, r, uid);
+  el.querySelectorAll("[data-commit]").forEach((b) => (b.onclick = async () => {
+    const company = prompt(`${b.dataset.commit} 이번 주 수행 협력업체`, store.get("lastCompany")); if (company === null) return;
+    store.set("lastCompany", company); await save("commit", { week: thisWeek, code: b.dataset.commit, name: b.dataset.name, company, done: false }); reload();
+  }));
+  const commits = la.rows.flatMap((a) => a.commitments);
+  el.querySelectorAll("[data-done]").forEach((c) => (c.onchange = async () => { const x = commits.find((y) => y.id === c.dataset.done); await save("commit", { ...x, done: c.checked, reason: c.checked ? "" : x.reason }); reload(); }));
+  el.querySelectorAll("[data-reason]").forEach((c) => (c.onchange = async () => { const x = commits.find((y) => y.id === c.dataset.reason); await save("commit", { ...x, reason: c.value }); }));
+  el.querySelectorAll("[data-con]").forEach((b) => (b.onclick = async () => {
+    const type = prompt("제약 유형 (도면/자재/인력/장비/허가/선행작업/기타)", "자재"); if (!type) return;
+    const desc = prompt("내용") || ""; const due = prompt("해소 기한 (YYYY-MM-DD)", thisWeek) || "";
+    try { await save("constraint", { code: b.dataset.con, type, desc, due, status: "미해결" }); reload(); } catch (e) { toast(e.message); }
+  }));
+  el.querySelectorAll("[data-cst]").forEach((sel) => (sel.onchange = async () => { const x = la.constraints.find((y) => y.id === sel.dataset.cst); await save("constraint", { ...x, status: sel.value }); }));
+  el.querySelectorAll("[data-cdel]").forEach((b) => (b.onclick = async () => { await api(`/api/uploads/${uid}/records/constraint/${b.dataset.cdel}`, { method: "DELETE" }); reload(); }));
+  if (p.weeks.length) lineChart($("#ppcCv"), p.weeks.map((w) => w.week.slice(5)), [{ color: "#2563eb", values: p.weeks.map((w) => w.ppc), dots: true }, { color: "#9ca3af", values: p.weeks.map(() => 80), dash: [4, 4] }], { min: 0, max: 100, left: 30 });
+}
+
+// ---------------------------------------------------------------- 설정
+async function tabSettings(el, r, uid) {
+  const [st, defs] = await Promise.all([api(`/api/uploads/${uid}/settings`), api("/api/metrics/defaults")]);
+  const ov = st.metric_overrides;
+  el.innerHTML = `<div class="panel"><h3 style="margin-top:0">일정 계산 옵션</h3>
+      <label><input type="checkbox" id="optPO" ${st.schedule_options.progress_override ? "checked" : ""}> Progress Override (착수된 작업은 선행 논리를 무시하고 Data Date부터 잔여 작업 진행)</label>
+      <p class="muted">기본값은 Retained Logic(P6 기본)입니다. P6의 Schedule Options와 같게 맞추면 'P6 일정 비교' 일치율이 올라갑니다. 변경하면 이 프로젝트의 모든 업데이트를 다시 계산합니다.</p>
+      <button class="btn primary" id="optSave">저장 및 재계산</button></div>
+    <div class="panel"><h3 style="margin-top:0">건전성 지표 기준값 (이 프로젝트)</h3>
+      <p class="muted">비워 두면 팀 기본값(${Object.keys(st.team_metric_overrides).length ? "관리자 설정" : "표준값"})을 씁니다. 가중치 0은 점수에서 제외합니다.</p>
+      <div class="scroll"><table class="t"><thead><tr><th>ID</th><th>그룹</th><th>항목</th><th>비교</th><th>기본 기준</th><th>기준</th><th>가중치</th><th>사용</th></tr></thead><tbody>
+      ${defs.map((d) => { const o = ov[d.id] || {}; return `<tr><td>${d.id}</td><td>${d.group}</td><td>${esc(d.name)}</td><td>${d.cmp === "le" ? "≤" : d.cmp === "ge" ? "≥" : "참고"}</td><td>${d.threshold ?? "-"}${d.unit === "%" ? "%" : ""}</td>
+        <td><input class="s" style="width:70px" data-id="${d.id}" data-k="threshold" value="${o.threshold ?? ""}" ${d.cmp === "info" ? "disabled" : ""}></td>
+        <td><input class="s" style="width:60px" data-id="${d.id}" data-k="weight" value="${o.weight ?? ""}" placeholder="${d.weight}"></td>
+        <td><input type="checkbox" data-id="${d.id}" data-k="enabled" ${o.enabled === false ? "" : "checked"}></td></tr>`; }).join("")}</tbody></table></div>
+      <div class="row end"><button class="btn primary" id="mSave">기준값 저장</button></div></div>`;
+  $("#optSave").onclick = () => withBusy($("#optSave"), async () => { await api(`/api/uploads/${uid}/settings`, { method: "PUT", json: { schedule_options: { progress_override: $("#optPO").checked } } }); cache = {}; toast("재계산했습니다"); });
+  $("#mSave").onclick = () => withBusy($("#mSave"), async () => {
+    const out = {};
+    el.querySelectorAll("[data-id]").forEach((x) => {
+      const o = (out[x.dataset.id] ||= {});
+      if (x.type === "checkbox") { if (!x.checked) o.enabled = false; } else if (x.value !== "") o[x.dataset.k] = +x.value;
+    });
+    await api(`/api/uploads/${uid}/settings`, { method: "PUT", json: { metric_overrides: Object.fromEntries(Object.entries(out).filter(([, v]) => Object.keys(v).length)) } });
+    toast("저장했습니다");
+  });
+}
+
+// ---------------------------------------------------------------- 새 공정표 만들기
+async function showGenerate() {
+  const [tpls, st] = await Promise.all([api("/api/templates"), getAiStatus()]);
+  let dlg = $("#dlgGen");
+  if (!dlg) { dlg = document.createElement("dialog"); dlg.id = "dlgGen"; document.body.appendChild(dlg); }
+  dlg.innerHTML = `<form method="dialog" id="fGen"><h3>새 공정표 만들기</h3>
+    <label>프로젝트명<input name="project" required></label><label>착공일<input name="start" type="date" required value="${new Date().toISOString().slice(0, 10)}"></label>
+    <div class="seg"><label><input type="radio" name="mode" value="template" checked> 표준 템플릿</label><label><input type="radio" name="mode" value="ai" ${st.enabled ? "" : "disabled"}> ✦ 문서로 AI 생성${st.enabled ? "" : " (AI 미설정)"}</label></div>
+    <div id="gTpl"><label>템플릿<select name="template">${tpls.map((t) => `<option value="${t.key}">${esc(t.name)} · ${t.activities}개 작업</option>`).join("")}</select></label>
+      <label>공기 배율<input name="scale" type="number" step="0.1" value="1.0"></label></div>
+    <div id="gAi" hidden><label>목표 공기(달력일, 선택)<input name="target_days" type="number"></label>
+      <label>입찰·설계 문서 (PDF, DOCX, TXT · 20MB 이하)<input name="file" type="file" accept=".pdf,.docx,.txt"></label>
+      <label>또는 내용 붙여넣기<textarea name="text" rows="5" style="width:100%"></textarea></label>
+      <p class="muted" style="font-size:12px">문서 내용이 AI 서비스로 전송됩니다. 생성된 공정표는 초안이며 공기·논리를 반드시 검토하세요.</p></div>
+    <div class="row end"><button class="btn" value="cancel" formnovalidate>취소</button><button class="btn primary" value="ok" id="gRun">만들기</button></div><p class="err" id="gErr"></p></form>`;
+  const f = $("#fGen");
+  f.querySelectorAll("[name=mode]").forEach((x) => (x.onchange = () => { $("#gTpl").hidden = f.mode.value !== "template"; $("#gAi").hidden = f.mode.value !== "ai"; }));
+  f.onsubmit = async (e) => {
+    if (e.submitter?.value !== "ok") return; e.preventDefault();
+    const fd = new FormData(f); if (!f.file?.files?.length) fd.delete("file");
+    await withBusy($("#gRun"), async () => {
+      try {
+        const res = await api("/api/generate", { method: "POST", body: fd });
+        dlg.close(); if (res.assumptions?.length) alert("AI 가정 사항:\n- " + res.assumptions.join("\n- "));
+        location.hash = `#/p/${res.id}/gantt`;
+      } catch (err) { $("#gErr").textContent = err.message; }
+    }).catch(() => {});
+  };
+  dlg.showModal();
+}
+
+// ---------------------------------------------------------------- 로그인
+let loginWait = null;
+function showLogin() {
+  if (loginWait) return loginWait;
+  let dlg = $("#dlgLogin");
+  if (!dlg) {
+    dlg = document.createElement("dialog"); dlg.id = "dlgLogin";
+    dlg.innerHTML = `<form method="dialog" id="fLogin"><h3>로그인</h3><label>아이디<input name="username" autocomplete="username" required></label>
+      <label>비밀번호<input name="password" type="password" autocomplete="current-password" required></label>
+      <div class="row end"><button class="btn primary" value="ok">로그인</button></div><p class="err" id="lgErr"></p></form>`;
+    dlg.addEventListener("cancel", (e) => e.preventDefault());
+    document.body.appendChild(dlg);
+  }
+  loginWait = new Promise((resolve) => {
+    $("#fLogin").onsubmit = async (e) => {
+      e.preventDefault();
+      const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(e.target))) });
+      if (!r.ok) { $("#lgErr").textContent = (await r.json()).detail; return; }
+      dlg.close(); loginWait = null; refreshMe(); resolve();
+    };
+    dlg.showModal();
+  });
+  return loginWait;
+}
+let me = null;
+async function refreshMe() {
+  try { me = await (await fetch("/api/me")).json(); } catch { me = null; }
+  const box = $("#userBox"); if (!box) return;
+  box.innerHTML = me?.username ? `<span>${esc(me.username)} <span class="tag">${me.role}</span></span>${me.role === "admin" ? ' <a href="#/admin">관리</a>' : ""} <a href="#" id="lnkLogout">로그아웃</a>`
+    : me?.mode === "open" ? '<a href="#/admin">관리</a>' : "";
+  $("#lnkLogout")?.addEventListener("click", async (e) => { e.preventDefault(); await fetch("/api/logout", { method: "POST", headers: { "X-Requested-With": "fetch" } }); location.reload(); });
+}
+
+// ---------------------------------------------------------------- 관리자
+async function showAdmin() {
+  $("#crumb").textContent = "/ 관리";
+  const [users, audit, aist, cfg] = await Promise.all([api("/api/admin/users").catch(() => []), api("/api/admin/audit").catch(() => []), api("/api/ai/status"), fetch("/api/config").then((x) => x.json())]);
+  const anyUid = (await api("/api/uploads"))[0]?.id;
+  const st = anyUid ? await api(`/api/uploads/${anyUid}/settings`) : { extra_holidays: [] };
+  view.innerHTML = `<h2>관리</h2>
+    <div class="panel"><h3 style="margin-top:0">사용자</h3>${cfg.login_required ? "" : `<p class="warn-text">아직 사용자 계정이 없어 누구나 접근할 수 있는 공개 모드입니다. 서버에서 <code>python -m app.auth create-admin 아이디</code>로 관리자를 만들거나 <code>ADMIN_USERNAME</code>/<code>ADMIN_PASSWORD</code> 환경변수를 설정하면 로그인이 켜집니다.</p>`}
+      <table class="t"><thead><tr><th>아이디</th><th>역할</th><th>상태</th><th>최근 로그인</th><th></th></tr></thead><tbody>
+      ${users.map((u) => `<tr><td>${esc(u.username)}</td><td><select class="s sm" data-role="${esc(u.username)}">${["viewer", "editor", "admin"].map((r) => `<option ${u.role === r ? "selected" : ""}>${r}</option>`).join("")}</select></td>
+        <td>${u.active ? "사용" : '<span class="tag fail">중지</span>'}</td><td>${(u.last_login || "").replace("T", " ")}</td>
+        <td><button class="btn sm" data-act="${esc(u.username)}" data-v="${u.active ? 0 : 1}">${u.active ? "중지" : "재사용"}</button> <button class="btn sm" data-pw="${esc(u.username)}">비밀번호 재설정</button></td></tr>`).join("")}</tbody></table>
+      ${cfg.login_required ? `<div class="row" style="margin-top:8px"><input class="s" id="nu" placeholder="아이디"><input class="s" id="np" type="password" placeholder="임시 비밀번호(10자 이상)">
+        <select class="s" id="nr"><option>viewer</option><option selected>editor</option><option>admin</option></select><button class="btn primary" id="nAdd">추가</button></div>
+        <p class="muted" style="font-size:12px">viewer: 조회·What-if 계산 / editor: 업로드·AI·리스크·시나리오 편집 / admin: 삭제·사용자·팀 설정</p>` : ""}</div>
+    <div class="panel"><h3 style="margin-top:0">추가 휴일 (임시공휴일·선거일 등)</h3>
+      <textarea id="exHol" rows="4" style="width:100%" placeholder="2026-06-03 지방선거">${st.extra_holidays.map((h) => `${h.date} ${h.name}`).join("\n")}</textarea>
+      <div class="row end"><button class="btn primary" id="hSave">저장</button></div></div>
+    <div class="panel"><h3 style="margin-top:0">AI 사용량</h3><p class="muted">모델 ${esc(aist.model)} · ${aist.enabled ? "사용 중" : "미설정"}</p>
+      <table class="t"><thead><tr><th>기능</th><th class="num">호출</th><th class="num">입력 토큰</th><th class="num">출력 토큰</th><th class="num">실패</th></tr></thead><tbody>
+      ${aist.usage.map((u) => `<tr><td>${esc(u.feature)}</td><td class="num">${u.n}</td><td class="num">${(u.tin || 0).toLocaleString()}</td><td class="num">${(u.tout || 0).toLocaleString()}</td><td class="num">${u.failed}</td></tr>`).join("") || '<tr><td class="muted">기록 없음</td></tr>'}</tbody></table></div>
+    <div class="panel"><h3 style="margin-top:0">감사 로그 (최근 300건)</h3><div class="scroll"><table class="t"><thead><tr><th>시각</th><th>사용자</th><th>요청</th><th class="num">결과</th></tr></thead><tbody>
+      ${audit.map((a) => `<tr><td>${a.at.replace("T", " ")}</td><td>${esc(a.username)}</td><td>${a.method} ${esc(a.path)}</td><td class="num">${a.status}</td></tr>`).join("")}</tbody></table></div></div>`;
+  const reload = () => showAdmin();
+  view.querySelectorAll("[data-role]").forEach((s) => (s.onchange = async () => { try { await api(`/api/admin/users/${encodeURIComponent(s.dataset.role)}`, { method: "PUT", json: { role: s.value } }); toast("변경했습니다"); } catch (e) { reload(); } }));
+  view.querySelectorAll("[data-act]").forEach((b) => (b.onclick = async () => { await api(`/api/admin/users/${encodeURIComponent(b.dataset.act)}`, { method: "PUT", json: { active: b.dataset.v === "1" } }).catch(() => {}); reload(); }));
+  view.querySelectorAll("[data-pw]").forEach((b) => (b.onclick = async () => { const pw = prompt("새 비밀번호 (10자 이상)"); if (pw) { await api(`/api/admin/users/${encodeURIComponent(b.dataset.pw)}`, { method: "PUT", json: { password: pw } }).catch(() => {}); toast("변경했습니다"); } }));
+  $("#nAdd")?.addEventListener("click", async () => { await api("/api/admin/users", { method: "POST", json: { username: $("#nu").value, password: $("#np").value, role: $("#nr").value } }).catch(() => {}); reload(); });
+  $("#hSave").onclick = async () => {
+    const hs = $("#exHol").value.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => ({ date: l.slice(0, 10), name: l.slice(11).trim() }));
+    await api("/api/settings/team", { method: "PUT", json: { extra_holidays: hs } }); toast("저장했습니다");
+  };
+}
+
+// ---------------------------------------------------------------- A3 인쇄용 공정표
+async function showPrint(uid) {
+  const u = await load(uid); const r = u.result;
+  const acts = r.activities.filter((a) => a.status_code !== "TK_Complete" || !store.get("printHideDone"));
+  const t0 = Math.min(...acts.map((a) => toT(a.start))) - 7 * dayMs, t1 = Math.max(...acts.map((a) => toT(a.finish))) + 14 * dayMs;
+  const W = 1500, L = 560, RH = 16, rowsPerPage = 52;
+  const X = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - 10);
+  const months = monthTicks(t0, t1);
+  const rows = []; let last = null;
+  for (const a of acts) { if (a.wbs !== last) { rows.push({ wbs: a.wbs || "(WBS 없음)" }); last = a.wbs; } rows.push(a); }
+  const pages = []; for (let i = 0; i < rows.length; i += rowsPerPage) pages.push(rows.slice(i, i + rowsPerPage));
+  const head = `<g font-size="10" fill="#111">${months.map((t) => `<line x1="${X(t)}" y1="0" x2="${X(t)}" y2="${rowsPerPage * RH + 30}" stroke="#e5e7eb"/><text x="${X(t) + 2}" y="12">${new Date(t).getFullYear() % 100}.${new Date(t).getMonth() + 1}</text>`).join("")}
+    <text x="4" y="24" font-weight="bold">ID</text><text x="70" y="24" font-weight="bold">액티비티명</text><text x="380" y="24" font-weight="bold">잔여</text><text x="410" y="24" font-weight="bold">시작</text><text x="470" y="24" font-weight="bold">종료</text><text x="530" y="24" font-weight="bold">TF</text></g>`;
+  $("#crumb").textContent = "/ 인쇄";
+  view.innerHTML = `<div class="noprint row" style="margin-bottom:10px"><button class="btn primary" onclick="window.print()">인쇄 / PDF 저장</button>
+      <a class="btn" href="#/p/${uid}/gantt">돌아가기</a><span class="muted">A3 가로에 맞춰 ${pages.length}쪽으로 나눕니다. 브라우저 인쇄에서 'PDF로 저장'을 고르세요.</span></div>
+    ${pages.map((pg, pi) => `<div class="print-page"><div class="ph"><b>${esc(r.name)}</b> 공정표 · Data Date ${r.data_date} · 예상 준공 ${r.finish}<span>${pi + 1} / ${pages.length}</span></div>
+      <svg viewBox="0 0 ${W} ${rowsPerPage * RH + 34}" width="100%" font-family="sans-serif">${head}<g transform="translate(0,30)">
+      ${pg.map((a, i) => { const y = i * RH; if (!a.id) return `<rect x="0" y="${y}" width="${W}" height="${RH}" fill="#f3f4f6"/><text x="4" y="${y + 11}" font-size="10" font-weight="bold">${esc(a.wbs)}</text>`;
+        const s = toT(a.start), f = toT(a.finish) + dayMs, col = a.status_code === "TK_Complete" ? "#9ca3af" : a.longest || a.critical ? "#dc2626" : "#3b82f6";
+        const bar = a.milestone ? `<path d="M${X(s)} ${y + 3} l5 5 l-5 5 l-5 -5z" fill="${col}"/>` : `<rect x="${X(s)}" y="${y + 4}" width="${Math.max(1.5, X(f) - X(s))}" height="8" fill="${col}"/>`;
+        return `<text x="4" y="${y + 11}" font-size="9">${esc(a.code)}</text><text x="70" y="${y + 11}" font-size="9" fill="${a.longest ? "#b91c1c" : "#111"}">${esc(a.name.slice(0, 40))}</text>
+          <text x="380" y="${y + 11}" font-size="9">${a.rem_dur}</text><text x="410" y="${y + 11}" font-size="9">${a.start.slice(2)}</text><text x="470" y="${y + 11}" font-size="9">${a.finish.slice(2)}</text><text x="530" y="${y + 11}" font-size="9">${a.tf ?? ""}</text>${bar}
+          <line x1="0" y1="${y + RH}" x2="${W}" y2="${y + RH}" stroke="#f1f3f5"/>`; }).join("")}
+      <line x1="${X(toT(r.data_date))}" y1="0" x2="${X(toT(r.data_date))}" y2="${pg.length * RH}" stroke="#16a34a" stroke-dasharray="4 3"/></g></svg>
+      <div class="pf">빨강: 최장경로/주공정 · 파랑: 일반 · 회색: 완료 · 초록 점선: Data Date</div></div>`).join("")}`;
+}
+
+document.addEventListener("DOMContentLoaded", refreshMe);

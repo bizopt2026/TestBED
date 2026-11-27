@@ -18,6 +18,7 @@ CONSTRAINT_NAMES = {
     "CS_MANDSTART": "Mandatory Start", "CS_MANDFIN": "Mandatory Finish",
 }
 MILESTONES = {"TT_Mile", "TT_FinMile"}
+SUMMARY_TYPES = {"TT_LOE", "TT_WBS"}  # 기간이 선·후행에 의해 결정되는 요약형 작업 (구동하지 않음)
 
 
 @dataclass
@@ -78,7 +79,9 @@ def _iso(o: int | None) -> str | None:
 
 
 class Schedule:
-    def __init__(self, tables: dict, proj_id: str | None = None):
+    def __init__(self, tables: dict, proj_id: str | None = None, options: dict | None = None):
+        self.options = options or {}
+        self.override = bool(self.options.get("progress_override"))
         projects = [p for p in tables.get("PROJECT", []) if p.get("export_flag", "Y") != "N"] \
             or tables.get("PROJECT", [])
         if not projects:
@@ -123,7 +126,10 @@ class Schedule:
             self.calendars[default_cal.id] = default_cal
         self.default_cal = default_cal
 
-        rsrc_tasks = {r.get("task_id") for r in tables.get("TASKRSRC", [])}
+        task_ids = {t["task_id"] for t in tasks}
+        self.assignments = [r for r in tables.get("TASKRSRC", []) if r.get("task_id") in task_ids]
+        self.resources = {r.get("rsrc_id"): r for r in tables.get("RSRC", [])}
+        rsrc_tasks = {r.get("task_id") for r in self.assignments}
 
         self.acts: dict[str, Activity] = {}
         for t in tasks:
@@ -215,6 +221,10 @@ class Schedule:
                     continue
                 p = self.acts[r.pred]
                 pc = self.cal(p)
+                if p.task_type in SUMMARY_TYPES and a.task_type not in SUMMARY_TYPES:
+                    continue  # LOE/WBS 요약 작업은 후행을 구동하지 않음
+                if a.status == "TK_Active" and self.override:
+                    continue  # Progress Override: 착수된 작업은 선행 논리 무시
                 if a.status == "TK_Active" and r.type in ("SS", "SF"):
                     continue  # 이미 착수된 작업의 시작 관계는 충족된 것으로 간주
                 if r.type == "FS":
@@ -274,7 +284,9 @@ class Schedule:
                 if r.succ not in done or (a.id in loop_ids and r.succ in loop_ids):
                     continue
                 s = self.acts[r.succ]
-                if s.status == "TK_Complete":
+                if s.status == "TK_Complete" or (s.task_type in SUMMARY_TYPES and a.task_type not in SUMMARY_TYPES):
+                    continue
+                if s.status == "TK_Active" and self.override:
                     continue
                 pc = c  # lag 은 선행 캘린더 기준
                 if r.type == "FS":  # 진행중 후행: 잔여 작업 만기 시작 기준 (Retained Logic)
@@ -313,6 +325,18 @@ class Schedule:
                 a.ls = a.rls if a.status == "TK_NotStart" else a.es
             done.add(a.id)
 
+        # ---------- LOE / WBS 요약 작업: 후행 작업으로 종료일 결정 ----------
+        for a in self.acts.values():
+            if a.task_type not in SUMMARY_TYPES or a.status == "TK_Complete":
+                continue
+            ends = []
+            for r in a.succs:
+                s = self.acts[r.succ]
+                ends.append(s.ef if r.type in ("FF", "SF") else s.es)
+            if ends:
+                a.ef = max(a.es, max(ends))
+            a.ls, a.lf, a.rls = a.es, a.ef, a.rs
+
         # ---------- Float ----------
         for a in self.acts.values():
             c = self.cal(a)
@@ -332,9 +356,10 @@ class Schedule:
                 gaps.append(self._gap(a, s, r))
             a.ff = max(0, min(gaps)) if gaps else max(0, a.tf)
             a.ff = min(a.ff, max(a.tf, 0)) if a.tf >= 0 else 0
-            a.critical = a.tf <= 0
+            a.critical = a.tf <= 0 and a.task_type not in SUMMARY_TYPES
 
         # ---------- Longest path ----------
+        incomplete = [a for a in incomplete if a.task_type not in SUMMARY_TYPES]
         if incomplete:
             last_ef = max(x.ef for x in incomplete)
             stack = [x for x in incomplete if x.ef == last_ef]
@@ -347,12 +372,14 @@ class Schedule:
                 a.longest = True
                 for r in a.preds:
                     p = self.acts[r.pred]
-                    if p.status != "TK_Complete" and self._gap(p, a, r) <= 0:
+                    if p.status != "TK_Complete" and p.task_type not in SUMMARY_TYPES and self._gap(p, a, r) <= 0:
                         stack.append(p)
 
     def _gap(self, p: Activity, s: Activity, r: Relation) -> int:
         """관계 여유(작업일): 0 이면 구동(driving) 관계."""
         pc = self.cal(p)
+        if s.status == "TK_Active" and self.override:
+            return 999999
         if r.type == "FS":
             return pc.workdays_between(pc.shift(p.ef, r.lag), s.rs if s.status == "TK_Active" else s.es)
         if r.type == "SS":
@@ -388,6 +415,7 @@ class Schedule:
                 "id": a.id, "code": a.code, "name": a.name,
                 "wbs": " > ".join(self.wbs_path(a.wbs_id)), "wbs_id": a.wbs_id,
                 "calendar": self.cal(a).name, "type": a.task_type, "milestone": ms,
+                "summary_type": a.task_type in SUMMARY_TYPES,
                 "status": STATUS.get(a.status, a.status), "status_code": a.status,
                 "orig_dur": a.orig_dur, "rem_dur": a.rem_dur, "pct": a.pct,
                 "start": _iso(fin(a.es, a.ef, a) if a.task_type == "TT_FinMile" else a.es),
@@ -419,6 +447,7 @@ class Schedule:
             "must_finish": self.must_finish.isoformat() if self.must_finish else None,
             "warnings": self.warnings, "activities": acts,
             "relationship_count": len(self.rels),
+            "options": self.options,
         }
 
 

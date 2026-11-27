@@ -84,7 +84,13 @@ for i, (code, name, w, dur, cal, tt, st, s, e, pct, cs) in enumerate(acts, start
          "cstr_type": cs[0] if cs else "", "cstr_date": f"{cs[1]} 08:00" if cs else ""}
     tasks.append(t)
     if tt == "TT_Task" and code not in ("A3070",):
-        rsrc.append({"taskrsrc_id": i, "task_id": i, "proj_id": 100, "rsrc_id": 1})
+        cost = dur * 1_000_000 * (2 if w == 4 else 1)          # 원공기 × 일당 단가(원)
+        spent = cost * pct / 100 * (1.15 if code in ("A2000", "A1030") else 1.0)  # 일부 작업 원가 초과
+        qty = dur * 8 * (6 if w in (3, 4) else 3)              # 인시(man-hour)
+        rsrc.append({"taskrsrc_id": i, "task_id": i, "proj_id": 100, "rsrc_id": 1 if w != 4 else 2,
+                     "target_cost": cost, "act_reg_cost": round(spent), "act_ot_cost": 0,
+                     "remain_cost": round(cost * (1 - pct / 100)), "target_qty": qty,
+                     "remain_qty": round(qty * (1 - pct / 100))})
 ids = {a[0]: i for i, a in enumerate(acts, start=1000)}
 for n, (p, s, t, lag) in enumerate(rels):
     preds.append({"task_pred_id": n + 1, "task_id": ids[s], "pred_task_id": ids[p], "proj_id": 100,
@@ -95,7 +101,11 @@ F = ["task_id", "proj_id", "wbs_id", "clndr_id", "task_code", "task_name", "task
 table("TASK", F, tasks)
 table("TASKPRED", ["task_pred_id", "task_id", "pred_task_id", "proj_id", "pred_proj_id", "pred_type",
                    "lag_hr_cnt"], preds)
-table("TASKRSRC", ["taskrsrc_id", "task_id", "proj_id", "rsrc_id"], rsrc)
+table("RSRC", ["rsrc_id", "rsrc_short_name", "rsrc_name", "rsrc_type"], [
+    {"rsrc_id": 1, "rsrc_short_name": "LAB", "rsrc_name": "일반 노무", "rsrc_type": "RT_Labor"},
+    {"rsrc_id": 2, "rsrc_short_name": "STL", "rsrc_name": "철골 작업조", "rsrc_type": "RT_Labor"}])
+table("TASKRSRC", ["taskrsrc_id", "task_id", "proj_id", "rsrc_id", "target_cost", "act_reg_cost", "act_ot_cost",
+                   "remain_cost", "target_qty", "remain_qty"], rsrc)
 
 print("ERMHDR\t19.12\t2026-03-02\tProject\tadmin\tadmin\tdbxDatabaseNoName\tProject Management\tKRW")
 print("".join(TABLES) + "%E")

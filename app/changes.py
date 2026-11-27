@@ -105,6 +105,19 @@ def apply_changes(tables: dict, proj_id: str, changes: list[dict]) -> tuple[dict
             for r in found:
                 r["lag_hr_cnt"] = str(float(ch["lag"]) * _day_hours(t, task(ch["pred"])))
             log.append(f"Lag 변경 {ch['pred']} → {ch['succ']} = {ch['lag']}일")
+        elif op == "add_holidays":
+            from datetime import date as _date
+
+            from .korea import add_holidays_to_clndr
+            days = [_date.fromisoformat(d) for d in ch.get("dates") or []]
+            targets = ch.get("clndr_ids") or []
+            n = 0
+            for c in t.get("CALENDAR", []):
+                if not targets or c.get("clndr_id") in targets:
+                    new = add_holidays_to_clndr(c.get("clndr_data", ""), days)
+                    n += new != c.get("clndr_data", "")
+                    c["clndr_data"] = new
+            log.append(f"캘린더 {n}개에 공휴일 {len(days)}일 반영")
         elif op == "set_data_date":
             for pr in t.get("PROJECT", []):
                 if pr.get("proj_id") == proj_id:

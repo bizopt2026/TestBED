@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Project xmlns="http://schemas.microsoft.com/project">
+  <Title>MSP 샘플 - 사무동 리모델링</Title>
+  <StartDate>2026-03-02T08:00:00</StartDate>
+  <FinishDate>2026-06-30T17:00:00</FinishDate>
+  <StatusDate>2026-03-16T08:00:00</StatusDate>
+  <ScheduleFromStart>1</ScheduleFromStart>
+  <Tasks>
+    <Task><UID>0</UID><ID>0</ID><Name>사무동 리모델링</Name><OutlineLevel>0</OutlineLevel><Summary>1</Summary></Task>
+    <Task><UID>1</UID><ID>1</ID><Name>착공</Name><OutlineLevel>1</OutlineLevel><Duration>PT0H0M0S</Duration><Milestone>1</Milestone>
+      <Start>2026-03-02T08:00:00</Start><Finish>2026-03-02T08:00:00</Finish><ActualStart>2026-03-02T08:00:00</ActualStart><ActualFinish>2026-03-02T08:00:00</ActualFinish><PercentComplete>100</PercentComplete></Task>
+    <Task><UID>2</UID><ID>2</ID><Name>철거</Name><OutlineLevel>1</OutlineLevel><Summary>1</Summary></Task>
+    <Task><UID>3</UID><ID>3</ID><WBS>2.1</WBS><Name>내부 철거</Name><OutlineLevel>2</OutlineLevel><Duration>PT80H0M0S</Duration>
+      <Start>2026-03-03T08:00:00</Start><Finish>2026-03-16T17:00:00</Finish><ActualStart>2026-03-03T08:00:00</ActualStart><PercentComplete>60</PercentComplete>
+      <PredecessorLink><PredecessorUID>1</PredecessorUID><Type>1</Type><LinkLag>0</LinkLag></PredecessorLink></Task>
+    <Task><UID>4</UID><ID>4</ID><Name>마감</Name><OutlineLevel>1</OutlineLevel><Summary>1</Summary></Task>
+    <Task><UID>5</UID><ID>5</ID><WBS>3.1</WBS><Name>설비 배관 교체</Name><OutlineLevel>2</OutlineLevel><Duration>PT160H0M0S</Duration>
+      <Start>2026-03-17T08:00:00</Start><Finish>2026-04-13T17:00:00</Finish>
+      <PredecessorLink><PredecessorUID>3</PredecessorUID><Type>1</Type><LinkLag>0</LinkLag></PredecessorLink></Task>
+    <Task><UID>6</UID><ID>6</ID><WBS>3.2</WBS><Name>천장 및 벽체 마감</Name><OutlineLevel>2</OutlineLevel><Duration>PT240H0M0S</Duration>
+      <Start>2026-03-31T08:00:00</Start><Finish>2026-05-12T17:00:00</Finish>
+      <PredecessorLink><PredecessorUID>5</PredecessorUID><Type>3</Type><LinkLag>4800</LinkLag></PredecessorLink></Task>
+    <Task><UID>7</UID><ID>7</ID><Name>준공</Name><OutlineLevel>1</OutlineLevel><Duration>PT0H0M0S</Duration><Milestone>1</Milestone>
+      <Start>2026-05-12T17:00:00</Start><Finish>2026-05-12T17:00:00</Finish>
+      <PredecessorLink><PredecessorUID>6</PredecessorUID><Type>1</Type><LinkLag>0</LinkLag></PredecessorLink></Task>
+  </Tasks>
+</Project>

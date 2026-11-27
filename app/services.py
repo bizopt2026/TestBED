@@ -36,7 +36,11 @@ def tables(uid: str):
 
 def schedule(uid: str) -> Schedule:
     t, pid = tables(uid)
-    return Schedule(t, pid)
+    return Schedule(t, pid, sched_options(result(uid)["name"]))
+
+
+def sched_options(name: str) -> dict:
+    return storage.setting(name, "schedule_options", {}) or {}
 
 
 def result(uid: str) -> dict:
@@ -169,7 +173,7 @@ def delay(uid: str, base_uid: str | None = None) -> dict:
 def whatif(uid: str, changes: list[dict]) -> dict:
     t, pid = tables(uid)
     new_t, log = apply_changes(t, pid, changes)
-    s2 = Schedule(new_t, pid)
+    s2 = Schedule(new_t, pid, sched_options(result(uid)["name"]))
     after = analyze(s2)
     before = result(uid)
     mb = {a["code"]: a for a in before["activities"]}
@@ -661,3 +665,352 @@ def chat(uid: str, messages: list[dict], user: str = "") -> dict:
     codes = [c for c in dict.fromkeys(re.findall(r"[A-Za-z0-9][\w.\-]*", out["answer"])) if c in by]
     out["codes"] = codes[:300]
     return out
+
+
+# ================================================================ 벤치마크 반영 기능 (2차)
+import hashlib as _hashlib  # noqa: E402
+import json as _json  # noqa: E402
+
+from . import evm as _evm  # noqa: E402
+from . import forensic as _forensic  # noqa: E402
+from . import korea as _korea  # noqa: E402
+from . import metrics as _metrics  # noqa: E402
+from . import predict as _predict  # noqa: E402
+from . import recovery as _recovery  # noqa: E402
+from . import risk as _risk  # noqa: E402
+from .calendar import parse_clndr_data  # noqa: E402
+
+
+def project_name(uid: str) -> str:
+    return result(uid)["name"]
+
+
+# ---------------------------------------------------------------- ① 건전성 점수
+def metric_overrides(name: str) -> dict:
+    team = storage.setting("*", "metric_overrides", {}) or {}
+    proj = storage.setting(name, "metric_overrides", {}) or {}
+    out = {k: dict(v) for k, v in team.items()}
+    for k, v in proj.items():
+        out.setdefault(k, {}).update(v)
+    return out
+
+
+def health(uid: str) -> dict:
+    r = result(uid)
+    ov = metric_overrides(r["name"])
+    h = _metrics.compute(schedule(uid), r, ov)
+    key = _hashlib.sha1(_json.dumps([ov, sched_options(r["name"])], sort_keys=True).encode()).hexdigest()
+    storage.set_extra(uid, "health_score", {"key": key, "score": h["score"], "grade": h["grade"]})
+    return h
+
+
+def health_score(uid: str) -> int | None:
+    r = result(uid)
+    key = _hashlib.sha1(_json.dumps([metric_overrides(r["name"]), sched_options(r["name"])], sort_keys=True).encode()).hexdigest()
+    c = storage.get_extra(uid, "health_score")
+    if c and c.get("key") == key:
+        return c["score"]
+    try:
+        return health(uid)["score"]
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------- ② 포렌식
+def forensic(uid: str, base_uid: str | None = None) -> dict:
+    r = result(uid)
+    hist = storage.history(r["name"])
+    out = {"trend": _forensic.trend(hist, {h["id"]: health_score(h["id"]) for h in hist})}
+    if base_uid:
+        base = result(base_uid)
+    else:
+        prev = previous_upload(uid)
+        base = prev["result"] if prev else None
+        base_uid = prev["id"] if prev else None
+    if base:
+        out.update({"available": True, "base_id": base_uid, "base_data_date": base["data_date"],
+                    "changes": _forensic.change_log(base, r), "compression": _forensic.compression(base, r)})
+    else:
+        out.update({"available": False, "message": "같은 프로젝트의 이전 업데이트가 없습니다."})
+    return out
+
+
+# ---------------------------------------------------------------- ③ 리스크 레지스터 + 시뮬레이션
+RISK_FIELDS = ("title", "desc", "codes", "prob", "impact_min", "impact_ml", "impact_max", "cost", "owner",
+               "mitigation", "status", "category", "due")
+
+
+def clean_risk(d: dict, valid_codes: set[str]) -> dict:
+    x = {k: d.get(k) for k in RISK_FIELDS}
+    x["title"] = str(x["title"] or "").strip()[:200]
+    if not x["title"]:
+        raise ValueError("리스크 제목을 입력하세요")
+    x["codes"] = [c for c in (x["codes"] or []) if c in valid_codes][:50]
+    for k in ("prob", "impact_min", "impact_ml", "impact_max", "cost"):
+        try:
+            x[k] = float(x[k] or 0)
+        except (TypeError, ValueError):
+            x[k] = 0.0
+    x["prob"] = min(max(x["prob"], 0), 100)
+    x["status"] = x["status"] if x["status"] in ("open", "closed", "mitigating") else "open"
+    return x
+
+
+def risks(uid: str) -> list[dict]:
+    rs = storage.rec_list("risk", project_name(uid))
+    for x in rs:
+        x["exposure_days"] = round(x["prob"] / 100 * (x["impact_min"] + x["impact_ml"] + x["impact_max"]) / 3, 1)
+    return sorted(rs, key=lambda x: (x["status"] == "closed", -x["exposure_days"]))
+
+
+def risk_extract(uid: str, text: str, user: str = "") -> list[dict]:
+    r = result(uid)
+    acts = "\n".join(f"{a['code']}\t{a['name']}" for a in r["activities"] if a["status_code"] != "TK_Complete")
+    schema = {"type": "object", "additionalProperties": False, "required": ["items"],
+              "properties": {"items": {"type": "array", "items": {
+                  "type": "object", "additionalProperties": False,
+                  "required": ["title", "desc", "codes", "prob", "impact_min", "impact_ml", "impact_max", "mitigation", "category"],
+                  "properties": {"title": {"type": "string"}, "desc": {"type": "string"},
+                                 "codes": {"type": "array", "items": {"type": "string"}},
+                                 "prob": {"type": "number"}, "impact_min": {"type": "number"},
+                                 "impact_ml": {"type": "number"}, "impact_max": {"type": "number"},
+                                 "mitigation": {"type": "string"},
+                                 "category": {"type": "string", "enum": ["설계", "인허가", "자재·장비", "인력", "기상", "민원·환경", "발주처", "협력업체", "기술", "기타"]}}}}}}
+    out, usage = ai.structured(SYSTEM_BASE + " 문서에서 공정 리스크(아직 일어나지 않은 불확실한 사건)를 찾아 리스크 레지스터 항목으로 만듭니다.",
+                               f"[문서]\n{text}\n\n[미완료 액티비티: ID, 이름]\n{acts}\n\n"
+                               "각 리스크의 발생확률(%)과 발생 시 영향 일수(최소/최빈/최대, 작업일)를 문서 근거로 추정하고, 영향을 받는 액티비티 ID를 연결하세요. "
+                               "근거가 약하면 확률을 낮게 잡고 desc 에 '추정'이라고 쓰세요.", schema, effort="medium", model=ai.MODEL)
+    storage.log_ai(uid, "risk_extract", user, usage, 0, True)
+    valid = {a["code"] for a in r["activities"]}
+    return [clean_risk({**x, "status": "open"}, valid) for x in out["items"]]
+
+
+def simulate(uid: str, iterations: int = 500, include_risks: bool = True, uncertainty: bool = True) -> dict:
+    s = schedule(uid)
+    ranges = {}
+    for t, r in _ratios().items():
+        if r["n"] >= 5:
+            ranges[t] = (min(0.9, r["median"] * 0.85), r["median"], max(r["p80"] * 1.1, r["median"] * 1.2))
+    rs = [x for x in risks(uid) if x["status"] != "closed"] if include_risks else []
+    out = _risk.simulate(s, rs, min(max(iterations, 50), 3000), ranges, trade_map(uid), uncertainty=uncertainty)
+    out["assumption"] = ("잔여공기 삼각분포(×0.9 / ×1.0 / ×1.35)" if uncertainty else "공기 불확실성 미적용") + \
+        (f" + 리스크 사건 {len(rs)}건" if rs else "") + (f", 벤치마크 보정 공종: {', '.join(ranges)}" if ranges else "")
+    return out
+
+
+def monte_carlo(uid: str, iterations: int = 300, use_benchmark: bool = True) -> dict:  # noqa: F811 (리스크 포함 버전으로 대체)
+    return simulate(uid, iterations)
+
+
+# ---------------------------------------------------------------- ④ 자동 만회안
+def recovery(uid: str, days: int, costs: dict | None = None, max_ratio: float = 0.3, exclude: list | None = None) -> dict:
+    out = []
+    for pol in _recovery.POLICIES:
+        pol = _recovery.Policy(**{**pol.__dict__, "max_crash_ratio": max_ratio})
+        res = _recovery.search(schedule(uid), int(days), pol, costs or {}, set(exclude or []))
+        if res["changes"]:
+            w = whatif(uid, res["changes"])
+            res["verified_gain"] = -w["d_finish"]
+            res["finish_after"] = w["finish_after"]
+        out.append(res)
+    out.sort(key=lambda r: (not r["achieved"], r["relative_cost"]))
+    return {"target_days": days, "options": out, "finish": result(uid)["finish"],
+            "note": "비용은 상대값입니다(기본 단축 1일=1, 병행 1건=3). 작업별 일당 비용을 입력하면 그 값으로 탐색합니다."}
+
+
+# ---------------------------------------------------------------- ⑤ 베이스라인·EVM·자원
+def baselines(uid: str) -> list[dict]:
+    return storage.rec_list("baseline", project_name(uid))
+
+
+def _baseline_result(uid: str, baseline_id: str | None):
+    if not baseline_id or baseline_id == "target":
+        return None
+    b = storage.rec_get("baseline", baseline_id)
+    return result(b["upload_id"]) if b else None
+
+
+def variance(uid: str, baseline_id: str | None) -> dict:
+    return _evm.baseline_variance(result(uid), _baseline_result(uid, baseline_id))
+
+
+def evm(uid: str, baseline_id: str | None) -> dict:
+    r = result(uid)
+    out = _evm.evm(schedule(uid), r, _baseline_result(uid, baseline_id))
+    if out.get("available"):  # 업데이트별 EV/AC 추이
+        pts = []
+        for h in storage.history(r["name"]):
+            try:
+                e = _evm.evm(schedule(h["id"]), h["result"], _baseline_result(uid, baseline_id))
+                if e.get("available"):
+                    pts.append({"date": h["data_date"], "pv": e["pv"], "ev": e["ev"], "ac": e["ac"],
+                                "spi": e["spi"], "cpi": e["cpi"]})
+            except Exception:
+                continue
+        out["history"] = pts
+    return out
+
+
+def resources(uid: str) -> dict:
+    return _evm.histogram(schedule(uid))
+
+
+# ---------------------------------------------------------------- ⑧ 국내 기준
+def korea_check(uid: str) -> dict:
+    t, pid = tables(uid)
+    r = result(uid)
+    d0 = date.fromisoformat(r["data_date"])
+    d1 = date.fromisoformat(r["finish"])
+    extra = storage.setting("*", "extra_holidays", []) or []
+    cals = _korea.calendar_check(t, pid, d0, d1, extra)
+    weather = {int(k): v for k, v in (storage.setting(r["name"], "weather_days", {}) or {}).items()}
+    proj_cal = next((c for c in t.get("CALENDAR", []) if c.get("clndr_id") == schedule(uid).default_cal.id), None)
+    wd, exc = parse_clndr_data(proj_cal.get("clndr_data", "")) if proj_cal else ({0, 1, 2, 3, 4}, {})
+    review = _korea.nonwork_review(wd, exc, d0, d1, weather, extra)
+    hol = [{"date": d.isoformat(), "name": n} for d, n in _korea.holidays_between(d0, d1, extra).items()]
+    return {"calendars": cals, "holidays": hol, "weather_days": weather, "review": review,
+            "default_calendar": proj_cal.get("clndr_name") if proj_cal else None}
+
+
+# ---------------------------------------------------------------- ⑨ 학습 기반 예측
+def prediction(uid: str) -> dict:
+    groups = {}
+    for h in storage.all_results():
+        groups.setdefault(h["result"]["name"], []).append({"id": h["id"], "result": h["result"]})
+    model = _predict.train(list(groups.values()))
+    prev = previous_upload(uid)
+    preds = _predict.predict(model, result(uid), prev["result"] if prev else None)
+    return {"model": {k: v for k, v in model.items() if k not in ("weights", "mu", "sd")}, "items": preds[:50]}
+
+
+# ---------------------------------------------------------------- ⑦ 룩어헤드·PPC
+def monday(d: date) -> date:
+    return d - timedelta(days=d.weekday())
+
+
+def lookahead_board(uid: str, weeks: int = 3) -> dict:
+    r = result(uid)
+    name = r["name"]
+    dd = date.fromisoformat(r["data_date"])
+    w0 = monday(dd)
+    end = w0 + timedelta(days=7 * weeks - 1)
+    acts = [a for a in r["activities"] if a["status_code"] != "TK_Complete" and not a["summary_type"]
+            and date.fromisoformat(a["start"]) <= end and date.fromisoformat(a["finish"]) >= w0]
+    commits = storage.rec_list("commit", name)
+    cons = storage.rec_list("constraint", name)
+    by_code_c = {}
+    for c in cons:
+        by_code_c.setdefault(c.get("code"), []).append(c)
+    rows = []
+    for a in sorted(acts, key=lambda a: (a["start"], a["code"])):
+        rows.append({"code": a["code"], "name": a["name"], "wbs": a["wbs"], "status": a["status"], "start": a["start"],
+                     "finish": a["finish"], "tf": a["tf"], "longest": a["longest"],
+                     "weeks": [((w0 + timedelta(days=7 * i)).isoformat()) for i in range(weeks)
+                               if date.fromisoformat(a["start"]) <= w0 + timedelta(days=7 * i + 6)
+                               and date.fromisoformat(a["finish"]) >= w0 + timedelta(days=7 * i)],
+                     "constraints": [c for c in by_code_c.get(a["code"], []) if c.get("status") != "해결"],
+                     "commitments": [c for c in commits if c.get("code") == a["code"]]})
+    return {"weeks": [(w0 + timedelta(days=7 * i)).isoformat() for i in range(weeks)], "rows": rows,
+            "constraints": cons, "data_date": r["data_date"]}
+
+
+def ppc(name: str) -> dict:
+    commits = storage.rec_list("commit", name)
+    weeks = {}
+    reasons = {}
+    for c in commits:
+        w = weeks.setdefault(c["week"], {"week": c["week"], "planned": 0, "done": 0})
+        w["planned"] += 1
+        if c.get("done"):
+            w["done"] += 1
+        elif c.get("reason"):
+            reasons[c["reason"]] = reasons.get(c["reason"], 0) + 1
+    rows = sorted(weeks.values(), key=lambda x: x["week"])
+    for w in rows:
+        w["ppc"] = round(100 * w["done"] / w["planned"]) if w["planned"] else None
+    by_company = {}
+    for c in commits:
+        k = c.get("company") or "(미지정)"
+        b = by_company.setdefault(k, {"company": k, "planned": 0, "done": 0})
+        b["planned"] += 1
+        b["done"] += 1 if c.get("done") else 0
+    for b in by_company.values():
+        b["ppc"] = round(100 * b["done"] / b["planned"]) if b["planned"] else None
+    return {"weeks": rows, "reasons": sorted(reasons.items(), key=lambda x: -x[1]),
+            "companies": sorted(by_company.values(), key=lambda b: b["ppc"] or 0)}
+
+
+# ---------------------------------------------------------------- ⑫ 포트폴리오
+def portfolio() -> list[dict]:
+    out = []
+    for p in storage.latest_by_project():
+        r = result(p["id"])
+        hist = storage.history(r["name"])
+        prev = [h for h in hist if h["data_date"] < r["data_date"]]
+        slip = (date.fromisoformat(r["finish"]) - date.fromisoformat(prev[-1]["result"]["finish"])).days if prev else None
+        margin = (date.fromisoformat(r["must_finish"]) - date.fromisoformat(r["finish"])).days if r["must_finish"] else None
+        rs = storage.rec_list("risk", r["name"])
+        try:
+            e = _evm.evm(schedule(p["id"]), r, None)
+        except Exception:
+            e = {}
+        inc = [a for a in r["activities"] if a["status_code"] != "TK_Complete"]
+        out.append({"id": p["id"], "name": r["name"], "data_date": r["data_date"], "finish": r["finish"],
+                    "must_finish": r["must_finish"], "margin": margin, "slip": slip, "updates": len(hist),
+                    "progress": r["summary"]["progress_pct"], "health": health_score(p["id"]),
+                    "negative_float": sum(1 for a in inc if a["tf"] is not None and a["tf"] < 0),
+                    "open_risks": sum(1 for x in rs if x.get("status") != "closed"),
+                    "spi": e.get("spi"), "cpi": e.get("cpi")})
+    return out
+
+
+# ---------------------------------------------------------------- ⑪ 문서 → 초기 공정표
+def extract_text(filename: str, raw: bytes) -> str:
+    name = (filename or "").lower()
+    if name.endswith(".pdf"):
+        import io
+
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(raw))
+        return "\n".join((p.extract_text() or "") for p in reader.pages[:200])
+    if name.endswith(".docx"):
+        import io
+
+        from docx import Document
+        return "\n".join(p.text for p in Document(io.BytesIO(raw)).paragraphs)
+    return decode(raw)
+
+
+def generate_from_text(project: str, start: date, text: str, target_days: int | None, user: str = "") -> dict:
+    from .importers import build_tables, set_target_from_early
+    schema = {"type": "object", "additionalProperties": False, "required": ["wbs", "activities", "assumptions"],
+              "properties": {
+                  "wbs": {"type": "array", "items": {"type": "string"}},
+                  "assumptions": {"type": "array", "items": {"type": "string"}},
+                  "activities": {"type": "array", "items": {
+                      "type": "object", "additionalProperties": False,
+                      "required": ["code", "name", "wbs", "duration", "milestone", "preds"],
+                      "properties": {"code": {"type": "string"}, "name": {"type": "string"}, "wbs": {"type": "string"},
+                                     "duration": {"type": "integer"},
+                                     "milestone": {"type": ["string", "null"], "enum": ["start", "finish", None]},
+                                     "preds": {"type": "array", "items": {
+                                         "type": "object", "additionalProperties": False, "required": ["code", "type", "lag"],
+                                         "properties": {"code": {"type": "string"},
+                                                        "type": {"type": "string", "enum": ["FS", "SS", "FF"]},
+                                                        "lag": {"type": "integer"}}}}}}}}}
+    out, usage = ai.structured(
+        SYSTEM_BASE + " 입찰·설계 문서를 읽고 CPM 초기 공정표(WBS, 액티비티, 공기, 선후행)를 만듭니다.",
+        f"프로젝트: {project}\n착공 예정일: {start.isoformat()}\n" + (f"목표 공기: {target_days}일(달력일)\n" if target_days else "")
+        + f"\n[문서]\n{text[:150000]}\n\n"
+          "규칙: 착공 마일스톤 1개(milestone=start)로 시작해 준공 마일스톤 1개(milestone=finish)로 끝나야 합니다. "
+          "모든 작업은 선행과 후행을 가져야 합니다(Open End 금지). 공기는 작업일 단위, 44일을 넘는 작업은 나누세요. "
+          "액티비티 ID는 WBS 약어+번호(예: STR-010). 30~120개 액티비티. assumptions 에 공기 산정 가정과 문서에서 확인되지 않은 사항을 쓰세요.",
+        schema, effort="high", model=ai.MODEL, max_tokens=32000)
+    storage.log_ai(None, "generate_schedule", user, usage, 0, True)
+    acts = out["activities"]
+    codes = {a["code"] for a in acts}
+    for a in acts:
+        a["preds"] = [p for p in a["preds"] if p["code"] in codes and p["code"] != a["code"]]
+    tables = set_target_from_early(build_tables(project, start, out["wbs"], acts, data_date=start,
+                                                must_finish=start + timedelta(days=target_days) if target_days else None))
+    return {"tables": tables, "assumptions": out["assumptions"]}
