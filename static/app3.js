@@ -139,6 +139,7 @@ showProject = async function (uid, tab, force = false) {
       ${latest ? '<span class="chip ok" title="가장 최근 업데이트">✓ 최신</span>' : '<span class="chip warn" title="최신 업데이트가 아닙니다">! <span class="hide-sm">최신 아님</span><span class="show-sm">이전</span></span>'}
       ${ctx.canWrite ? "" : `<button class="chip warn as-btn hide-sm" id="btnReqAccess" title="편집하려면 소유자에게 권한을 요청하세요">👁 읽기 전용 · 권한 요청</button>`}
       <span class="spacer"></span>
+      <button class="btn sm ai-link" id="btnAi2" title="AI 어시스턴트 (Alt+A)">✦ AI</button>
       <div class="menu-wrap"><button class="btn sm" id="btnView" aria-haspopup="dialog" aria-expanded="false" aria-label="보기 설정">${icon("eye", 14)}<span class="hide-sm"> 보기 설정 <span class="muted">· 비교 ${esc(baseLabel)}</span></span> ▾</button>
         <div class="menu pop" id="viewPop" role="dialog" aria-label="보기 설정" hidden>
           <label class="muted" for="baseSel">비교 기준 <span style="font-size:11px">(업데이트 분석·상황판·리포트·공정표 겹쳐보기 공통)</span></label>
@@ -170,6 +171,7 @@ showProject = async function (uid, tab, force = false) {
     $("#baseSel").onchange = (e) => { setBase(r.name, e.target.value); toast("비교 기준을 바꿨습니다. 업데이트 분석·상황판·리포트에 적용됩니다."); showProject(uid, ctx.tab, true); };
     $("#btnReqAccess")?.addEventListener("click", () => requestAccess(r.name));
     $("#btnAi").onclick = () => openAiPanel();
+    $("#btnAi2").onclick = () => openAiPanel();
     $("#btnFav").onclick = () => {
       const f = new Set(JSON.parse(store.get("favs", "[]"))); f.has(r.name) ? f.delete(r.name) : f.add(r.name);
       store.set("favs", JSON.stringify([...f])); $("#btnFav").classList.toggle("on", f.has(r.name));
@@ -245,7 +247,7 @@ tabOverview = async function (el, r, uid) {
     <div class="sit ${lvl[0]}"><span class="sit-badge">${lvl[1]}</span><div><div class="sit-line">${esc(s.headline)}</div>
       <div class="muted" style="font-size:12px">${s.base_data_date ? `비교 기준: DD ${s.base_data_date}` : "비교할 이전 업데이트 없음"} ·
         ${rv.completed_by ? `<span class="chip ok">✓ 월간 점검 완료 · ${esc(rv.completed_by)} ${fmtAt(rv.completed_at)}</span>` : `<a href="#/wizard/${uid}">월간 업데이트 점검 ${Object.keys(rv.steps || {}).length ? `(${Object.keys(rv.steps).length}단계 확인됨) ` : ""}열기 →</a>`}</div></div></div>
-    <div class="kpis kpis6">${s.kpis.map((k) => `<div class="kpi">
+    <div class="kpis kpis6">${s.kpis.map((k) => `<div class="kpi ${kTone(k)}">
       <div class="l">${esc(k.label)}${s.why?.[k.key] ? ` <button class="why" data-why="${k.key}" aria-expanded="false" aria-label="${esc(k.label)} 왜 이런가요?">왜?</button>` : ""}</div>
       <div class="v ${k.key === "neg" && k.value ? "crit" : ""}">${k.value === null || k.value === undefined ? "-" : esc(String(k.value))}${k.unit && k.value !== null && typeof k.value === "number" ? `<small>${k.unit}</small>` : ""}</div>
       <div class="row" style="justify-content:space-between;gap:4px">${fmtDelta(k)}<span class="spk" title="${esc(k.series_label || "")}">${spark(k.series)}</span></div>
@@ -261,7 +263,7 @@ tabOverview = async function (el, r, uid) {
       <div class="panel"><h3 style="margin-top:0">마일스톤</h3>
         <div class="scroll"><table class="t" data-noexport><thead><tr><th>ID</th><th>마일스톤</th><th>예정</th><th>계획</th><th class="num">편차</th></tr></thead><tbody>
         ${s.milestones.map((m) => `<tr><td>${esc(m.code)}</td><td>${m.done ? "✓ " : ""}${esc(m.name)}</td><td>${m.finish}</td><td>${m.bl || "-"}</td>
-          <td class="num" style="color:${(m.var || 0) > 0 ? "var(--crit)" : ""}">${m.var === null ? "-" : (m.var > 0 ? "+" : "") + m.var}</td></tr>`).join("") || '<tr><td colspan="5" class="muted">마일스톤이 없습니다.</td></tr>'}</tbody></table></div></div></div>
+          <td class="num" style="color:${(m.var || 0) > 0 ? "var(--crit-text)" : ""}">${m.var === null ? "-" : (m.var > 0 ? "+" : "") + m.var}</td></tr>`).join("") || '<tr><td colspan="5" class="muted">마일스톤이 없습니다.</td></tr>'}</tbody></table></div></div></div>
     ${readinessPanel(s.readiness, uid)}
     <div class="panel"><h3 style="margin-top:0">팀 코멘트 <span class="muted" style="font-size:13px">@아이디로 동료를 부르면 알림이 갑니다</span></h3><div id="projComments"></div></div>`;
   el.querySelectorAll("[data-why]").forEach((b) => (b.onclick = () => {
@@ -275,6 +277,13 @@ tabOverview = async function (el, r, uid) {
   })));
   $("#kpiCfg").onclick = () => kpiConfig(uid, r);
 };
+function kTone(k) {
+  if (k.key === "neg") return k.value ? "tone-bad" : "tone-good";
+  if (k.key === "margin" && typeof k.value === "number") return k.value < 0 ? "tone-bad" : "tone-good";
+  if (!k.delta) return "";
+  const better = k.good === "up" ? k.delta > 0 : k.delta < 0;
+  return better ? "tone-good" : "tone-bad";
+}
 const KPI_LABEL = { finish: "예상 준공", margin: "목표 대비 여유", progress: "공정률", health: "건전성", spi: "SPI", neg: "음수 여유 작업" };
 async function kpiConfig(uid, r) {
   let cur = [...(prefs.kpis?.length ? prefs.kpis : Object.keys(KPI_LABEL))];
@@ -421,12 +430,27 @@ showList = async function () {
   const st = JSON.parse(store.get("pfView", '{"sort":"risk","lv":"all"}'));
   const favs = JSON.parse(store.get("favs", "[]"));
   const byName = {}; list.forEach((u) => (byName[u.name] ||= []).push(u));
-  view.innerHTML = `<div id="myTasks"></div><div id="inbox"></div>
-  <div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">포트폴리오 <span class="muted" id="pfCount"></span></h2>
+  const lvAll = pf.map((p) => p.level || projectLevel(p)); const cnt = (k) => lvAll.filter((x) => x === k).length;
+  const avgH = pf.length ? Math.round(pf.reduce((a, p) => a + (p.health || 0), 0) / pf.length) : "-";
+  const nextFin = pf.map((p) => p.finish).sort()[0];
+  view.innerHTML = `<div class="page-head"><div><h2>홈</h2><p>${me?.username ? `${esc(me.username)} 님, ` : ""}팀 프로젝트 ${pf.length}개의 현재 상황입니다.</p></div>
+    <div class="row"><button class="btn" onclick="showGenerate()" data-need="editor">${icon("sparkles", 15)} 새 공정표 만들기</button><button class="btn primary" onclick="$('#btnUpload').click()" data-need="editor">${icon("upload", 15)} 업데이트 올리기</button></div></div>
+  <div class="sum-band">
+    <div class="s"><div class="l">프로젝트 상태</div><div class="v">${pf.length}<small class="muted" style="font-size:13px;font-weight:500"> 개</small></div>
+      <div class="dist" role="img" aria-label="정상 ${cnt("ok")}, 주의 ${cnt("warn")}, 위험 ${cnt("bad")}">${["ok", "warn", "bad"].map((k) => `<i class="${k}" style="width:${pf.length ? (100 * cnt(k)) / pf.length : 0}%"></i>`).join("")}</div>
+      <div class="muted" style="font-size:12px;margin-top:6px">정상 ${cnt("ok")} · 주의 ${cnt("warn")} · 위험 ${cnt("bad")}</div></div>
+    <div class="s"><div class="l">평균 건전성</div><div class="v">${avgH}<small class="muted" style="font-size:13px;font-weight:500"> 점</small></div></div>
+    <div class="s"><div class="l">열린 리스크</div><div class="v">${pf.reduce((a, p) => a + (p.open_risks || 0), 0)}</div></div>
+    <div class="s"><div class="l">월간 점검 완료</div><div class="v">${pf.filter((p) => p.review?.completed_by).length}<small class="muted" style="font-size:13px;font-weight:500"> / ${pf.length}</small></div></div>
+    <div class="s"><div class="l">가장 빠른 준공</div><div class="v" style="font-size:20px">${nextFin || "-"}</div></div>
+  </div>
+  <div class="home-grid"><div>
+  <div class="row" style="justify-content:space-between;margin-bottom:12px"><h3 style="margin:0">포트폴리오 <span class="muted" id="pfCount"></span></h3>
     <div class="row"><label class="muted">정렬 <select class="s sm" id="pfSort">${[["risk", "위험 높은 순"], ["slip", "지연 큰 순"], ["recent", "최근 업데이트 순"], ["name", "이름 순"]].map(([k, l]) => `<option value="${k}" ${st.sort === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <div class="seg-tabs sm" role="group" aria-label="상태 필터">${[["all", "전체"], ["bad", "위험"], ["warn", "주의"], ["ok", "정상"]].map(([k, l]) => `<button class="${st.lv === k ? "on" : ""}" data-lv="${k}">${l}</button>`).join("")}</div>
-      <button class="btn" onclick="showGenerate()" data-need="editor">+ 새 공정표 만들기</button></div></div>
-  <div class="cards" id="pfCards"></div>
+      </div></div>
+  <div class="cards" id="pfCards"></div></div>
+  <aside><div id="myTasks"></div><div id="inbox"></div></aside></div>
   <div class="panel">
     <div class="row" style="justify-content:space-between;margin-bottom:10px">
       <h3 style="margin:0">팀 공정표 <span class="muted">(프로젝트 ${Object.keys(byName).length} · 업데이트 ${list.length})</span></h3>
@@ -454,19 +478,20 @@ showList = async function () {
       recent: (a, b) => (b.data_date + (b.created_at || "")).localeCompare(a.data_date + (a.created_at || "")), name: (a, b) => a.name.localeCompare(b.name) }[st.sort];
     xs.sort((a, b) => favs.includes(b.name) - favs.includes(a.name) || cmp(a, b));
     $("#pfCount").textContent = `(${xs.length}/${pf.length})`;
+    const LV = { ok: "정상", warn: "주의", bad: "위험" };
     $("#pfCards").innerHTML = xs.map((p) => `<div class="card lv-${p.lv} ${favs.includes(p.name) ? "fav" : ""}">
-      <a class="card-main" href="#/p/${p.id}/overview"><div class="row" style="justify-content:space-between"><b>${esc(p.name)}</b><span class="muted" style="font-size:12px">DD ${p.data_date}</span></div>
-      <div class="big">${p.finish}<span class="muted" style="font-size:12px"> 예상 준공</span></div>
-      <div class="chips">
-        <span class="chip ${p.margin === null ? "" : p.margin >= 0 ? "ok" : "bad"}">${p.margin === null ? "목표 준공 없음" : p.margin >= 0 ? `✓ 여유 ${p.margin}일` : `✕ 지연 ${-p.margin}일`}</span>
-        ${p.slip !== null ? `<span class="chip ${p.slip > 0 ? "bad" : "ok"}">${p.slip > 0 ? "▼" : "▲"} 전회 ${p.slip > 0 ? "+" : ""}${p.slip}일</span>` : ""}
-        <span class="chip ${sig(p.health, 75, 60)}">건전성 ${p.health ?? "-"}</span>
-        ${p.spi !== null ? `<span class="chip ${sig(p.spi, 0.95, 0.85)}">SPI ${p.spi}</span>` : ""}
-        ${p.open_risks ? `<span class="chip warn">리스크 ${p.open_risks}</span>` : ""}
-        ${p.negative_float ? `<span class="chip bad">음수여유 ${p.negative_float}</span>` : ""}
-        ${p.review?.completed_by ? `<span class="chip ok" title="${fmtAt(p.review.completed_at)}">✓ 점검 ${esc(p.review.completed_by)}</span>` : `<span class="chip">점검 ${p.review?.steps || 0}/6</span>`}
-      </div>
-      <div class="bar"><i style="width:${p.progress}%"></i></div><div class="muted" style="font-size:12px">공정률 ${p.progress}% · 업데이트 ${p.updates}회</div></a>
+      <a class="card-main" href="#/p/${p.id}/overview">
+        <div class="pc-head"><div><b>${favs.includes(p.name) ? "★ " : ""}${esc(p.name)}</b><div class="pc-sub">Data Date ${p.data_date} · 업데이트 ${p.updates}회</div></div><span class="status-badge ${p.lv}">${LV[p.lv]}</span></div>
+        <div class="pc-finish"><span class="d">${p.finish}</span><span class="l">예상 준공</span></div>
+        <div class="pc-stats">
+          <div><div class="l">목표 대비</div><div class="v ${p.margin === null ? "" : p.margin >= 0 ? "ok" : "bad"}">${p.margin === null ? "-" : (p.margin >= 0 ? "+" : "") + p.margin + "일"}</div></div>
+          <div><div class="l">건전성</div><div class="v ${sig(p.health, 75, 60)}">${p.health ?? "-"}</div></div>
+          <div><div class="l">SPI</div><div class="v ${p.spi === null ? "" : sig(p.spi, 0.95, 0.85)}">${p.spi ?? "-"}</div></div></div>
+        <div class="bar" title="공정률 ${p.progress}%"><i style="width:${p.progress}%"></i></div>
+        <div class="pc-foot"><span>공정률 ${p.progress}%</span>
+          ${p.slip !== null && p.slip !== 0 ? `<span class="${p.slip > 0 ? "bad" : "ok"}">전회 대비 ${p.slip > 0 ? "+" : ""}${p.slip}일</span>` : ""}
+          ${p.open_risks ? `<span>리스크 ${p.open_risks}</span>` : ""}${p.negative_float ? `<span class="bad">음수 여유 ${p.negative_float}</span>` : ""}
+          <span class="${p.review?.completed_by ? "ok" : ""}" title="${p.review?.completed_at ? fmtAt(p.review.completed_at) : ""}">${p.review?.completed_by ? `✓ 점검 ${esc(p.review.completed_by)}` : `점검 ${p.review?.steps || 0}/6`}</span></div></a>
       ${p.history?.length > 1 ? `<details class="card-hist"><summary>업데이트 이력 ${p.history.length}</summary>${p.history.map((h, i) => `<a href="#/p/${h.id}/overview" class="hist-row"><span>DD ${h.data_date}</span><span>${h.finish}</span>
         ${p.history[i + 1] ? `<span class="${h.finish > p.history[i + 1].finish ? "crit" : ""}">${h.finish > p.history[i + 1].finish ? "▼ 지연" : h.finish < p.history[i + 1].finish ? "▲ 단축" : "="}</span>` : "<span></span>"}</a>`).join("")}</details>` : ""}</div>`).join("")
       || '<p class="muted">조건에 맞는 프로젝트가 없습니다.</p>';

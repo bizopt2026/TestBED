@@ -64,7 +64,7 @@ async function fieldWeek(body, uid, la, thisWeek) {
     const ph = photos.filter((p) => p.ref === a.code);
     return `<div class="fcard ${a.longest ? "crit" : ""}">
       <div class="row" style="justify-content:space-between"><b>${esc(a.code)} ${esc(a.name)}</b>${a.longest ? '<span class="chip bad">▲ 주공정</span>' : `<span class="chip">여유 ${fmtDays(a.tf)}일</span>`}</div>
-      <div class="muted">${a.start} ~ ${a.finish}${a.constraints.length ? ` · <span style="color:var(--crit)">제약 ${a.constraints.length}건</span>` : ""}</div>
+      <div class="muted">${a.start} ~ ${a.finish}${a.constraints.length ? ` · <span style="color:var(--crit-text)">제약 ${a.constraints.length}건</span>` : ""}</div>
       ${c ? `<label class="big-chk"><input type="checkbox" data-done="${c.id}" ${c.done ? "checked" : ""}> ${c.done ? "완료" : "이번 주 완료하면 체크"} <span class="muted" style="font-size:13px">(${esc(c.company || "")})</span></label>
         ${c.done ? "" : `<select class="s" data-reason="${c.id}" style="width:100%;margin-top:6px"><option value="">못 했다면 사유 선택</option>${REASONS.map((x) => `<option ${c.reason === x ? "selected" : ""}>${x}</option>`).join("")}</select>`}`
         : `<div class="row" style="margin-top:8px"><input class="s" placeholder="협력업체" value="${esc(store.get("lastCompany"))}" data-co="${esc(a.code)}" style="flex:1"><button class="btn primary" data-commit="${esc(a.code)}" data-name="${esc(a.name)}">약속 등록</button></div>`}
@@ -116,7 +116,7 @@ function shrinkImage(file) {
 function fieldCons(body, uid, la) {
   const open = la.constraints.filter((c) => c.status !== "해결");
   body.innerHTML = `${open.map((c) => `<div class="fcard"><b>${esc(c.code)} · ${esc(c.type)}</b><div>${esc(c.desc)}</div>
-      <div class="muted">담당 ${esc(c.owner || "-")} · 기한 <span style="color:${c.due && c.due < la.data_date ? "var(--crit)" : ""}">${c.due || "-"}</span></div>
+      <div class="muted">담당 ${esc(c.owner || "-")} · 기한 <span style="color:${c.due && c.due < la.data_date ? "var(--crit-text)" : ""}">${c.due || "-"}</span></div>
       <div class="row" style="margin-top:8px">${["미해결", "진행", "해결"].map((s) => `<button class="btn ${c.status === s ? "primary" : ""}" data-cid="${c.id}" data-st="${s}">${s}</button>`).join("")}</div></div>`).join("")
     || '<div class="fcard muted">미해결 제약이 없습니다.</div>'}
     <div class="fcard"><h3 style="margin-top:0">제약 등록</h3>

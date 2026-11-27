@@ -109,6 +109,7 @@ async function route() {
     if (parts[0] === "wizard" && parts[1]) return await showWizard(parts[1]);
     if (parts[0] === "field" && parts[1]) return await showField(parts[1]);
     if (parts[0] === "print" && parts[1]) return await showPrint(parts[1]);
+    if (parts[0] === "design" && typeof showDesign === "function") return await showDesign();
     return await showList();
   } catch (err) {
     view.innerHTML = typeof errorPanel === "function" ? errorPanel(err) : `<div class="panel err">오류: ${esc(err.message)}</div>`;
@@ -485,7 +486,7 @@ function tabGantt(el, r) {
   };
 
   const byId = Object.fromEntries(r.activities.map((a) => [a.id, a]));
-  const RH = 26;
+  const RH = parseInt(cssv("--row")) || 26;
   let rows = [];
   let sel = null;
   let ppd = 1.2; // pixels per day
@@ -538,51 +539,74 @@ function tabGantt(el, r) {
     const X = (t) => ((t - t0) / dayMs) * ppd - sx;
     const trace = traceSet();
     // 눈금
-    h.font = "11px sans-serif"; h.fillStyle = cssv("--text"); g.strokeStyle = cssv("--line");
+    // 눈금: 위 줄 연·월, 아래 줄 주(월요일 날짜) — 주말 음영
+    const FONT = '11px "Pretendard", sans-serif', FONTB = '600 11px "Pretendard", sans-serif';
+    const cLine = cssv("--line"), cMuted = cssv("--muted"), cText = cssv("--text-2") || cssv("--text");
+    h.strokeStyle = cLine; h.beginPath(); h.moveTo(0, 22.5); h.lineTo(W, 22.5); h.moveTo(0, 43.5); h.lineTo(W, 43.5); h.stroke();
+    if (ppd >= 2) {  // 주말 음영
+      g.fillStyle = cssv("--soft");
+      for (let t = t0 + Math.max(0, Math.floor(sx / ppd) - 1) * dayMs; t < t1; t += dayMs) {
+        const x = X(t); if (x > W) break;
+        const dw = new Date(t).getDay(); if (dw === 0 || dw === 6) g.fillRect(x, 0, ppd, H);
+      }
+    }
     const months = monthTicks(t0, t1);
-    months.forEach((t) => {
-      const x = X(t); if (x < -200 || x > W + 10) return;
-      g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke();
-      h.strokeStyle = "#e3e6eb"; h.beginPath(); h.moveTo(x, 22); h.lineTo(x, 44); h.stroke();
+    const wide = ppd >= 3;   // 확대: 위 줄 '연.월', 아래 줄 주(월요일 날짜) / 축소: 위 줄 연도, 아래 줄 월
+    g.strokeStyle = cLine; g.lineWidth = 1;
+    months.forEach((t, i) => {
+      const x = Math.round(X(t)) + 0.5; if (x < -300 || x > W + 10) return;
       const d = new Date(t);
-      if (ppd >= 0.3 || d.getMonth() % 3 === 0) h.fillText(ppd >= 0.3 ? `${d.getMonth() + 1}월` : `${d.getFullYear()}.${d.getMonth() + 1}`, x + 3, 38);
-      if (d.getMonth() === 0 || t === months[0]) h.fillText(`${d.getFullYear()}년`, x + 3, 15);
+      g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke();
+      h.strokeStyle = cLine; h.beginPath(); h.moveTo(x, wide || d.getMonth() === 0 || i === 0 ? 0 : 22); h.lineTo(x, 44); h.stroke();
+      h.font = FONTB; h.fillStyle = cText;
+      if (wide) h.fillText(`${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}`, x + 5, 15);
+      else {
+        if (d.getMonth() === 0 || i === 0) h.fillText(`${d.getFullYear()}년`, x + 5, 15);
+        h.font = FONT; h.fillStyle = cMuted;
+        if (ppd * 30 >= 26 || d.getMonth() % 3 === 0) h.fillText(ppd * 30 >= 26 ? `${d.getMonth() + 1}월` : `${d.getMonth() + 1}`, x + 4, 37);
+      }
     });
-    if (ppd >= 2) {
+    h.font = FONT; h.fillStyle = cMuted;
+    if (wide) {
       for (let t = t0; t < t1; t += dayMs) {
         const d = new Date(t); if (d.getDay() !== 1) continue;
-        const x = X(t); if (x < 0 || x > W) continue;
-        h.fillStyle = "#9ca3af"; h.fillText(d.getDate(), x + 2, 28); h.fillStyle = "#374151";
+        const x = X(t); if (x < -20 || x > W) continue;
+        h.strokeStyle = cLine; h.beginPath(); h.moveTo(Math.round(x) + 0.5, 22); h.lineTo(Math.round(x) + 0.5, 44); h.stroke();
+        h.fillText(String(d.getDate()), x + 3, 37);
       }
     }
     // 행 배경 (WBS)
     for (let i = first; i < last; i++) {
       const a = rows[i]; const y = i * RH - sy;
-      if (!a.id) { g.fillStyle = cssv("--soft"); g.fillRect(0, y, W, RH); continue; }
+      if (!a.id) { g.fillStyle = cssv("--head"); g.fillRect(0, y, W, RH); g.fillStyle = cLine; g.fillRect(0, y + RH - 1, W, 1); continue; }
       if (trace.has(a.id) && sel !== a.id) { g.fillStyle = "rgba(253,230,138,.55)"; g.fillRect(0, y, W, RH); }
       if (sel === a.id) { g.fillStyle = cssv("--sel"); g.fillRect(0, y, W, RH); }
       const blS = blMap ? blMap[a.code]?.s : a.bl_start, blF = blMap ? blMap[a.code]?.f : a.bl_finish;
       const bl = $("#fBl").checked && blS && blF;
       const s = toT(a.start), f = toT(a.finish) + dayMs;
-      const color = a.status_code === "TK_Complete" ? "#9ca3af" : a.critical || a.longest ? "#dc2626" : "#3b82f6";
-      const by = y + (bl ? 5 : 7), bh = bl ? 10 : 12;
+      const color = a.status_code === "TK_Complete" ? cssv("--done") : a.critical || a.longest ? cssv("--crit") : cssv("--bar");
+      const bh = Math.round(RH * (bl ? 0.38 : 0.46)), by = y + Math.round((RH - bh) / 2) - (bl ? 3 : 0);
       if (a.milestone) {
         const x = X(a.milestone && a.type === "TT_FinMile" ? f : s);
         g.fillStyle = color; g.beginPath(); g.moveTo(x, by - 1); g.lineTo(x + 6, by + bh / 2); g.lineTo(x, by + bh + 1); g.lineTo(x - 6, by + bh / 2); g.fill();
       } else {
         const x = X(s), w = Math.max(2, X(f) - x);
-        g.fillStyle = color; g.fillRect(x, by, w, bh);
-        if (a.status_code === "TK_Active" && a.pct > 0) { g.fillStyle = "rgba(0,0,0,.25)"; g.fillRect(x, by + bh - 3, w * Math.min(a.pct, 100) / 100, 3); }
-        if (a.tf > 0 && a.status_code !== "TK_Complete") {
-          const lf = X(toT(a.late_finish) + dayMs); g.strokeStyle = "#9ca3af"; g.beginPath(); g.moveTo(x + w, by + bh / 2); g.lineTo(lf, by + bh / 2); g.stroke();
+        if (a.tf > 0 && a.status_code !== "TK_Complete") {  // 여유(TF): 막대 끝에서 Late Finish까지 가는 선
+          const lf = X(toT(a.late_finish) + dayMs); g.strokeStyle = cssv("--faint") || "#98a2b3"; g.setLineDash([2, 3]); g.beginPath(); g.moveTo(x + w, by + bh / 2); g.lineTo(lf, by + bh / 2); g.stroke(); g.setLineDash([]);
         }
+        const rr = Math.min(4, bh / 2, w / 2);
+        const rpath = (px, pw) => { g.beginPath(); g.roundRect ? g.roundRect(px, by, pw, bh, rr) : g.rect(px, by, pw, bh); };
+        if (a.status_code === "TK_Active" && a.pct > 0) {  // 진행 중: 완료분은 진하게, 남은 부분은 옅게
+          g.globalAlpha = 0.35; g.fillStyle = color; rpath(x, w); g.fill(); g.globalAlpha = 1;
+          g.save(); rpath(x, w); g.clip(); g.fillStyle = color; g.fillRect(x, by, w * Math.min(a.pct, 100) / 100, bh); g.restore();
+        } else { g.fillStyle = color; rpath(x, w); g.fill(); }
       }
       if (cmpMap && cmpMap[a.code]) {
         const c = cmpMap[a.code], cx = X(toT(c.s)), cw = Math.max(2, X(toT(c.f) + dayMs) - cx);
         g.save(); g.setLineDash([4, 3]); g.strokeStyle = "#7c3aed"; g.lineWidth = 1.5; g.strokeRect(cx, y + 3, cw, RH - 6); g.restore();
       }
-      if (bl) { g.fillStyle = "#f59e0b"; const x = X(toT(blS)); g.fillRect(x, y + 18, Math.max(2, X(toT(blF) + dayMs) - x), 4); }
-      if (ppd >= 1) { g.fillStyle = cssv("--text"); g.font = "11px sans-serif"; g.fillText(a.name, X(f) + 8, y + 17); }
+      if (bl) { g.fillStyle = cssv("--bl"); const x = X(toT(blS)); g.beginPath(); g.roundRect ? g.roundRect(x, by + bh + 2, Math.max(2, X(toT(blF) + dayMs) - x), 3, 1.5) : g.rect(x, by + bh + 2, Math.max(2, X(toT(blF) + dayMs) - x), 3); g.fill(); }
+      if (ppd >= 1) { g.fillStyle = cText; g.font = FONT; g.fillText(a.name, X(f) + 8, y + RH / 2 + 4); }
     }
     // 관계선 (선택 작업, 또는 최장경로 전체)
     const idx = Object.fromEntries(rows.map((a, i) => [a.id, i]));
@@ -596,7 +620,7 @@ function tabGantt(el, r) {
         if (idx[p.id] === undefined || idx[s.id] === undefined) return;
         const x1 = X(toT(type[0] === "S" ? p.start : p.finish) + (type[0] === "S" ? 0 : dayMs));
         const x2 = X(toT(type[1] === "S" ? s.start : s.finish) + (type[1] === "S" ? 0 : dayMs));
-        const y1 = idx[p.id] * RH - sy + 13, y2 = idx[s.id] * RH - sy + 13;
+        const y1 = idx[p.id] * RH - sy + RH / 2, y2 = idx[s.id] * RH - sy + RH / 2;
         g.strokeStyle = color; g.lineWidth = 1; g.beginPath(); g.moveTo(x1, y1);
         g.lineTo(x1 + 5, y1); g.lineTo(x1 + 5, y2); g.lineTo(x2, y2); g.stroke();
         g.beginPath(); g.moveTo(x2, y2); g.lineTo(x2 - 4, y2 - 3); g.lineTo(x2 - 4, y2 + 3); g.fillStyle = color; g.fill();
@@ -610,7 +634,7 @@ function tabGantt(el, r) {
         if (idx[p.id] === undefined || idx[s.id] === undefined) return;
         const x1 = X(toT(type[0] === "S" ? p.start : p.finish) + (type[0] === "S" ? 0 : dayMs));
         const x2 = X(toT(type[1] === "S" ? s.start : s.finish) + (type[1] === "S" ? 0 : dayMs));
-        const y1 = idx[p.id] * RH - sy + 13, y2 = idx[s.id] * RH - sy + 13;
+        const y1 = idx[p.id] * RH - sy + RH / 2, y2 = idx[s.id] * RH - sy + RH / 2;
         g.strokeStyle = "#111827"; g.lineWidth = 1; g.beginPath(); g.moveTo(x1, y1);
         g.lineTo(x1 + 5, y1); g.lineTo(x1 + 5, y2); g.lineTo(x2, y2); g.stroke();
         g.beginPath(); g.moveTo(x2, y2); g.lineTo(x2 - 4, y2 - 3); g.lineTo(x2 - 4, y2 + 3); g.fillStyle = "#111827"; g.fill();
@@ -623,7 +647,7 @@ function tabGantt(el, r) {
     g.beginPath(); g.moveTo(xd, 0); g.lineTo(xd, H); g.stroke(); g.setLineDash([]); g.lineWidth = 1;
     const xt = X(toT(new Date().toISOString().slice(0, 10)));
     if (xt > 0 && xt < W) { g.strokeStyle = "#ea580c"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(xt, 0); g.lineTo(xt, H); g.stroke(); g.lineWidth = 1;
-      h.fillStyle = "#ea580c"; h.fillText("오늘", xt + 3, 28); }
+      h.fillStyle = "#ea580c"; h.font = FONTB; h.fillText("오늘", xt + 3, 15); }
   }
   // 경로 추적: 선택 작업에서 선행·후행 방향으로 끝까지
   let traceCache = { sel: null, set: new Set() };
@@ -775,7 +799,7 @@ async function showCompare(a, b) {
       <th class="num">Δ종료</th><th class="num">TF 기준→비교</th><th class="num">Δ원공기</th></tr></thead><tbody>
       ${c.changed.map((x) => `<tr><td>${esc(x.code)}</td><td class="wrap">${esc(x.name)}${x.critical ? ' <span class="tag crit">주공정</span>' : ""}</td>
         <td>${x.status_before}→${x.status_after}</td><td>${x.finish_before}</td><td>${x.finish_after}</td>
-        <td class="num" style="color:${x.d_finish > 0 ? "var(--crit)" : x.d_finish < 0 ? "var(--ok)" : ""}">${x.d_finish > 0 ? "+" : ""}${x.d_finish}</td>
+        <td class="num" style="color:${x.d_finish > 0 ? "var(--crit-text)" : x.d_finish < 0 ? "var(--ok)" : ""}">${x.d_finish > 0 ? "+" : ""}${x.d_finish}</td>
         <td class="num">${fmtDays(x.tf_before)} → ${fmtDays(x.tf_after)}</td><td class="num">${x.d_dur || ""}</td></tr>`).join("")}
       </tbody></table></div></div>
     <div class="panel"><h3 style="margin-top:0">추가된 액티비티 (${c.added.length})</h3>${simpleList(c.added)}</div>
@@ -926,7 +950,7 @@ async function tabDelay(el, r, uid) {
       <div class="panel"><h3 style="margin-top:0">지연 기여 작업 (큰 순)</h3>
       <table class="t"><thead><tr><th>ID</th><th>작업</th><th class="num">종료 순연</th><th class="num">선행에서 전달</th><th class="num">새로 발생</th><th>추정 원인</th></tr></thead><tbody>
       ${d.top.map((x) => `<tr><td>${esc(x.code)}</td><td class="wrap">${esc(x.name)}</td><td class="num">${x.slip}</td><td class="num">${x.inherited ?? "-"}</td>
-        <td class="num" style="color:${x.introduced > 0 ? "var(--crit)" : "var(--ok)"}">${x.introduced > 0 ? "+" : ""}${x.introduced}</td><td class="wrap">${esc(x.note)}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">기여 작업 없음</td></tr>`}
+        <td class="num" style="color:${x.introduced > 0 ? "var(--crit-text)" : "var(--ok)"}">${x.introduced > 0 ? "+" : ""}${x.introduced}</td><td class="wrap">${esc(x.note)}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">기여 작업 없음</td></tr>`}
       </tbody></table></div>
       <div class="panel"><h3 style="margin-top:0">최장 경로 추적</h3>${pathTable(d.path)}</div>`;
   };
@@ -1098,7 +1122,7 @@ async function tabBench(el, r, uid) {
     <p class="muted">팀이 올린 모든 프로젝트(${b.sample_projects}개)의 완료 작업에서 <b>실적 작업일 ÷ 계획 원공기</b> 비율을 공종별로 집계합니다. 1.2는 계획보다 20% 더 걸렸다는 뜻입니다. 업로드가 쌓일수록 정확해집니다.</p>
     <table class="t"><thead><tr><th>공종</th><th class="num">작업 수</th><th class="num">원공기 합</th><th class="num">잔여 합</th><th class="num">실적 표본</th><th class="num">실적 비율(중앙)</th><th class="num">P80</th></tr></thead><tbody>
     ${b.trades.map((x) => `<tr><td><b>${esc(x.trade)}</b></td><td class="num">${x.count}</td><td class="num">${x.orig_days}</td><td class="num">${x.rem_days}</td><td class="num">${x.hist_n}</td>
-      <td class="num" style="color:${x.hist_median > 1.1 ? "var(--crit)" : ""}">${x.hist_median ?? "-"}</td><td class="num">${x.hist_p80 ?? "-"}</td></tr>`).join("")}</tbody></table></div>
+      <td class="num" style="color:${x.hist_median > 1.1 ? "var(--crit-text)" : ""}">${x.hist_median ?? "-"}</td><td class="num">${x.hist_p80 ?? "-"}</td></tr>`).join("")}</tbody></table></div>
     <div class="panel"><h3 style="margin-top:0">과소 계획 의심 작업</h3>
     ${b.flags.length ? `<table class="t"><thead><tr><th>ID</th><th>작업</th><th>공종</th><th class="num">계획 잔여</th><th class="num">실적 기준 예상</th><th class="num">TF</th></tr></thead><tbody>
       ${b.flags.map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}${x.longest ? ' <span class="tag crit">주공정</span>' : ""}</td><td>${esc(x.trade)}</td><td class="num">${x.planned}</td><td class="num">${x.expected}</td><td class="num">${fmtDays(x.tf)}</td></tr>`).join("")}</tbody></table>`
@@ -1198,7 +1222,7 @@ async function tabForensic(el, r, uid) {
       ${legend([["#dc2626", "예상 준공 변동(누적, 일)"], ["#2563eb", "건전성 점수"], ["#16a34a", "공정률 %"]])}
       <canvas id="trendCv" style="width:100%;height:240px"></canvas>
       <table class="t"><thead><tr><th>Data Date</th><th>예상 준공</th><th class="num">변동</th><th class="num">공정률</th><th class="num">최장경로</th><th class="num">음수여유</th><th class="num">건전성</th><th class="num">DCMA</th></tr></thead><tbody>
-      ${tr.map((x) => `<tr><td><a href="#/p/${x.id}/forensic">${x.data_date}</a></td><td>${x.finish}</td><td class="num" style="color:${x.finish_change > 0 ? "var(--crit)" : ""}">${signed(x.finish_change)}</td>
+      ${tr.map((x) => `<tr><td><a href="#/p/${x.id}/forensic">${x.data_date}</a></td><td>${x.finish}</td><td class="num" style="color:${x.finish_change > 0 ? "var(--crit-text)" : ""}">${signed(x.finish_change)}</td>
         <td class="num">${x.progress}%</td><td class="num">${x.longest}</td><td class="num">${x.negative_float}</td><td class="num">${x.health ?? "-"}</td><td class="num">${x.dcma_pass}/14</td></tr>`).join("")}</tbody></table></div>`;
     if (!f.available) html += `<div class="panel empty">${esc(f.message)}</div>`;
     else {
@@ -1206,7 +1230,7 @@ async function tabForensic(el, r, uid) {
       html += `<div class="panel ${c.suspected ? "warn" : ""}"><h3 style="margin-top:0">공기 압축(Compression) 탐지 ${c.suspected ? '<span class="tag fail">의심</span>' : '<span class="tag ok">특이 없음</span>'}</h3>
         <p class="muted">${esc(c.note)} 최장경로 단축 합계 <b>${c.longest_path_cut_days}일</b>, 준공 변동 ${signed(c.finish_slip)}일.</p>
         ${c.items.length ? `<table class="t"><thead><tr><th>ID</th><th>작업</th><th class="num">잔여(전)</th><th class="num">예상 잔여</th><th class="num">잔여(후)</th><th class="num">진척 없는 단축</th><th>공정률</th></tr></thead><tbody>
-        ${c.items.map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}${x.longest ? ' <span class="tag crit">주공정</span>' : ""}</td><td class="num">${x.rem_before}</td><td class="num">${x.expected}</td><td class="num">${x.rem_after}</td><td class="num" style="color:var(--crit)">-${x.cut}</td><td>${x.pct_before}% → ${x.pct_after}%</td></tr>`).join("")}</tbody></table>` : ""}</div>
+        ${c.items.map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}${x.longest ? ' <span class="tag crit">주공정</span>' : ""}</td><td class="num">${x.rem_before}</td><td class="num">${x.expected}</td><td class="num">${x.rem_after}</td><td class="num" style="color:var(--crit-text)">-${x.cut}</td><td>${x.pct_before}% → ${x.pct_after}%</td></tr>`).join("")}</tbody></table>` : ""}</div>
         <div class="panel"><h3 style="margin-top:0">변경 로그 (${f.changes.items.length}건)</h3>
         <div class="chips">${Object.entries(f.changes.counts).map(([k, v]) => `<span class="chip filter" data-cat="${esc(k)}">${esc(k)} ${v}</span>`).join("")}<span class="chip filter on" data-cat="">전체</span></div>
         <div class="scroll"><table class="t" id="chgTable"><thead><tr><th>구분</th><th>ID</th><th>대상</th><th>변경 전</th><th>변경 후</th><th>비고</th></tr></thead><tbody>
@@ -1334,7 +1358,7 @@ async function tabPredict(el, r, uid) {
       ${md_.trained ? `<p>업데이트 이력 표본 <b>${md_.samples}</b>개로 학습했습니다. 검증 오차(MAE) <b>${md_.mae_days}일</b>, 설명력 R² <b>${md_.r2}</b>.</p>
         <p class="muted">영향 큰 요인: ${md_.importance.slice(0, 5).map((x) => `${x.feature}(${x.weight > 0 ? "+" : ""}${x.weight})`).join(", ")}</p>
         <table class="t"><thead><tr><th>ID</th><th>작업</th><th class="num">다음 업데이트 예상 순연(일)</th><th class="num">TF</th></tr></thead><tbody>
-        ${pr.items.slice(0, 20).map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}${x.longest ? ' <span class="tag crit">주공정</span>' : ""}</td><td class="num" style="color:${x.predicted_slip > 3 ? "var(--crit)" : ""}">${x.predicted_slip}</td><td class="num">${fmtDays(x.tf)}</td></tr>`).join("")}</tbody></table>`
+        ${pr.items.slice(0, 20).map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}${x.longest ? ' <span class="tag crit">주공정</span>' : ""}</td><td class="num" style="color:${x.predicted_slip > 3 ? "var(--crit-text)" : ""}">${x.predicted_slip}</td><td class="num">${fmtDays(x.tf)}</td></tr>`).join("")}</tbody></table>`
       : `<p>${esc(md_.message)}</p><p class="muted">그동안은 아래의 설명 가능한 규칙 기반 위험 점수를 사용하세요.</p>`}</div>
     <div class="panel"><h3 style="margin-top:0">지연 위험 점수</h3><p class="muted">${esc(rk.note)} (누적 업데이트 ${rk.history_updates}회)</p>
     <div class="scroll"><table class="t"><thead><tr><th>ID</th><th>작업</th><th>공종</th><th>상태</th><th>종료</th><th class="num">TF</th><th class="num">위험</th><th>사유</th></tr></thead><tbody>
@@ -1390,7 +1414,7 @@ async function tabEvm(el, r, uid) {
       <div class="panel"><h3 style="margin-top:0">비용 S-Curve</h3>${legend([["#f59e0b", "PV (계획)"], ["#3b82f6", "현재 일정 예측"], ["#16a34a", "EV (업데이트별)"], ["#dc2626", "AC (업데이트별)"]])}
       <canvas id="evCv" style="width:100%;height:280px"></canvas></div>
       ${e.worst_cv.length ? `<div class="panel"><h3 style="margin-top:0">원가 초과 작업 (CV 작은 순)</h3><table class="t"><thead><tr><th>ID</th><th>작업</th><th class="num">BAC</th><th class="num">EV</th><th class="num">AC</th><th class="num">CV</th></tr></thead><tbody>
-        ${e.worst_cv.map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}</td><td class="num">${won(x.bac)}</td><td class="num">${won(x.ev)}</td><td class="num">${won(x.ac)}</td><td class="num" style="color:${x.cv < 0 ? "var(--crit)" : ""}">${won(x.cv)}</td></tr>`).join("")}</tbody></table></div>` : ""}`;
+        ${e.worst_cv.map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}</td><td class="num">${won(x.bac)}</td><td class="num">${won(x.ev)}</td><td class="num">${won(x.ac)}</td><td class="num" style="color:${x.cv < 0 ? "var(--crit-text)" : ""}">${won(x.cv)}</td></tr>`).join("")}</tbody></table></div>` : ""}`;
     if (e.available) {
       const labels = e.curve.map((c) => c.date);
       const hist = Object.fromEntries((e.history || []).map((h) => [h.date, h]));
@@ -1403,7 +1427,7 @@ async function tabEvm(el, r, uid) {
       <div class="kpis">${kpi("베이스라인 준공", v.bl_project_finish || "-")}${kpi("현재 예상 준공", v.project_finish)}${kpi("준공 편차", v.project_var === null ? "-" : signed(v.project_var) + "일", v.project_var > 0 ? "crit" : "")}${kpi("지연 작업 수", v.late_count)}</div>
       <div class="scroll"><table class="t"><thead><tr><th>ID</th><th>작업</th><th>상태</th><th>BL 시작</th><th>시작</th><th class="num">Δ</th><th>BL 종료</th><th>종료</th><th class="num">Δ</th></tr></thead><tbody>
       ${v.rows.slice(0, 300).map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name)}${x.longest ? ' <span class="tag crit">주공정</span>' : ""}</td><td>${esc(x.status)}</td><td>${x.bl_start || "-"}</td><td>${x.start}</td><td class="num">${x.start_var ?? "-"}</td><td>${x.bl_finish}</td><td>${x.finish}</td>
-        <td class="num" style="color:${x.finish_var > 0 ? "var(--crit)" : x.finish_var < 0 ? "var(--ok)" : ""}">${signed(x.finish_var)}</td></tr>`).join("")}</tbody></table></div></div>`;
+        <td class="num" style="color:${x.finish_var > 0 ? "var(--crit-text)" : x.finish_var < 0 ? "var(--ok)" : ""}">${signed(x.finish_var)}</td></tr>`).join("")}</tbody></table></div></div>`;
   };
   $("#blSel").onchange = draw; draw();
 }
@@ -1444,7 +1468,7 @@ async function tabKorea(el, r, uid) {
       <div class="row end"><button class="btn primary" id="kSave" data-need="editor">저장 후 재검토</button></div>
       <table class="t"><thead><tr><th>월</th><th class="num">일수</th><th class="num">주말·공휴일</th><th class="num">기상</th><th class="num">필요 비작업일</th><th class="num">캘린더 비작업일</th><th class="num">부족</th></tr></thead><tbody>
       ${k.review.months.map((m) => `<tr><td>${m.month}</td><td class="num">${m.days}</td><td class="num">${m.holidays_weekends}</td><td class="num">${m.weather}</td><td class="num">${m.required_nonwork}</td><td class="num">${m.calendar_nonwork}</td>
-        <td class="num" style="color:${m.shortage > 0 ? "var(--crit)" : ""}">${m.shortage || ""}</td></tr>`).join("")}</tbody></table>
+        <td class="num" style="color:${m.shortage > 0 ? "var(--crit-text)" : ""}">${m.shortage || ""}</td></tr>`).join("")}</tbody></table>
       <p><b>부족 비작업일 합계: ${k.review.total_shortage_days}일</b> <span class="muted">${esc(k.review.note)}</span></p></div>`;
   const ch = (id) => [{ op: "add_holidays", clndr_ids: [id], dates: k.calendars.find((c) => c.clndr_id === id).missing.map((m) => m.date) }];
   el.querySelectorAll("[data-fix]").forEach((b) => (b.onclick = () => downloadPost(`/api/uploads/${uid}/xer_patch`, { changes: ch(b.dataset.fix) }, "holidays.xer")));
@@ -1479,7 +1503,7 @@ async function tabLookahead(el, r, uid) {
       <table class="t" style="margin-top:10px"><tbody>${p.companies.map((c) => `<tr><td>${esc(c.company)}</td><td class="num">${c.done}/${c.planned}</td><td class="num">${c.ppc}%</td></tr>`).join("")}</tbody></table></div></div>
     <div class="panel"><h3 style="margin-top:0">제약 로그</h3><table class="t"><thead><tr><th>ID</th><th>유형</th><th>내용</th><th>담당</th><th>해소 기한</th><th>상태</th><th></th></tr></thead><tbody>
       ${la.constraints.map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.type)}</td><td class="wrap">${esc(x.desc)}</td><td>${esc(x.owner || "")}</td>
-        <td style="color:${x.status !== "해결" && x.due && x.due < la.data_date ? "var(--crit)" : ""}">${x.due || ""}</td>
+        <td style="color:${x.status !== "해결" && x.due && x.due < la.data_date ? "var(--crit-text)" : ""}">${x.due || ""}</td>
         <td><select class="s sm" data-cst="${x.id}">${["미해결", "진행", "해결"].map((s) => `<option ${x.status === s ? "selected" : ""}>${s}</option>`).join("")}</select></td>
         <td><button class="btn sm danger" data-cdel="${x.id}">삭제</button></td></tr>`).join("") || '<tr><td colspan="7" class="muted">등록된 제약이 없습니다.</td></tr>'}</tbody></table></div>`;
   const save = (kind, body) => api(`/api/uploads/${uid}/records/${kind}`, { method: "POST", json: body });

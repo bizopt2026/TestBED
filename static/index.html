@@ -4,18 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>공정관리 분석기</title>
+<link rel="preload" href="/static/fonts/PretendardVariable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/theme.css">
 </head>
 <body>
 <a class="skip" href="#view">본문으로 건너뛰기</a>
 <header class="top">
-  <h1 class="brand-h"><a class="brand" href="#/">▦ 공정관리 분석기</a></h1>
+  <button class="btn ghost icon side-toggle" id="btnSide" aria-label="메뉴 열기" aria-controls="side" aria-expanded="false"><svg class="ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
+  <h1 class="brand-h"><a class="brand" href="#/"><span class="logo" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 6h9M8 12h10M6 18h8"/></svg></span>공정관리 분석기</a></h1>
   <span class="crumb" id="crumb"></span>
   <span class="spacer"></span>
   <span id="userBox" class="userbox"></span>
   <button class="btn primary" id="btnUpload" data-need="editor">파일 업로드</button>
 </header>
-<main id="view" tabindex="-1"></main>
+<div class="shell"><nav class="side" id="side" aria-label="주 메뉴"></nav>
+<main id="view" tabindex="-1"></main></div>
 
 <dialog id="dlgUpload">
   <form method="dialog" id="formUpload">
@@ -50,5 +54,6 @@
 <script src="/static/app2.js"></script>
 <script src="/static/app3.js"></script>
 <script src="/static/app4.js"></script>
+<script src="/static/app5.js"></script>
 </body>
 </html>

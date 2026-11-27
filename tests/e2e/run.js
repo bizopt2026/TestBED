@@ -64,6 +64,25 @@ async function a11y(page, label) {
   axeFindings.push(...r.map((v) => `${label}: [${v.impact}] ${v.id} ×${v.n} - ${v.help} (${v.target})`));
   assert(!serious.length, `${label} 접근성 심각 위반 ${serious.length}건: ${serious.map((v) => `${v.id}(${v.target})`).join(", ")}`);
 }
+// 기준 이미지 비교(시각 회귀): 기준이 없거나 E2E_UPDATE_BASELINE=1 이면 새로 저장
+const { PNG } = require("pngjs");
+const pixelmatch = require("pixelmatch");
+const BASE_DIR = path.join(__dirname, "baseline");
+async function visual(page, name, mask = []) {
+  await page.evaluate(() => document.fonts.ready);
+  await page.waitForTimeout(300);
+  const buf = await page.screenshot({ animations: "disabled", caret: "hide", mask: mask.map((m) => page.locator(m)) });
+  const file = path.join(BASE_DIR, name + ".png");
+  fs.mkdirSync(BASE_DIR, { recursive: true });
+  if (!fs.existsSync(file) || process.env.E2E_UPDATE_BASELINE === "1") { fs.writeFileSync(file, buf); results.push(`  · 기준 이미지 저장: ${name}`); return; }
+  const a = PNG.sync.read(fs.readFileSync(file)), b = PNG.sync.read(buf);
+  assert(a.width === b.width && a.height === b.height, `${name} 크기가 기준과 다름`);
+  const diff = new PNG({ width: a.width, height: a.height });
+  const n = pixelmatch(a.data, b.data, diff.data, a.width, a.height, { threshold: 0.15 });
+  const ratio = n / (a.width * a.height);
+  if (ratio > 0.01) { fs.writeFileSync(path.join(OUT, name + "-diff.png"), PNG.sync.write(diff)); fs.writeFileSync(path.join(OUT, name + "-now.png"), buf); }
+  assert(ratio <= 0.01, `${name} 화면이 기준 이미지와 ${(ratio * 100).toFixed(2)}% 다름 (out/${name}-diff.png)`);
+}
 const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png"), fullPage: false });
 
 (async () => {
@@ -72,7 +91,19 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
   let uid;
   try {
     const alice = await login(browser, "alice");
-    await step("빈 홈 화면", async () => { await alice.waitForSelector(".panel.empty"); await a11y(alice, "빈 홈"); });
+    await step("디자인 가이드 화면 + 기준 이미지 비교", async () => {
+      await alice.goto(`${BASE}/#/design`); await alice.waitForSelector(".dg-swatches");
+      await a11y(alice, "디자인 가이드");
+      await visual(alice, "design", ["#userBox", "#helpFab"]);
+    });
+    await step("로그인 화면 기준 이미지", async () => {
+      const ctx2 = await browser.newContext({ viewport: { width: 1400, height: 900 }, locale: "ko-KR" });
+      const p = await ctx2.newPage(); await p.goto(BASE + "/"); await p.waitForSelector("#fLogin [name=username]");
+      await a11y(p, "로그인");
+      await visual(p, "login");
+      await ctx2.close();
+    });
+    await step("빈 홈 화면", async () => { await alice.goto(`${BASE}/#/`); await alice.waitForSelector(".panel.empty"); await a11y(alice, "빈 홈"); });
     await step("업로드 → 상황판", async () => {
       await alice.click("#btnUpload");
       await alice.setInputFiles("#formUpload [name=file]", path.join(ROOT, "samples", "sample_project.xer"));
@@ -147,9 +178,13 @@ const shot = (page, name) => page.screenshot({ path: path.join(OUT, name + ".png
       await alice.waitForSelector("#gc");
       assert(alice.url().endsWith("/gantt"), "g g 단축키로 공정표 이동 안 됨");
       assert(await alice.evaluate(() => document.querySelector("#phead").dataset.mark) === "same", "탭 전환 때 머리글을 다시 그림");
-      await alice.click('.groups a:has-text("품질·진단")'); await alice.waitForSelector("#btnMoreTabs");
-      await alice.click("#btnMoreTabs"); await alice.waitForSelector("#moreTabs:not([hidden])");
-      await alice.click('#moreTabs a:has-text("국내 기준")'); await alice.waitForURL(/\/korea$/);
+      await alice.click('#side a:has-text("건전성·DCMA")'); await alice.waitForURL(/\/health$/);
+      assert(await alice.evaluate(() => document.querySelector("#phead").dataset.mark) === "same", "사이드바 이동 때 머리글을 다시 그림");
+      const more = alice.locator("#side details", { has: alice.locator('a:has-text("국내 기준")') });
+      await more.locator("summary").click();
+      await more.locator('a:has-text("국내 기준")').click(); await alice.waitForURL(/\/korea$/);
+      await alice.click("#sideMini"); assert(await alice.evaluate(() => document.body.classList.contains("side-mini")), "사이드바 접기 안 됨");
+      await alice.click("#sideMini");
     });
     await step("공정표 비교 겹쳐보기", async () => {
       const up2 = await alice.evaluate(async () => {

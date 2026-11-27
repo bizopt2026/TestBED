@@ -36,7 +36,7 @@ tabOverview = async function (el, r, uid) {
       <div class="panel"><h3 style="margin-top:0">마일스톤</h3>
         <table class="t" data-noexport><thead><tr><th>ID</th><th>마일스톤</th><th>예정</th><th>계획</th><th class="num">편차</th></tr></thead><tbody>
         ${s.milestones.map((m) => `<tr><td>${esc(m.code)}</td><td>${m.done ? "✓ " : ""}${esc(m.name)}</td><td>${m.finish}</td><td>${m.bl || "-"}</td>
-          <td class="num" style="color:${(m.var || 0) > 0 ? "var(--crit)" : ""}">${m.var === null ? "-" : (m.var > 0 ? "+" : "") + m.var}</td></tr>`).join("") || '<tr><td colspan="5" class="muted">마일스톤이 없습니다.</td></tr>'}</tbody></table></div></div>
+          <td class="num" style="color:${(m.var || 0) > 0 ? "var(--crit-text)" : ""}">${m.var === null ? "-" : (m.var > 0 ? "+" : "") + m.var}</td></tr>`).join("") || '<tr><td colspan="5" class="muted">마일스톤이 없습니다.</td></tr>'}</tbody></table></div></div>
     ${readinessPanel(s.readiness, uid)}`;
 };
 

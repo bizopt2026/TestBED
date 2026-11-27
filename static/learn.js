@@ -43,10 +43,10 @@ const COURSES = [
       { type: "text", html: `<p>교육용 샘플 프로젝트를 열어 화면 구조를 익힙니다. 샘플은 3월·4월 두 번의 업데이트가 들어 있습니다.</p>` },
       { type: "tour", tab: "overview", steps: [
         { sel: "#upSel", title: "업데이트 전환", body: "같은 프로젝트의 다른 업데이트(Data Date)로 바로 이동합니다. 최신이 아니면 '! 최신 아님'이 표시됩니다." },
-        { sel: ".groups", title: "4개 업무 그룹", body: "현황 · 품질·진단 · 리스크·대응 · 현장·보고. 그룹을 누르면 아래에 세부 화면이 나옵니다." },
-        { sel: "#btnAi", title: "AI 어시스턴트", body: "어느 화면에서든 열 수 있습니다(Alt+A). 지금 보고 있는 화면을 함께 전달해 맥락에 맞게 답합니다." },
+        { sel: "#side, .groups", title: "왼쪽 메뉴: 4개 업무 그룹", body: "현황 · 품질·진단 · 리스크·대응 · 현장·보고. 왼쪽 메뉴(휴대폰은 아래 탭)에서 그룹과 화면을 고릅니다. 그룹을 누르면 아래에 세부 화면이 나옵니다." },
+        { sel: "#btnAi2, #btnAi", title: "AI 어시스턴트", body: "어느 화면에서든 열 수 있습니다(Alt+A). 지금 보고 있는 화면을 함께 전달해 맥락에 맞게 답합니다." },
         { sel: "#btnProj", title: "프로젝트 빠른 전환", body: "프로젝트 이름을 누르면 최근 본·관심 프로젝트와 검색이 나와 홈을 거치지 않고 옮겨 갑니다." },
-        { sel: "#tnav", title: "자주 쓰는 화면 + 더보기", body: "그룹마다 자주 쓰는 화면만 탭으로 보이고, 나머지는 '더보기'에 있습니다. 많이 쓰는 화면은 자동으로 탭에 올라옵니다. 단축키 g o(상황판), g g(공정표), g r(리스크)…" },
+        { sel: "#side details, #tnav", title: "자주 쓰는 화면 + 더보기", body: "그룹마다 자주 쓰는 화면만 메뉴에 보이고, 나머지는 '더보기'에 있습니다. 많이 쓰는 화면은 자동으로 탭에 올라옵니다. 단축키 g o(상황판), g g(공정표), g r(리스크)…" },
         { sel: "#btnView", title: "보기 설정", body: "비교 기준(어느 업데이트와 비교할지), 계산 방식, 내 권한을 확인·변경합니다. 비교 기준은 상황판·업데이트 분석·리포트에 함께 적용됩니다." },
         { sel: "#btnWork", title: "작업 메뉴", body: "월간 점검, 보고서 센터, 현장 모드, 이 화면 사용법, 재계산이 모여 있습니다." },
         { sel: "#tab", title: "ID를 누르면 상세", body: "모든 표에서 파란 Activity ID를 누르면 오른쪽에 상세(선후행·리스크·제약·변경 이력)가 열립니다. 표 오른쪽 위 '⭳ 엑셀'로 내보낼 수 있습니다." },
@@ -166,7 +166,7 @@ const COURSES = [
         <tr><td>단축 방법</td><td>A3030을 10일 줄이면 준공이 며칠 당겨져?</td></tr></tbody></table>
         <p>답변의 숫자는 엔진 계산값이지만, 문장·해석은 반드시 사람이 검토하세요.</p>` },
       { type: "tour", tab: "overview", steps: [
-        { sel: "#btnAi", title: "AI 패널 열기", body: "눌러서 열어 보세요. 예시 질문 버튼으로 바로 시작할 수 있습니다.", wait: "click" },
+        { sel: "#btnAi2, #btnAi", title: "AI 패널 열기", body: "눌러서 열어 보세요. 예시 질문 버튼으로 바로 시작할 수 있습니다.", wait: "click" },
       ] },
       { type: "quiz", q: "AI 어시스턴트가 할 수 없는 일은?", options: ["What-if 가정 계산 결과 설명", "원본 공정표(XER)를 직접 수정", "주공정 작업 조회"], answer: 1,
         explain: "AI 도구는 읽기 전용입니다. 원본 변경은 사람이 승인한 수정 XER로만 합니다." },
@@ -227,6 +227,7 @@ const COURSES = [
         <li><b>되돌리기</b>: 리스크·제약·약속·업로드를 지우면 화면 아래에 10초 동안 <b>되돌리기</b> 버튼이 나옵니다. 놓쳤다면 관리자가 휴지통(7일 보관)에서 복원할 수 있습니다.</li>
         <li><b>화면 이동 단축키</b>: <kbd>g</kbd>를 누른 뒤 <kbd>o</kbd> 상황판, <kbd>t</kbd> 타임라인, <kbd>g</kbd> 공정표, <kbd>r</kbd> 리스크, <kbd>l</kbd> 룩어헤드, <kbd>w</kbd> 월간 점검, <kbd>p</kbd> 보고서 센터, <kbd>h</kbd> 홈. <kbd>?</kbd>로 전체 목록을 봅니다.</li>
         <li><b>표에서 바로 고치기</b>: 리스크의 상태·확률·담당자·기한, 제약의 기한·담당자·상태는 표 칸에서 바로 바꿉니다. 다른 사람이 먼저 고쳤으면 '덮어쓰기/다시 불러오기'를 묻습니다.</li>
+        <li><b>왼쪽 메뉴</b>: 화면은 왼쪽 메뉴에서 고릅니다. 맨 아래 '메뉴 접기'로 아이콘만 남길 수 있고, 휴대폰에서는 왼쪽 위 ☰ 버튼으로 엽니다. 내 메뉴에서 <b>표 간격</b>(편안·보통·촘촘)과 <b>화면 테마</b>(밝게·어둡게)를 고릅니다.</li>
         <li><b>스크롤 고정 머리글</b>: 긴 화면을 내리면 위에 얇은 머리글(프로젝트명·Data Date·그룹 탭)이 고정되어 바로 다른 그룹으로 갈 수 있습니다.</li></ul>` },
       { type: "quiz", q: "실수로 리스크를 지웠습니다. 바로 할 일은?", options: ["화면 아래 '되돌리기'를 누른다", "새로 다시 입력한다", "XER을 다시 올린다"], answer: 0,
         explain: "삭제 직후 10초 동안 되돌리기가 표시되고, 지난 뒤에도 7일간 휴지통에 보관됩니다." },
@@ -438,7 +439,9 @@ function runTour() {
   const s = JSON.parse(sessionStorage.getItem("tour") || "null"); if (!s) return;
   const step = s.tour.steps[s.i];
   if (!step) return endTour(true);
-  const el = step.sel.split(",").map((x) => document.querySelector(x.trim())).find(Boolean);
+  const vis = (e) => e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== "hidden";
+  const el = step.sel.split(",").flatMap((x) => [...document.querySelectorAll(x.trim())]).find(vis)
+    || step.sel.split(",").map((x) => document.querySelector(x.trim())).find(Boolean);
   document.querySelectorAll(".tour-hole,.tour-pop").forEach((x) => x.remove());
   const hole = document.createElement("div"); hole.className = "tour-hole";
   const pop = document.createElement("div"); pop.className = "tour-pop"; pop.setAttribute("role", "dialog"); pop.setAttribute("aria-live", "polite");

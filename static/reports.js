@@ -16,7 +16,7 @@ async function showReports(preUid) {
       <div class="panel"><h3 style="margin-top:0">① 양식 선택</h3>
         <div id="tplList" role="radiogroup" aria-label="양식">${tpls.map((t) => `<label class="tpl ${t.id === selTpl ? "on" : ""}"><input type="radio" name="tpl" value="${esc(t.id)}" ${t.id === selTpl ? "checked" : ""}>
           <div><b>${esc(t.name)}</b> ${t.builtin ? '<span class="tag">기본 제공</span>' : ""}<div class="muted" style="font-size:12px">${esc(t.desc || "")}
-          ${t.scan ? ` · 필드 ${t.scan.fields}개 · 표 ${t.scan.lists.length}개${t.scan.unknown?.length ? ` · <span style="color:var(--crit)">알 수 없는 필드 ${t.scan.unknown.length}</span>` : ""}` : ""}
+          ${t.scan ? ` · 필드 ${t.scan.fields}개 · 표 ${t.scan.lists.length}개${t.scan.unknown?.length ? ` · <span style="color:var(--crit-text)">알 수 없는 필드 ${t.scan.unknown.length}</span>` : ""}` : ""}
           ${t.author ? ` · ${esc(t.author)}` : ""}</div></div>
           <span class="row" style="gap:4px"><button class="btn sm" data-dl="${esc(t.id)}" title="양식 내려받기" aria-label="양식 내려받기">⭳</button>${t.builtin ? "" : `<button class="btn sm" data-ver="${esc(t.id)}" title="버전 기록" aria-label="버전 기록">이력</button>`}${t.builtin ? "" : `<button class="btn sm danger" data-rm="${esc(t.id)}" data-need="editor" data-scope="global" title="삭제">✕</button>`}</span></label>`).join("")}</div>
         <div class="row" style="margin-top:10px"><button class="btn primary" id="tplUp" data-need="editor" data-scope="global">+ 내 양식 올리기 (.xlsx)</button>
@@ -114,7 +114,7 @@ async function uploadTemplate(preUid) {
       d.close(); store.set("rptTpl", r.id);
       const s = r.scan;
       ui.notice("양식 점검 결과", `<p>시트 ${s.sheets.length}개 · 인식한 필드 <b>${s.fields}</b>개 · 반복 표 <b>${s.lists.length}</b>개 (${s.lists.map(esc).join(", ") || "없음"})</p>
-        ${s.unknown.length ? `<h4 style="color:var(--crit)">알 수 없는 필드 ${s.unknown.length}개</h4><table class="t" data-noexport><tbody>${s.unknown.map((u) => `<tr><td>${esc(u.sheet)}!${u.cell}</td><td><code>{{${esc(u.expr)}}}</code></td></tr>`).join("")}</tbody></table><p class="muted">철자를 '필드 목록'과 비교해 고친 뒤 다시 올리세요. 그대로 두면 빈칸으로 출력됩니다.</p>` : "<p>✓ 모든 필드를 인식했습니다.</p>"}
+        ${s.unknown.length ? `<h4 style="color:var(--crit-text)">알 수 없는 필드 ${s.unknown.length}개</h4><table class="t" data-noexport><tbody>${s.unknown.map((u) => `<tr><td>${esc(u.sheet)}!${u.cell}</td><td><code>{{${esc(u.expr)}}}</code></td></tr>`).join("")}</tbody></table><p class="muted">철자를 '필드 목록'과 비교해 고친 뒤 다시 올리세요. 그대로 두면 빈칸으로 출력됩니다.</p>` : "<p>✓ 모든 필드를 인식했습니다.</p>"}
         ${s.fields === 0 ? `<p class="warn-text">자리표시자가 하나도 없습니다. '작성 방법'을 참고하세요.</p>` : ""}`);
       showReports(preUid);
     } catch (err) { $("#tplErr").textContent = err.message; }
