@@ -313,4 +313,8 @@ document.addEventListener("keydown", (e) => {
 // 토스트를 화면 낭독기에 알림
 document.addEventListener("DOMContentLoaded", () => { const t = $("#toast"); if (t) { t.setAttribute("role", "status"); t.setAttribute("aria-live", "polite"); } });
 
-window.addEventListener("hashchange", () => { $("#palette")?.close(); document.querySelectorAll(".menu").forEach((m) => (m.hidden = true)); });
+window.addEventListener("hashchange", () => {
+  $("#palette")?.close();
+  document.querySelectorAll(".menu").forEach((m) => (m.hidden = true));
+  document.querySelectorAll(".drawer.open:not(#aiDrawer)").forEach((d) => d.classList.remove("open"));  // 화면을 옮기면 알림·상세 서랍 닫기 (AI 패널은 유지)
+});
